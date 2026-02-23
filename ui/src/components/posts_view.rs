@@ -1,6 +1,7 @@
 use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
+use crate::util::markdown::text_to_html;
 use crate::util::{format_utc_as_full_datetime, format_utc_as_local_time};
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
@@ -120,95 +121,6 @@ fn decrypt_text_content(
             (String::new(), "[Encrypted]".to_string())
         }
     }
-}
-
-/// Convert text to HTML with clickable links
-fn text_to_html(text: &str) -> String {
-    let linkified = auto_linkify_urls(text);
-    let with_hard_breaks = linkified.replace("\n", "  \n");
-    let html = markdown::to_html(&with_hard_breaks);
-    make_links_open_in_new_tab(&html)
-}
-
-/// Auto-linkify plain URLs
-fn auto_linkify_urls(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut chars = text.char_indices().peekable();
-
-    while let Some((i, c)) = chars.next() {
-        if c == ']' {
-            result.push(c);
-            if let Some(&(_, '(')) = chars.peek() {
-                result.push(chars.next().unwrap().1);
-                for (_, ch) in chars.by_ref() {
-                    result.push(ch);
-                    if ch == ')' {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-
-        let remaining = &text[i..];
-        if remaining.starts_with("http://") || remaining.starts_with("https://") {
-            let before = &text[..i];
-            let is_in_markdown_link = {
-                let mut depth = 0i32;
-                let mut in_link_url = false;
-                for ch in before.chars().rev() {
-                    if ch == ')' {
-                        depth += 1;
-                    } else if ch == '(' {
-                        if depth > 0 {
-                            depth -= 1;
-                        } else {
-                            in_link_url = true;
-                            break;
-                        }
-                    } else if ch == ']' && depth == 0 {
-                        break;
-                    }
-                }
-                in_link_url
-            };
-
-            if is_in_markdown_link {
-                result.push(c);
-                continue;
-            }
-
-            let url_end = remaining
-                .find(|ch: char| ch.is_whitespace() || ch == '<' || ch == '>' || ch == '"')
-                .unwrap_or(remaining.len());
-
-            let mut url = &remaining[..url_end];
-            while url.ends_with(['.', ',', ';', ':', '!', '?', ')', ']']) {
-                url = &url[..url.len() - 1];
-            }
-
-            result.push('[');
-            result.push_str(url);
-            result.push_str("](");
-            result.push_str(url);
-            result.push(')');
-
-            for _ in 0..url.len() - 1 {
-                chars.next();
-            }
-        } else {
-            result.push(c);
-        }
-    }
-
-    result
-}
-
-fn make_links_open_in_new_tab(html: &str) -> String {
-    html.replace(
-        "<a href=\"",
-        "<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"",
-    )
 }
 
 #[component]

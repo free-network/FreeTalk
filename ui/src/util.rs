@@ -2,6 +2,7 @@
 
 pub mod avatar;
 pub mod ecies;
+pub mod markdown;
 
 use ed25519_dalek::VerifyingKey;
 use freenet_stdlib::prelude::{ContractCode, ContractKey, Parameters};
