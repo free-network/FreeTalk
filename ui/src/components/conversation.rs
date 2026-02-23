@@ -592,6 +592,415 @@ pub enum MessageCardVariant {
     Card,
 }
 
+/// Size variant for shared components
+#[derive(Clone, Copy, PartialEq, Default)]
+pub enum MessageSize {
+    /// Compact size for reply style
+    #[default]
+    Compact,
+    /// Normal size for card list view
+    Normal,
+    /// Large size for expanded card view
+    Large,
+}
+
+/// Shared header component for messages
+#[component]
+fn MessageHeader(
+    author_id: MemberId,
+    author_name: String,
+    is_self: bool,
+    time_str: String,
+    full_time_str: String,
+    time_clamped: bool,
+    size: MessageSize,
+) -> Element {
+    let (avatar_size, name_class) = match size {
+        MessageSize::Compact => ("w-8 h-8", "text-sm font-medium text-text"),
+        MessageSize::Normal => ("w-14 h-14", "text-lg font-semibold text-text"),
+        MessageSize::Large => ("w-16 h-16", "text-xl font-semibold text-text"),
+    };
+
+    let time_class = match size {
+        MessageSize::Compact => if time_clamped { "text-xs text-text-muted italic" } else { "text-xs text-text-muted" },
+        _ => if time_clamped { "text-sm text-text-muted italic" } else { "text-sm text-text-muted" },
+    };
+
+    rsx! {
+        img {
+            src: "{get_avatar(&author_id)}",
+            alt: "Avatar",
+            class: "{avatar_size} rounded-full"
+        }
+        div { class: if matches!(size, MessageSize::Compact) { "flex items-center gap-3" } else { "flex-1 min-w-0" },
+            div {
+                class: "{name_class} cursor-pointer hover:text-accent transition-colors",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    MEMBER_INFO_MODAL.with_mut(|signal| {
+                        signal.member = Some(author_id);
+                    });
+                },
+                "{author_name}"
+            }
+            if is_self && matches!(size, MessageSize::Compact) {
+                span { class: "text-xs text-accent", "(you)" }
+            }
+            span {
+                class: "{time_class}",
+                title: "{full_time_str}",
+                if time_clamped && !matches!(size, MessageSize::Compact) { "~{time_str}" } else { "{time_str}" }
+            }
+        }
+    }
+}
+
+/// Shared content display component (non-editing mode)
+#[component]
+fn MessageContentDisplay(
+    title_text: String,
+    content_html: String,
+    edited: bool,
+    size: MessageSize,
+    expanded: bool,
+) -> Element {
+    let (title_class, content_class) = match size {
+        MessageSize::Compact => (
+            "font-semibold text-text mb-1",
+            "prose prose-sm dark:prose-invert max-w-none",
+        ),
+        MessageSize::Normal => (
+            "text-2xl font-bold text-text mb-4",
+            "prose prose-lg dark:prose-invert max-w-none",
+        ),
+        MessageSize::Large => (
+            "text-3xl font-bold text-text mb-6",
+            "prose prose-xl dark:prose-invert max-w-none",
+        ),
+    };
+
+    let edited_class = if matches!(size, MessageSize::Compact) { "text-xs ml-2 text-text-muted" } else { "text-sm ml-2 text-text-muted" };
+    let text_class = if matches!(size, MessageSize::Compact) { "text-sm text-text" } else { "text-lg text-text leading-relaxed" };
+
+    rsx! {
+        // Title
+        if !title_text.is_empty() {
+            match size {
+                MessageSize::Large if expanded => rsx! { h1 { class: "{title_class}", "{title_text}" } },
+                MessageSize::Compact => rsx! { h4 { class: "{title_class}", "{title_text}" } },
+                _ => rsx! { h2 { class: "{title_class}", "{title_text}" } },
+            }
+        }
+        // Content
+        div { class: "{text_class}",
+            span {
+                class: "{content_class}",
+                dangerous_inner_html: "{content_html}"
+            }
+            if edited {
+                span { class: "{edited_class}", "(edited)" }
+            }
+        }
+    }
+}
+
+/// Shared edit form component
+#[component]
+fn MessageEditForm(
+    edit_text: Signal<String>,
+    editing: Signal<bool>,
+    original_text: String,
+    msg_id: MessageId,
+    on_edit: Option<EventHandler<(MessageId, String)>>,
+    size: MessageSize,
+) -> Element {
+    let (textarea_class, button_class, container_class) = match size {
+        MessageSize::Compact => (
+            "w-full p-2 rounded-lg text-sm bg-surface border border-border text-text resize-y min-h-[80px]",
+            "text-xs px-2 py-1 rounded",
+            "space-y-2",
+        ),
+        _ => (
+            "w-full p-3 rounded-lg bg-surface border border-border text-text resize-y min-h-[120px]",
+            "px-4 py-2 rounded-lg",
+            "space-y-4",
+        ),
+    };
+
+    let original_for_key = original_text.clone();
+    let original_for_save = original_text.clone();
+    let msg_id_for_key = msg_id.clone();
+    let msg_id_for_save = msg_id.clone();
+
+    // Use Ctrl+Enter for Card, Enter for Reply
+    let use_ctrl = !matches!(size, MessageSize::Compact);
+
+    rsx! {
+        div { class: "{container_class}",
+            textarea {
+                class: "{textarea_class}",
+                value: "{edit_text}",
+                autofocus: true,
+                oninput: move |e| edit_text.set(e.value().clone()),
+                onkeydown: move |e: KeyboardEvent| {
+                    if e.key() == Key::Escape {
+                        editing.set(false);
+                    } else if e.key() == Key::Enter {
+                        let should_submit = if use_ctrl {
+                            e.modifiers().ctrl() || e.modifiers().meta()
+                        } else {
+                            !e.modifiers().shift()
+                        };
+                        if should_submit {
+                            e.prevent_default();
+                            let new_text = edit_text.read().clone();
+                            if !new_text.is_empty() && new_text != original_for_key {
+                                if let Some(ref handler) = on_edit {
+                                    handler.call((msg_id_for_key.clone(), new_text));
+                                }
+                            }
+                            editing.set(false);
+                        }
+                    }
+                },
+            }
+            div { class: if matches!(size, MessageSize::Compact) { "flex gap-2" } else { "flex gap-3" },
+                button {
+                    class: "{button_class} bg-surface hover:bg-border text-text",
+                    onclick: move |_| editing.set(false),
+                    "Cancel"
+                }
+                button {
+                    class: "{button_class} bg-accent text-white",
+                    onclick: move |_| {
+                        let new_text = edit_text.read().clone();
+                        if !new_text.is_empty() && new_text != original_for_save {
+                            if let Some(ref handler) = on_edit {
+                                handler.call((msg_id_for_save.clone(), new_text));
+                            }
+                        }
+                        editing.set(false);
+                    },
+                    "Save"
+                }
+            }
+        }
+    }
+}
+
+/// Shared reactions display component
+#[component]
+fn ReactionDisplay(
+    reactions: HashMap<String, Vec<MemberId>>,
+    self_member_id: MemberId,
+    member_names: HashMap<MemberId, String>,
+    msg_id: MessageId,
+    on_react: Option<EventHandler<(MessageId, String)>>,
+    size: MessageSize,
+) -> Element {
+    if reactions.is_empty() {
+        return rsx! {};
+    }
+
+    let (container_class, badge_class, count_class) = match size {
+        MessageSize::Compact => (
+            "flex flex-wrap items-center gap-1 mt-2",
+            "inline-flex items-center gap-0.5 text-sm",
+            "text-xs text-text-muted",
+        ),
+        _ => (
+            "flex flex-wrap items-center gap-2 px-6 pb-4",
+            "inline-flex items-center gap-1 px-2 py-1 rounded-full bg-surface text-base",
+            "text-sm text-text-muted",
+        ),
+    };
+
+    let mut sorted: Vec<_> = reactions.iter().collect();
+    sorted.sort_by_key(|(e, _)| e.as_str());
+
+    rsx! {
+        div { class: "{container_class}",
+            {sorted.into_iter().map(|(emoji, reactors)| {
+                let count = reactors.len();
+                let is_user = reactors.contains(&self_member_id);
+                let emoji_click = emoji.clone();
+                let msg_id_click = msg_id.clone();
+                let names: Vec<String> = reactors.iter().map(|id| {
+                    if *id == self_member_id { "You".to_string() }
+                    else { member_names.get(id).cloned().unwrap_or("Unknown".to_string()) }
+                }).collect();
+                let tooltip = names.join(", ");
+
+                let highlight_class = if matches!(size, MessageSize::Compact) {
+                    if is_user { "cursor-pointer underline decoration-accent" } else { "" }
+                } else {
+                    if is_user { "cursor-pointer ring-1 ring-accent" } else { "" }
+                };
+
+                rsx! {
+                    span {
+                        key: "{emoji}",
+                        class: format!("{} {}", badge_class, highlight_class),
+                        title: "{tooltip}",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            if is_user {
+                                if let Some(ref handler) = on_react {
+                                    handler.call((msg_id_click.clone(), emoji_click.clone()));
+                                }
+                            }
+                        },
+                        "{emoji}"
+                        if count > 1 {
+                            span { class: "{count_class}", "{count}" }
+                        }
+                    }
+                }
+            })}
+        }
+    }
+}
+
+/// Shared action buttons component (hover menu)
+#[component]
+fn ActionButtons(
+    msg_id: MessageId,
+    is_self: bool,
+    content_text: String,
+    author_name: String,
+    content_preview: String,
+    editing: Signal<bool>,
+    edit_text: Signal<String>,
+    open_emoji_picker: Signal<bool>,
+    on_react: Option<EventHandler<(MessageId, String)>>,
+    on_reply: Option<EventHandler<ReplyContext>>,
+    on_edit: Option<EventHandler<(MessageId, String)>>,
+    on_request_delete: Option<EventHandler<MessageId>>,
+    size: MessageSize,
+) -> Element {
+    let has_actions = on_react.is_some() || on_reply.is_some() || (is_self && (on_edit.is_some() || on_request_delete.is_some()));
+
+    if !has_actions {
+        return rsx! {};
+    }
+
+    let (container_class, button_class, picker_button_class, picker_grid_class) = match size {
+        MessageSize::Compact => (
+            "absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded shadow border border-border px-1 py-0.5",
+            "text-xs text-text-muted hover:text-accent px-1",
+            "p-1 rounded hover:bg-surface text-lg",
+            "grid gap-[2px]",
+        ),
+        _ => (
+            "absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded-lg shadow border border-border px-2 py-1",
+            "text-sm text-text-muted hover:text-accent px-2",
+            "p-2 rounded hover:bg-surface text-xl",
+            "grid gap-1",
+        ),
+    };
+
+    let msg_id_for_react = msg_id.clone();
+    let msg_id_for_reply = msg_id.clone();
+    let msg_id_for_delete = msg_id.clone();
+
+    rsx! {
+        div {
+            class: "{container_class}",
+            onclick: move |e| e.stop_propagation(),
+
+            // React button with emoji picker
+            if on_react.is_some() {
+                div { class: "relative",
+                    button {
+                        class: "{button_class}",
+                        onclick: move |_| open_emoji_picker.set(!open_emoji_picker()),
+                        "+"
+                    }
+                    if *open_emoji_picker.read() {
+                        div {
+                            class: "fixed inset-0 z-40",
+                            onclick: move |_| open_emoji_picker.set(false),
+                        }
+                        div {
+                            class: "absolute right-0 top-full mt-1 p-1 bg-panel rounded shadow border border-border z-50 {picker_grid_class}",
+                            style: "grid-template-columns: repeat(4, 1fr);",
+                            {FREQUENT_EMOJIS.iter().map({
+                                let msg_id = msg_id_for_react.clone();
+                                move |emoji| {
+                                    let e = emoji.to_string();
+                                    let mid = msg_id.clone();
+                                    rsx! {
+                                        button {
+                                            key: "{emoji}",
+                                            class: "{picker_button_class}",
+                                            onclick: move |_| {
+                                                if let Some(ref handler) = on_react {
+                                                    handler.call((mid.clone(), e.clone()));
+                                                }
+                                                open_emoji_picker.set(false);
+                                            },
+                                            "{emoji}"
+                                        }
+                                    }
+                                }
+                            })}
+                        }
+                    }
+                }
+            }
+
+            // Reply button
+            if let Some(ref reply_handler) = on_reply {
+                button {
+                    class: "{button_class}",
+                    onclick: {
+                        let handler = reply_handler.clone();
+                        let msg_id = msg_id_for_reply.clone();
+                        let author = author_name.clone();
+                        let preview = content_preview.clone();
+                        move |_| {
+                            handler.call(ReplyContext {
+                                message_id: msg_id.clone(),
+                                author_name: author.clone(),
+                                content_preview: preview.clone(),
+                            });
+                        }
+                    },
+                    "reply"
+                }
+            }
+
+            // Edit/Delete buttons (only for own messages)
+            if is_self {
+                if on_edit.is_some() {
+                    button {
+                        class: if matches!(size, MessageSize::Compact) { "text-xs text-text-muted hover:text-text px-1" } else { "text-sm text-text-muted hover:text-text px-2" },
+                        onclick: {
+                            let text = content_text.clone();
+                            move |_| {
+                                edit_text.set(text.clone());
+                                editing.set(true);
+                            }
+                        },
+                        "edit"
+                    }
+                }
+                if let Some(ref delete_handler) = on_request_delete {
+                    button {
+                        class: if matches!(size, MessageSize::Compact) { "text-xs text-text-muted hover:text-red-500 px-1" } else { "text-sm text-text-muted hover:text-red-500 px-2" },
+                        onclick: {
+                            let handler = delete_handler.clone();
+                            let msg_id = msg_id_for_delete.clone();
+                            move |_| handler.call(msg_id.clone())
+                        },
+                        "delete"
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Unified component for rendering messages in either card or reply style
 /// Replaces both ReplyTreeNode and PostCard
 #[component]
@@ -651,32 +1060,26 @@ pub fn MessageCard(
         format_utc_as_full_datetime(timestamp_ms)
     };
 
-    let mut editing = use_signal(|| false);
-    let mut edit_text = use_signal(String::new);
-    let mut open_emoji_picker = use_signal(|| false);
+    let editing = use_signal(|| false);
+    let edit_text = use_signal(String::new);
+    let open_emoji_picker = use_signal(|| false);
 
-    // Clone message IDs for various handlers
-    let msg_id_for_key = msg.message_id.clone();
-    let msg_id_for_edit_1 = msg.message_id.clone();
-    let msg_id_for_edit_2 = msg.message_id.clone();
-    let msg_id_for_delete = msg.message_id.clone();
-    let msg_id_for_reply = msg.message_id.clone();
-    let msg_id_for_react = msg.message_id.clone();
-    let msg_id_for_react_picker = msg.message_id.clone();
-    let msg_id_for_replies = msg.message_id.clone();
-    let author_name_for_reply = msg.author_name.clone();
+    let msg_id = msg.message_id.clone();
     let content_preview = msg.content_text.chars().take(100).collect::<String>();
     let author_id = msg.author_id;
     let author_name = msg.author_name.clone();
     let title_text = msg.title_text.clone();
     let content_html = msg.content_html.clone();
-    let content_text_for_edit = msg.content_text.clone();
-    let content_text_for_edit_2 = msg.content_text.clone();
+    let content_text = msg.content_text.clone();
     let edited = msg.edited;
     let reactions = msg.reactions.clone();
 
-    // Check if we have action handlers
-    let has_actions = on_react.is_some() || on_reply.is_some() || (is_self && (on_edit.is_some() || on_request_delete.is_some()));
+    // Determine size based on variant and expanded state
+    let size = match variant {
+        MessageCardVariant::Reply => MessageSize::Compact,
+        MessageCardVariant::Card if expanded => MessageSize::Large,
+        MessageCardVariant::Card => MessageSize::Normal,
+    };
 
     match variant {
         MessageCardVariant::Reply => {
@@ -691,244 +1094,71 @@ pub fn MessageCard(
 
             rsx! {
                 div {
-                    key: "{msg_id_for_key:?}",
+                    key: "{msg_id:?}",
                     class: "{indent_class}",
                     // Message card
                     div {
                         class: "group relative border-l-2 pl-4 py-2 hover:bg-surface/30 transition-colors",
                         style: if is_self { "border-color: var(--accent);" } else { "border-color: var(--border);" },
 
-                        // Header: avatar, name, time
+                        // Header
                         div { class: "flex items-center gap-3 mb-2",
-                            img {
-                                src: "{get_avatar(&author_id)}",
-                                alt: "Avatar",
-                                class: "w-8 h-8 rounded-full"
-                            }
-                            span {
-                                class: "text-sm font-medium text-text cursor-pointer hover:text-accent transition-colors",
-                                onclick: move |_| {
-                                    MEMBER_INFO_MODAL.with_mut(|signal| {
-                                        signal.member = Some(author_id);
-                                    });
-                                },
-                                "{author_name}"
-                            }
-                            if is_self {
-                                span { class: "text-xs text-accent", "(you)" }
-                            }
-                            span {
-                                class: if msg.time_clamped { "text-xs text-text-muted italic" } else { "text-xs text-text-muted" },
-                                title: "{full_time_str}",
-                                "{time_str}"
+                            MessageHeader {
+                                author_id: author_id,
+                                author_name: author_name.clone(),
+                                is_self: is_self,
+                                time_str: time_str.clone(),
+                                full_time_str: full_time_str.clone(),
+                                time_clamped: msg.time_clamped,
+                                size: size,
                             }
                         }
 
                         // Content (or edit form)
                         if *editing.read() {
-                            div { class: "space-y-2",
-                                textarea {
-                                    class: "w-full p-2 rounded-lg text-sm bg-surface border border-border text-text resize-y min-h-[80px]",
-                                    value: "{edit_text}",
-                                    autofocus: true,
-                                    oninput: move |e| edit_text.set(e.value().clone()),
-                                    onkeydown: {
-                                        let original = content_text_for_edit.clone();
-                                        let msg_id = msg_id_for_edit_1.clone();
-                                        move |e: KeyboardEvent| {
-                                            if e.key() == Key::Escape {
-                                                editing.set(false);
-                                            } else if e.key() == Key::Enter && !e.modifiers().shift() {
-                                                e.prevent_default();
-                                                let new_text = edit_text.read().clone();
-                                                if !new_text.is_empty() && new_text != original {
-                                                    if let Some(ref handler) = on_edit {
-                                                        handler.call((msg_id.clone(), new_text));
-                                                    }
-                                                }
-                                                editing.set(false);
-                                            }
-                                        }
-                                    },
-                                }
-                                div { class: "flex gap-2",
-                                    button {
-                                        class: "text-xs px-2 py-1 rounded bg-surface hover:bg-border text-text",
-                                        onclick: move |_| editing.set(false),
-                                        "Cancel"
-                                    }
-                                    button {
-                                        class: "text-xs px-2 py-1 rounded bg-accent text-white",
-                                        onclick: {
-                                            let original = content_text_for_edit_2.clone();
-                                            let msg_id = msg_id_for_edit_2.clone();
-                                            move |_| {
-                                                let new_text = edit_text.read().clone();
-                                                if !new_text.is_empty() && new_text != original {
-                                                    if let Some(ref handler) = on_edit {
-                                                        handler.call((msg_id.clone(), new_text));
-                                                    }
-                                                }
-                                                editing.set(false);
-                                            }
-                                        },
-                                        "Save"
-                                    }
-                                }
+                            MessageEditForm {
+                                edit_text: edit_text,
+                                editing: editing,
+                                original_text: content_text.clone(),
+                                msg_id: msg_id.clone(),
+                                on_edit: on_edit.clone(),
+                                size: size,
                             }
                         } else {
-                            div {
-                                // Title
-                                if !title_text.is_empty() {
-                                    h4 { class: "font-semibold text-text mb-1",
-                                        "{title_text}"
-                                    }
-                                }
-                                // Content
-                                div { class: "text-sm text-text",
-                                    span {
-                                        class: "prose prose-sm dark:prose-invert max-w-none",
-                                        dangerous_inner_html: "{content_html}"
-                                    }
-                                    if edited {
-                                        span { class: "text-xs ml-2 text-text-muted", "(edited)" }
-                                    }
-                                }
+                            MessageContentDisplay {
+                                title_text: title_text.clone(),
+                                content_html: content_html.clone(),
+                                edited: edited,
+                                size: size,
+                                expanded: false,
                             }
                         }
 
                         // Reactions
-                        if !reactions.is_empty() {
-                            div { class: "flex flex-wrap items-center gap-1 mt-2",
-                                {
-                                    let mut sorted: Vec<_> = reactions.iter().collect();
-                                    sorted.sort_by_key(|(e, _)| e.as_str());
-                                    sorted.into_iter().map(|(emoji, reactors)| {
-                                        let count = reactors.len();
-                                        let is_user = reactors.contains(&self_member_id);
-                                        let emoji_click = emoji.clone();
-                                        let msg_id_click = msg_id_for_react.clone();
-                                        let names: Vec<String> = reactors.iter().map(|id| {
-                                            if *id == self_member_id { "You".to_string() }
-                                            else { member_names.get(id).cloned().unwrap_or("Unknown".to_string()) }
-                                        }).collect();
-                                        let tooltip = names.join(", ");
-                                        rsx! {
-                                            span {
-                                                key: "{emoji}",
-                                                class: format!(
-                                                    "inline-flex items-center gap-0.5 text-sm {}",
-                                                    if is_user { "cursor-pointer underline decoration-accent" } else { "" }
-                                                ),
-                                                title: "{tooltip}",
-                                                onclick: move |_| {
-                                                    if is_user {
-                                                        if let Some(ref handler) = on_react {
-                                                            handler.call((msg_id_click.clone(), emoji_click.clone()));
-                                                        }
-                                                    }
-                                                },
-                                                "{emoji}"
-                                                if count > 1 {
-                                                    span { class: "text-xs text-text-muted", "{count}" }
-                                                }
-                                            }
-                                        }
-                                    })
-                                }
-                            }
+                        ReactionDisplay {
+                            reactions: reactions.clone(),
+                            self_member_id: self_member_id,
+                            member_names: member_names.clone(),
+                            msg_id: msg_id.clone(),
+                            on_react: on_react.clone(),
+                            size: size,
                         }
 
-                        // Action buttons (hover)
-                        if has_actions {
-                            div {
-                                class: "absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded shadow border border-border px-1 py-0.5",
-                                // React button
-                                if on_react.is_some() {
-                                    div { class: "relative",
-                                        button {
-                                            class: "text-xs text-text-muted hover:text-accent px-1",
-                                            onclick: move |_| open_emoji_picker.set(!open_emoji_picker()),
-                                            "+"
-                                        }
-                                        if *open_emoji_picker.read() {
-                                            div {
-                                                class: "fixed inset-0 z-40",
-                                                onclick: move |_| open_emoji_picker.set(false),
-                                            }
-                                            div {
-                                                class: "absolute right-0 top-full mt-1 p-1 bg-panel rounded shadow border border-border z-50 grid",
-                                                style: "grid-template-columns: repeat(4, 1fr); gap: 2px;",
-                                                {FREQUENT_EMOJIS.iter().map({
-                                                    let msg_id = msg_id_for_react_picker.clone();
-                                                    move |emoji| {
-                                                        let e = emoji.to_string();
-                                                        let mid = msg_id.clone();
-                                                        rsx! {
-                                                            button {
-                                                                key: "{emoji}",
-                                                                class: "p-1 rounded hover:bg-surface text-lg",
-                                                                onclick: move |_| {
-                                                                    if let Some(ref handler) = on_react {
-                                                                        handler.call((mid.clone(), e.clone()));
-                                                                    }
-                                                                    open_emoji_picker.set(false);
-                                                                },
-                                                                "{emoji}"
-                                                            }
-                                                        }
-                                                    }
-                                                })}
-                                            }
-                                        }
-                                    }
-                                }
-                                if let Some(ref reply_handler) = on_reply {
-                                    button {
-                                        class: "text-xs text-text-muted hover:text-accent px-1",
-                                        onclick: {
-                                            let handler = reply_handler.clone();
-                                            let msg_id = msg_id_for_reply.clone();
-                                            let author = author_name_for_reply.clone();
-                                            let preview = content_preview.clone();
-                                            move |_| {
-                                                handler.call(ReplyContext {
-                                                    message_id: msg_id.clone(),
-                                                    author_name: author.clone(),
-                                                    content_preview: preview.clone(),
-                                                });
-                                            }
-                                        },
-                                        "reply"
-                                    }
-                                }
-                                if is_self {
-                                    if on_edit.is_some() {
-                                        button {
-                                            class: "text-xs text-text-muted hover:text-text px-1",
-                                            onclick: {
-                                                let text = msg.content_text.clone();
-                                                move |_| {
-                                                    edit_text.set(text.clone());
-                                                    editing.set(true);
-                                                }
-                                            },
-                                            "edit"
-                                        }
-                                    }
-                                    if let Some(ref delete_handler) = on_request_delete {
-                                        button {
-                                            class: "text-xs text-text-muted hover:text-red-500 px-1",
-                                            onclick: {
-                                                let handler = delete_handler.clone();
-                                                let msg_id = msg_id_for_delete.clone();
-                                                move |_| handler.call(msg_id.clone())
-                                            },
-                                            "delete"
-                                        }
-                                    }
-                                }
-                            }
+                        // Action buttons
+                        ActionButtons {
+                            msg_id: msg_id.clone(),
+                            is_self: is_self,
+                            content_text: content_text.clone(),
+                            author_name: author_name.clone(),
+                            content_preview: content_preview.clone(),
+                            editing: editing,
+                            edit_text: edit_text,
+                            open_emoji_picker: open_emoji_picker,
+                            on_react: on_react.clone(),
+                            on_reply: on_reply.clone(),
+                            on_edit: on_edit.clone(),
+                            on_request_delete: on_request_delete.clone(),
+                            size: size,
                         }
                     }
 
@@ -962,23 +1192,10 @@ pub fn MessageCard(
         }
 
         MessageCardVariant::Card => {
-            // Styling based on expanded or list view
-            let (avatar_size, header_padding, content_padding, title_class, content_class) = if expanded {
-                (
-                    "w-16 h-16",
-                    "px-8 py-6",
-                    "px-8 py-8",
-                    "text-3xl font-bold text-text mb-6",
-                    "text-xl text-text leading-relaxed prose prose-xl dark:prose-invert max-w-none",
-                )
+            let (header_padding, content_padding) = if expanded {
+                ("px-8 py-6", "px-8 py-8")
             } else {
-                (
-                    "w-14 h-14",
-                    "px-6 py-4",
-                    "px-6 py-6",
-                    "text-2xl font-bold text-text mb-4",
-                    "text-lg text-text leading-relaxed prose prose-lg dark:prose-invert max-w-none",
-                )
+                ("px-6 py-4", "px-6 py-6")
             };
 
             let card_class = if on_click.is_some() {
@@ -988,9 +1205,10 @@ pub fn MessageCard(
             };
 
             // Create reply context for when show_replies is enabled
+            let msg_id_for_replies = msg_id.clone();
             let reply_context_for_section = if show_replies {
                 Some(ReplyContext {
-                    message_id: msg_id_for_replies.clone(),
+                    message_id: msg_id.clone(),
                     author_name: author_name.clone(),
                     content_preview: content_preview.clone(),
                 })
@@ -1000,7 +1218,7 @@ pub fn MessageCard(
 
             rsx! {
                 div {
-                    key: "{msg_id_for_key:?}",
+                    key: "{msg_id:?}",
                     class: "group relative",
 
                     div {
@@ -1011,248 +1229,67 @@ pub fn MessageCard(
                             }
                         },
 
-                        // Post header with author
+                        // Header
                         div {
                             class: "flex items-center gap-4 {header_padding} border-b border-border bg-surface/30",
-                            img {
-                                src: "{get_avatar(&author_id)}",
-                                alt: "Avatar",
-                                class: "{avatar_size} rounded-full"
-                            }
-                            div { class: "flex-1 min-w-0",
-                                div {
-                                    class: if expanded {
-                                        "text-xl font-semibold text-text cursor-pointer hover:text-accent transition-colors"
-                                    } else {
-                                        "text-lg font-semibold text-text cursor-pointer hover:text-accent transition-colors"
-                                    },
-                                    onclick: move |e| {
-                                        e.stop_propagation();
-                                        MEMBER_INFO_MODAL.with_mut(|signal| {
-                                            signal.member = Some(author_id);
-                                        });
-                                    },
-                                    "{author_name}"
-                                }
-                                span {
-                                    class: if msg.time_clamped {
-                                        "text-sm text-text-muted italic"
-                                    } else {
-                                        "text-sm text-text-muted"
-                                    },
-                                    title: "{full_time_str}",
-                                    if msg.time_clamped { "~{time_str}" } else { "{time_str}" }
-                                }
+                            MessageHeader {
+                                author_id: author_id,
+                                author_name: author_name.clone(),
+                                is_self: is_self,
+                                time_str: time_str.clone(),
+                                full_time_str: full_time_str.clone(),
+                                time_clamped: msg.time_clamped,
+                                size: size,
                             }
                         }
 
-                        // Post content (or edit form)
+                        // Content
                         div { class: "{content_padding}",
                             if *editing.read() {
-                                div { class: "space-y-4",
-                                    textarea {
-                                        class: "w-full p-3 rounded-lg bg-surface border border-border text-text resize-y min-h-[120px]",
-                                        value: "{edit_text}",
-                                        autofocus: true,
-                                        oninput: move |e| edit_text.set(e.value().clone()),
-                                        onkeydown: {
-                                            let original = content_text_for_edit.clone();
-                                            let msg_id = msg_id_for_edit_1.clone();
-                                            move |e: KeyboardEvent| {
-                                                if e.key() == Key::Escape {
-                                                    editing.set(false);
-                                                } else if e.key() == Key::Enter && (e.modifiers().ctrl() || e.modifiers().meta()) {
-                                                    e.prevent_default();
-                                                    let new_text = edit_text.read().clone();
-                                                    if !new_text.is_empty() && new_text != original {
-                                                        if let Some(ref handler) = on_edit {
-                                                            handler.call((msg_id.clone(), new_text));
-                                                        }
-                                                    }
-                                                    editing.set(false);
-                                                }
-                                            }
-                                        },
-                                    }
-                                    div { class: "flex gap-3",
-                                        button {
-                                            class: "px-4 py-2 rounded-lg bg-surface hover:bg-border text-text",
-                                            onclick: move |_| editing.set(false),
-                                            "Cancel"
-                                        }
-                                        button {
-                                            class: "px-4 py-2 rounded-lg bg-accent text-white",
-                                            onclick: {
-                                                let original = content_text_for_edit_2.clone();
-                                                let msg_id = msg_id_for_edit_2.clone();
-                                                move |_| {
-                                                    let new_text = edit_text.read().clone();
-                                                    if !new_text.is_empty() && new_text != original {
-                                                        if let Some(ref handler) = on_edit {
-                                                            handler.call((msg_id.clone(), new_text));
-                                                        }
-                                                    }
-                                                    editing.set(false);
-                                                }
-                                            },
-                                            "Save"
-                                        }
-                                    }
+                                MessageEditForm {
+                                    edit_text: edit_text,
+                                    editing: editing,
+                                    original_text: content_text.clone(),
+                                    msg_id: msg_id.clone(),
+                                    on_edit: on_edit.clone(),
+                                    size: size,
                                 }
                             } else {
-                                // Title
-                                if !title_text.is_empty() {
-                                    if expanded {
-                                        h1 { class: "{title_class}", "{title_text}" }
-                                    } else {
-                                        h2 { class: "{title_class}", "{title_text}" }
-                                    }
-                                }
-                                // Content
-                                div {
-                                    class: "{content_class}",
-                                    span { dangerous_inner_html: "{content_html}" }
-                                    if edited {
-                                        span { class: "text-sm ml-2 text-text-muted", "(edited)" }
-                                    }
+                                MessageContentDisplay {
+                                    title_text: title_text.clone(),
+                                    content_html: content_html.clone(),
+                                    edited: edited,
+                                    size: size,
+                                    expanded: expanded,
                                 }
                             }
                         }
 
-                        // Reactions (shown below content in card view)
-                        if !reactions.is_empty() {
-                            div { class: "flex flex-wrap items-center gap-2 px-6 pb-4",
-                                {
-                                    let mut sorted: Vec<_> = reactions.iter().collect();
-                                    sorted.sort_by_key(|(e, _)| e.as_str());
-                                    sorted.into_iter().map(|(emoji, reactors)| {
-                                        let count = reactors.len();
-                                        let is_user = reactors.contains(&self_member_id);
-                                        let emoji_click = emoji.clone();
-                                        let msg_id_click = msg_id_for_react.clone();
-                                        let names: Vec<String> = reactors.iter().map(|id| {
-                                            if *id == self_member_id { "You".to_string() }
-                                            else { member_names.get(id).cloned().unwrap_or("Unknown".to_string()) }
-                                        }).collect();
-                                        let tooltip = names.join(", ");
-                                        rsx! {
-                                            span {
-                                                key: "{emoji}",
-                                                class: format!(
-                                                    "inline-flex items-center gap-1 px-2 py-1 rounded-full bg-surface text-base {}",
-                                                    if is_user { "cursor-pointer ring-1 ring-accent" } else { "" }
-                                                ),
-                                                title: "{tooltip}",
-                                                onclick: move |e| {
-                                                    e.stop_propagation();
-                                                    if is_user {
-                                                        if let Some(ref handler) = on_react {
-                                                            handler.call((msg_id_click.clone(), emoji_click.clone()));
-                                                        }
-                                                    }
-                                                },
-                                                "{emoji}"
-                                                if count > 1 {
-                                                    span { class: "text-sm text-text-muted", "{count}" }
-                                                }
-                                            }
-                                        }
-                                    })
-                                }
-                            }
+                        // Reactions
+                        ReactionDisplay {
+                            reactions: reactions.clone(),
+                            self_member_id: self_member_id,
+                            member_names: member_names.clone(),
+                            msg_id: msg_id.clone(),
+                            on_react: on_react.clone(),
+                            size: size,
                         }
 
-                        // Action buttons (hover) - positioned at top right of card
-                        if has_actions {
-                            div {
-                                class: "absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded-lg shadow border border-border px-2 py-1",
-                                onclick: move |e| e.stop_propagation(),
-                                // React button
-                                if on_react.is_some() {
-                                    div { class: "relative",
-                                        button {
-                                            class: "text-sm text-text-muted hover:text-accent px-2",
-                                            onclick: move |_| open_emoji_picker.set(!open_emoji_picker()),
-                                            "+"
-                                        }
-                                        if *open_emoji_picker.read() {
-                                            div {
-                                                class: "fixed inset-0 z-40",
-                                                onclick: move |_| open_emoji_picker.set(false),
-                                            }
-                                            div {
-                                                class: "absolute right-0 top-full mt-1 p-2 bg-panel rounded-lg shadow border border-border z-50 grid",
-                                                style: "grid-template-columns: repeat(4, 1fr); gap: 4px;",
-                                                {FREQUENT_EMOJIS.iter().map({
-                                                    let msg_id = msg_id_for_react_picker.clone();
-                                                    move |emoji| {
-                                                        let e = emoji.to_string();
-                                                        let mid = msg_id.clone();
-                                                        rsx! {
-                                                            button {
-                                                                key: "{emoji}",
-                                                                class: "p-2 rounded hover:bg-surface text-xl",
-                                                                onclick: move |_| {
-                                                                    if let Some(ref handler) = on_react {
-                                                                        handler.call((mid.clone(), e.clone()));
-                                                                    }
-                                                                    open_emoji_picker.set(false);
-                                                                },
-                                                                "{emoji}"
-                                                            }
-                                                        }
-                                                    }
-                                                })}
-                                            }
-                                        }
-                                    }
-                                }
-                                if let Some(ref reply_handler) = on_reply {
-                                    button {
-                                        class: "text-sm text-text-muted hover:text-accent px-2",
-                                        onclick: {
-                                            let handler = reply_handler.clone();
-                                            let msg_id = msg_id_for_reply.clone();
-                                            let author = author_name_for_reply.clone();
-                                            let preview = content_preview.clone();
-                                            move |_| {
-                                                handler.call(ReplyContext {
-                                                    message_id: msg_id.clone(),
-                                                    author_name: author.clone(),
-                                                    content_preview: preview.clone(),
-                                                });
-                                            }
-                                        },
-                                        "reply"
-                                    }
-                                }
-                                if is_self {
-                                    if let Some(ref _edit_handler) = on_edit {
-                                        button {
-                                            class: "text-sm text-text-muted hover:text-text px-2",
-                                            onclick: {
-                                                let text = msg.content_text.clone();
-                                                move |_| {
-                                                    edit_text.set(text.clone());
-                                                    editing.set(true);
-                                                }
-                                            },
-                                            "edit"
-                                        }
-                                    }
-                                    if let Some(ref delete_handler) = on_request_delete {
-                                        button {
-                                            class: "text-sm text-text-muted hover:text-red-500 px-2",
-                                            onclick: {
-                                                let handler = delete_handler.clone();
-                                                let msg_id = msg_id_for_delete.clone();
-                                                move |_| handler.call(msg_id.clone())
-                                            },
-                                            "delete"
-                                        }
-                                    }
-                                }
-                            }
+                        // Action buttons
+                        ActionButtons {
+                            msg_id: msg_id.clone(),
+                            is_self: is_self,
+                            content_text: content_text.clone(),
+                            author_name: author_name.clone(),
+                            content_preview: content_preview.clone(),
+                            editing: editing,
+                            edit_text: edit_text,
+                            open_emoji_picker: open_emoji_picker,
+                            on_react: on_react.clone(),
+                            on_reply: on_reply.clone(),
+                            on_edit: on_edit.clone(),
+                            on_request_delete: on_request_delete.clone(),
+                            size: size,
                         }
                     }
 
