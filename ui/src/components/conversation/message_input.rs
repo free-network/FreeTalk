@@ -12,18 +12,35 @@ pub fn PostInput(
     handle_send_message: EventHandler<(String, String, Option<ReplyContext>)>,
     replying_to: Signal<Option<ReplyContext>>,
     on_request_edit_last: EventHandler<()>,
+    /// Default reply context - applied when modal opens if replying_to is None
+    #[props(default)]
+    default_reply_to: Option<ReplyContext>,
 ) -> Element {
     let mut show_modal = use_signal(|| false);
     let mut title_text = use_signal(String::new);
     let mut message_text = use_signal(String::new);
     let mut show_emoji_picker = use_signal(|| false);
 
-    // Open modal when replying_to changes to Some
+    // Open modal when replying_to changes to Some (from clicking reply button)
     use_effect(move || {
         if replying_to.read().is_some() && !show_modal() {
             show_modal.set(true);
         }
     });
+
+    // Handler for opening the modal via Compose button
+    let open_modal = {
+        let default_reply = default_reply_to.clone();
+        move |_| {
+            // If no explicit reply is set but we have a default, use it
+            if replying_to.peek().is_none() {
+                if let Some(ref default) = default_reply {
+                    replying_to.set(Some(default.clone()));
+                }
+            }
+            show_modal.set(true);
+        }
+    };
 
     let mut send_message = move || {
         let title = title_text.peek().to_string();
@@ -48,7 +65,7 @@ pub fn PostInput(
         // Compose button bar
         button {
             class: "flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors",
-            onclick: move |_| show_modal.set(true),
+            onclick: open_modal,
             Icon { icon: FaPen, width: 14, height: 14 }
             "Compose Post"
         }

@@ -338,7 +338,7 @@ pub fn Conversation(
         }
     };
 
-    let mut replying_to: Signal<Option<ReplyContext>> = use_signal(move || default_reply_to.clone());
+    let mut replying_to: Signal<Option<ReplyContext>> = use_signal(|| None);
     let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
     // Build message tree for the given parent
@@ -795,6 +795,7 @@ pub fn Conversation(
                                     },
                                     replying_to: replying_to,
                                     on_request_edit_last: move |_| {},
+                                    default_reply_to: default_reply_to.clone(),
                                 }
                             },
                             Err(SendMessageError::UserNotMember) => {
