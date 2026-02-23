@@ -143,7 +143,7 @@ pub fn PostsView() -> Element {
         div { class: "flex-1 flex flex-col min-w-0 bg-bg",
             // Show no-board-selected message or header with user info
             if !has_room_selected {
-                div { class: "flex-1 flex flex-col items-center justify-center text-text-muted",
+                div { class: "flex-1 flex flex-col items-center justify-center text-text-muted text-center",
                     p { class: "text-xl", "Select a board from the sidebar above or create one" }
                 }
             } else {
