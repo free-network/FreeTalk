@@ -11,7 +11,7 @@ use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::logger::tracing::error;
 use dioxus::prelude::*;
 use dioxus_free_icons::{
-    icons::fa_solid_icons::{FaComments, FaLink, FaPlus},
+    icons::fa_solid_icons::{FaChevronDown, FaComments, FaPlus},
     Icon,
 };
 
@@ -56,6 +56,8 @@ fn format_build_time_local() -> String {
 
 #[component]
 pub fn RoomList() -> Element {
+    let mut is_open = use_signal(|| false);
+
     // Memoize the room list to avoid reading signals during render
     let room_items = use_memo(move || {
         let rooms = ROOMS.read();
@@ -83,79 +85,108 @@ pub fn RoomList() -> Element {
             .collect::<Vec<_>>()
     });
 
+    // Get current room name for the dropdown button
+    let current_room_name = use_memo(move || {
+        room_items
+            .read()
+            .iter()
+            .find(|(_, _, is_current)| *is_current)
+            .map(|(_, name, _)| name.clone())
+            .unwrap_or_else(|| "Select Room".to_string())
+    });
+
     rsx! {
-        aside { class: "w-64 flex-shrink-0 bg-panel border-r border-border flex flex-col overflow-y-auto",
-            // Logo (explicit h-24 to match w-24 since SVG is square, prevents CLS)
-            div { class: "p-4 flex justify-center",
-                img {
-                    class: "w-24 h-24",
-                    src: asset!("/assets/river_logo.svg"),
-                    alt: "River Logo"
+        div { class: "relative inline-block",
+            // Dropdown trigger button
+            button {
+                class: "flex items-center gap-2 px-4 py-2 bg-panel border border-border rounded-lg text-sm text-text hover:bg-surface transition-colors min-w-48",
+                onclick: move |_| {
+                    is_open.set(!is_open());
+                },
+                Icon { width: 16, height: 16, icon: FaComments, class: "text-text-muted" }
+                span { class: "flex-1 text-left truncate", "{current_room_name}" }
+                Icon {
+                    width: 12,
+                    height: 12,
+                    icon: FaChevronDown,
+                    class: format!("text-text-muted transition-transform {}", if is_open() { "rotate-180" } else { "" })
                 }
             }
 
-            // Rooms header with create button
-            div { class: "px-4 py-2 flex items-center justify-between",
-                h2 { class: "text-sm font-semibold text-text-muted uppercase tracking-wide flex items-center gap-2",
-                    Icon { width: 16, height: 16, icon: FaComments }
-                    span { "Rooms" }
-                }
-                button {
-                    class: "p-1.5 rounded-md text-text-muted hover:text-accent hover:bg-surface transition-colors",
-                    title: "Create Room",
+            // Dropdown panel
+            if is_open() {
+                // Backdrop to close dropdown when clicking outside
+                div {
+                    class: "fixed inset-0 z-10",
                     onclick: move |_| {
-                        CREATE_ROOM_MODAL.write().show = true;
-                    },
-                    Icon { width: 14, height: 14, icon: FaPlus }
+                        is_open.set(false);
+                    }
                 }
-            }
 
-            // Room list
-            ul { class: "flex-1 px-2 py-1 space-y-0.5",
-                {room_items.read().iter().map(|(room_key, room_name, is_current)| {
-                    let room_key = *room_key;
-                    let room_name = room_name.clone();
-                    let is_current = *is_current;
-                    rsx! {
-                        li { key: "{room_key:?}",
-                            button {
-                                class: format!(
-                                    "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors {}",
-                                    if is_current {
-                                        "bg-accent/10 text-accent font-medium"
-                                    } else {
-                                        "text-text hover:bg-surface"
+                // Dropdown menu
+                div { class: "absolute left-0 top-full mt-1 z-20 w-64 bg-panel border border-border rounded-lg shadow-lg overflow-hidden",
+                    // Header with create room button
+                    div { class: "px-3 py-2 border-b border-border flex items-center justify-between",
+                        span { class: "text-xs font-semibold text-text-muted uppercase tracking-wide",
+                            "Rooms"
+                        }
+                        button {
+                            class: "p-1 rounded text-text-muted hover:text-accent hover:bg-surface transition-colors",
+                            title: "Create Room",
+                            onclick: move |_| {
+                                CREATE_ROOM_MODAL.write().show = true;
+                                is_open.set(false);
+                            },
+                            Icon { width: 12, height: 12, icon: FaPlus }
+                        }
+                    }
+
+                    // Room list
+                    ul { class: "max-h-64 overflow-y-auto py-1",
+                        {room_items.read().iter().map(|(room_key, room_name, is_current)| {
+                            let room_key = *room_key;
+                            let room_name = room_name.clone();
+                            let is_current = *is_current;
+                            rsx! {
+                                li { key: "{room_key:?}",
+                                    button {
+                                        class: format!(
+                                            "w-full text-left px-3 py-2 text-sm transition-colors {}",
+                                            if is_current {
+                                                "bg-accent/10 text-accent font-medium"
+                                            } else {
+                                                "text-text hover:bg-surface"
+                                            }
+                                        ),
+                                        onclick: move |_| {
+                                            *CURRENT_ROOM.write() = CurrentRoom { owner_key: Some(room_key) };
+                                            mark_current_room_as_read();
+                                            is_open.set(false);
+                                            spawn(async move {
+                                                if let Err(e) = save_rooms_to_delegate().await {
+                                                    error!("Failed to save current room selection: {}", e);
+                                                }
+                                            });
+                                        },
+                                        span { class: "block truncate", "{room_name}" }
                                     }
-                                ),
-                                onclick: move |_| {
-                                    *CURRENT_ROOM.write() = CurrentRoom { owner_key: Some(room_key) };
-                                    mark_current_room_as_read();
-                                    spawn(async move {
-                                        if let Err(e) = save_rooms_to_delegate().await {
-                                            error!("Failed to save current room selection: {}", e);
-                                        }
-                                    });
-                                },
-                                span { class: "block truncate", "{room_name}" }
+                                }
+                            }
+                        }).collect::<Vec<_>>().into_iter()}
+
+                        // Empty state
+                        if room_items.read().is_empty() {
+                            li { class: "px-3 py-4 text-sm text-text-muted text-center",
+                                "No rooms yet"
                             }
                         }
                     }
-                }).collect::<Vec<_>>().into_iter()}
-            }
 
-            // Bottom actions - secondary only (Create Room is in header as icon)
-            div { class: "p-3 border-t border-border",
-                button {
-                    class: "w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-text-muted bg-surface hover:bg-surface-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
-                    disabled: true,
-                    Icon { width: 14, height: 14, icon: FaLink }
-                    span { "Join Room" }
+                    // Build info footer
+                    div { class: "px-3 py-2 border-t border-border text-xs text-text-muted text-center",
+                        {"Built: "} {format_build_time_local()}
+                    }
                 }
-            }
-
-            // Build info (local time)
-            div { class: "px-3 py-2 text-xs text-text-muted text-center",
-                {"Built: "} {format_build_time_local()}
             }
         }
     }
