@@ -865,10 +865,10 @@ pub fn Conversation() -> Element {
         }
     };
 
-    // Message sending handler - receives message text from MessageInput component
+    // Message sending handler - receives title, content, and reply context from MessageInput component
     let handle_send_message = {
         let current_room_data = current_room_data.clone();
-        move |(message_text, reply_ctx): (String, Option<ReplyContext>)| {
+        move |(title_text, message_text, reply_ctx): (String, String, Option<ReplyContext>)| {
             // Always scroll to bottom when user sends their own message
             is_at_bottom.set(true);
 
@@ -901,7 +901,7 @@ pub fn Conversation() -> Element {
                         if is_private {
                             if let Some((secret, version)) = secret_opt {
                                 let reply_content = ReplyContentV1::new(
-                                    String::new(),
+                                    title_text.clone(),
                                     message_text.clone(),
                                     reply.message_id,
                                     reply.author_name,
@@ -920,7 +920,7 @@ pub fn Conversation() -> Element {
                             } else {
                                 warn!("Room is private but no secret available, sending reply as public");
                                 RoomMessageBody::reply(
-                                    String::new(),
+                                    title_text.clone(),
                                     message_text.clone(),
                                     reply.message_id,
                                     reply.author_name,
@@ -929,7 +929,7 @@ pub fn Conversation() -> Element {
                             }
                         } else {
                             RoomMessageBody::reply(
-                                String::new(),
+                                title_text.clone(),
                                 message_text.clone(),
                                 reply.message_id,
                                 reply.author_name,
@@ -940,7 +940,7 @@ pub fn Conversation() -> Element {
                         // Regular text message
                         if is_private {
                             if let Some((secret, version)) = secret_opt {
-                                let text_content = TextContentV1::new(String::new(), message_text.clone());
+                                let text_content = TextContentV1::new(title_text.clone(), message_text.clone());
                                 let content_bytes = text_content.encode();
                                 let (ciphertext, nonce) =
                                     encrypt_with_symmetric_key(&secret, &content_bytes);
@@ -953,10 +953,10 @@ pub fn Conversation() -> Element {
                                 )
                             } else {
                                 warn!("Room is private but no secret available, sending as public");
-                                RoomMessageBody::public(String::new(), message_text.clone())
+                                RoomMessageBody::public(title_text.clone(), message_text.clone())
                             }
                         } else {
-                            RoomMessageBody::public(String::new(), message_text.clone())
+                            RoomMessageBody::public(title_text.clone(), message_text.clone())
                         }
                     };
 
@@ -1239,7 +1239,7 @@ pub fn Conversation() -> Element {
                         match room_data.can_participate() {
                             Ok(()) => rsx! {
                                 MessageInput {
-                                    handle_send_message: move |msg: (String, Option<ReplyContext>)| {
+                                    handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
                                         let mut handle = handle_send_message.clone();
                                         handle(msg)
                                     },
@@ -1444,7 +1444,7 @@ fn MessageGroupComponent(
                                             rsx! {
                                                 div {
                                                     class: format!(
-                                                        "p-3 rounded-2xl {}",
+                                                        "p-3 {}",
                                                         if is_self { "bg-accent" } else { "bg-surface" }
                                                     ),
                                                     style: "width: 550px; overflow: visible;",

@@ -1,51 +1,40 @@
 use dioxus::prelude::*;
-use wasm_bindgen::JsCast;
+use dioxus_free_icons::icons::fa_solid_icons::{FaPen, FaXmark};
+use dioxus_free_icons::Icon;
 
 use super::emoji_picker::EmojiPicker;
 use super::ReplyContext;
 
-/// Message input component that owns its own state.
-/// This isolates keystroke handling from the parent component,
-/// preventing expensive re-renders of the message list on each keystroke.
+/// Message input component with a compose button that opens a modal.
+/// The modal contains fields for title and content.
 #[component]
 pub fn MessageInput(
-    handle_send_message: EventHandler<(String, Option<ReplyContext>)>,
+    handle_send_message: EventHandler<(String, String, Option<ReplyContext>)>,
     replying_to: Signal<Option<ReplyContext>>,
     on_request_edit_last: EventHandler<()>,
 ) -> Element {
-    // Own the message state locally - keystrokes only re-render this component
+    let mut show_modal = use_signal(|| false);
+    let mut title_text = use_signal(String::new);
     let mut message_text = use_signal(String::new);
     let mut show_emoji_picker = use_signal(|| false);
 
-    let auto_resize = move || {
-        if let Some(window) = web_sys::window() {
-            if let Some(doc) = window.document() {
-                if let Some(el) = doc.get_element_by_id("message-input") {
-                    if let Ok(el) = el.dyn_into::<web_sys::HtmlElement>() {
-                        // Reset height to auto to measure scrollHeight correctly
-                        el.style().set_property("height", "auto").ok();
-                        let scroll_height = el.scroll_height();
-                        // Clamp to max ~7 lines (approx 168px at 14px font + padding)
-                        let max_height = 168;
-                        let new_height = scroll_height.min(max_height);
-                        el.style()
-                            .set_property("height", &format!("{}px", new_height))
-                            .ok();
-                    }
-                }
-            }
+    // Open modal when replying_to changes to Some
+    use_effect(move || {
+        if replying_to.read().is_some() && !show_modal() {
+            show_modal.set(true);
         }
-    };
+    });
 
     let mut send_message = move || {
-        let text = message_text.peek().to_string();
-        if !text.is_empty() {
+        let title = title_text.peek().to_string();
+        let content = message_text.peek().to_string();
+        if !content.is_empty() {
             let reply_ctx = replying_to.peek().clone();
+            title_text.set(String::new());
             message_text.set(String::new());
             replying_to.set(None);
-            handle_send_message.call((text, reply_ctx));
-            // Reset textarea height after sending
-            auto_resize();
+            show_modal.set(false);
+            handle_send_message.call((title, content, reply_ctx));
         }
     };
 
@@ -56,94 +45,169 @@ pub fn MessageInput(
     };
 
     rsx! {
-        // Backdrop for emoji picker - outside the message bar to avoid z-index issues
-        if show_emoji_picker() {
-            div {
-                class: "fixed inset-0 z-40",
-                onclick: move |_| show_emoji_picker.set(false),
+        // Compose button bar
+        div { class: "flex-shrink-0 border-t border-border bg-panel",
+            div { class: "max-w-4xl mx-auto px-4 py-3",
+                button {
+                    class: "flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors",
+                    onclick: move |_| show_modal.set(true),
+                    Icon { icon: FaPen, width: 14, height: 14 }
+                    "Compose Message"
+                }
             }
         }
-        div { class: "flex-shrink-0 border-t border-border bg-panel relative z-50",
-            div { class: "max-w-4xl mx-auto px-4 py-3",
-                // Reply preview strip
-                {
-                    let reply = replying_to.read();
-                    if let Some(ctx) = reply.as_ref() {
-                        let author = ctx.author_name.clone();
-                        let preview = ctx.content_preview.clone();
-                        rsx! {
-                            div { class: "flex items-center gap-2 mb-2 px-3 py-1.5 bg-surface border-l-2 border-accent rounded text-sm text-text-muted",
-                                span { class: "flex-1 truncate",
-                                    span { class: "font-medium", "\u{21a9} @{author}: " }
-                                    "{preview}"
-                                }
-                                button {
-                                    class: "text-text-muted hover:text-text transition-colors flex-shrink-0",
-                                    title: "Cancel reply",
-                                    onclick: move |_| replying_to.set(None),
-                                    "\u{00d7}"
-                                }
-                            }
+
+        // Compose modal
+        if show_modal() {
+            div {
+                class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50",
+                onclick: move |_| {
+                    show_modal.set(false);
+                    replying_to.set(None);
+                },
+                div {
+                    class: "bg-panel rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col",
+                    onclick: move |e| e.stop_propagation(),
+
+                    // Modal header
+                    div { class: "flex items-center justify-between px-6 py-4 border-b border-border",
+                        h2 { class: "text-lg font-semibold text-text",
+                            if replying_to.read().is_some() { "Reply to Message" } else { "New Message" }
                         }
-                    } else {
-                        rsx! {}
-                    }
-                }
-                div { class: "flex gap-3 items-end",
-                    // Emoji picker button and popup
-                    div { class: "relative self-center",
                         button {
-                            class: "p-2.5 rounded-xl hover:bg-surface transition-colors",
-                            title: "Insert emoji",
-                            onclick: move |_| show_emoji_picker.set(!show_emoji_picker()),
-                            span {
-                                class: "text-lg",
-                                style: "filter: grayscale(100%); opacity: 0.6;",
-                                "🙂"
+                            class: "p-2 rounded-lg text-text-muted hover:text-text hover:bg-surface transition-colors",
+                            onclick: move |_| {
+                                show_modal.set(false);
+                                replying_to.set(None);
+                            },
+                            Icon { icon: FaXmark, width: 16, height: 16 }
+                        }
+                    }
+
+                    // Modal body
+                    div { class: "flex-1 overflow-y-auto px-6 py-4 space-y-4",
+                        // Reply preview strip
+                        {
+                            let reply = replying_to.read();
+                            if let Some(ctx) = reply.as_ref() {
+                                let author = ctx.author_name.clone();
+                                let preview = ctx.content_preview.clone();
+                                rsx! {
+                                    div { class: "flex items-center gap-2 px-3 py-2 bg-surface border-l-2 border-accent rounded text-sm text-text-muted",
+                                        span { class: "flex-1 truncate",
+                                            span { class: "font-medium", "\u{21a9} Replying to @{author}: " }
+                                            "{preview}"
+                                        }
+                                        button {
+                                            class: "text-text-muted hover:text-text transition-colors flex-shrink-0",
+                                            title: "Cancel reply",
+                                            onclick: move |_| replying_to.set(None),
+                                            "\u{00d7}"
+                                        }
+                                    }
+                                }
+                            } else {
+                                rsx! {}
                             }
                         }
-                        // Emoji picker popup (appears above the button)
-                        if show_emoji_picker() {
-                            div {
-                                class: "absolute bottom-full left-0 mb-2",
-                                EmojiPicker {
-                                    on_select: handle_emoji_select,
-                                    on_close: move |_| show_emoji_picker.set(false),
+
+                        // Title field
+                        div { class: "space-y-1.5",
+                            label { class: "block text-sm font-medium text-text",
+                                "Title"
+                                span { class: "text-text-muted font-normal", " (optional)" }
+                            }
+                            input {
+                                r#type: "text",
+                                class: "w-full px-4 py-2.5 bg-surface border border-border rounded-lg text-text placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors",
+                                placeholder: "Add a title...",
+                                value: "{title_text}",
+                                oninput: move |evt| title_text.set(evt.value().to_string()),
+                            }
+                        }
+
+                        // Content field
+                        div { class: "space-y-1.5",
+                            label { class: "block text-sm font-medium text-text",
+                                "Message"
+                            }
+                            div { class: "relative",
+                                // Emoji picker backdrop
+                                if show_emoji_picker() {
+                                    div {
+                                        class: "fixed inset-0 z-40",
+                                        onclick: move |_| show_emoji_picker.set(false),
+                                    }
+                                }
+                                div { class: "flex gap-2",
+                                    // Emoji picker button
+                                    div { class: "relative self-start pt-2",
+                                        button {
+                                            class: "p-2 rounded-lg hover:bg-surface transition-colors",
+                                            title: "Insert emoji",
+                                            onclick: move |_| show_emoji_picker.set(!show_emoji_picker()),
+                                            span {
+                                                class: "text-lg",
+                                                style: "filter: grayscale(100%); opacity: 0.6;",
+                                                "🙂"
+                                            }
+                                        }
+                                        if show_emoji_picker() {
+                                            div {
+                                                class: "absolute bottom-full left-0 mb-2 z-50",
+                                                EmojiPicker {
+                                                    on_select: handle_emoji_select,
+                                                    on_close: move |_| show_emoji_picker.set(false),
+                                                }
+                                            }
+                                        }
+                                    }
+                                    textarea {
+                                        id: "message-input",
+                                        class: "flex-1 px-4 py-2.5 bg-surface border border-border rounded-lg text-text placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors resize-none min-h-[120px]",
+                                        placeholder: "Type your message...",
+                                        value: "{message_text}",
+                                        rows: "5",
+                                        oninput: move |evt| message_text.set(evt.value().to_string()),
+                                        onkeydown: move |evt| {
+                                            // Ctrl/Cmd+Enter sends the message
+                                            if evt.key() == Key::Enter && (evt.modifiers().ctrl() || evt.modifiers().meta()) {
+                                                evt.prevent_default();
+                                                send_message();
+                                            }
+                                            // Escape closes modal
+                                            if evt.key() == Key::Escape {
+                                                show_modal.set(false);
+                                                replying_to.set(None);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                    textarea {
-                        id: "message-input",
-                        class: "flex-1 px-4 py-2.5 bg-surface border border-border rounded-xl text-text placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors resize-none min-h-[44px] overflow-y-auto",
-                        style: "max-height: 168px;",
-                        placeholder: "Type your message...",
-                        value: "{message_text}",
-                        rows: "1",
-                        oninput: move |evt| {
-                            message_text.set(evt.value().to_string());
-                            auto_resize();
-                        },
-                        onkeydown: move |evt| {
-                            // Enter without Shift sends the message
-                            // Shift+Enter creates a new line (default textarea behavior)
-                            if evt.key() == Key::Enter && !evt.modifiers().shift() {
-                                evt.prevent_default();
-                                send_message();
+
+                    // Modal footer
+                    div { class: "flex items-center justify-between px-6 py-4 border-t border-border bg-surface/50",
+                        span { class: "text-xs text-text-muted",
+                            "Press Ctrl+Enter to send"
+                        }
+                        div { class: "flex gap-3",
+                            button {
+                                class: "px-4 py-2 rounded-lg bg-surface hover:bg-surface-hover text-text transition-colors",
+                                onclick: move |_| {
+                                    show_modal.set(false);
+                                    replying_to.set(None);
+                                },
+                                "Cancel"
                             }
-                            // Up arrow in empty input: edit last sent message
-                            if evt.key() == Key::ArrowUp && message_text.peek().is_empty() {
-                                evt.prevent_default();
-                                on_request_edit_last.call(());
+                            button {
+                                class: "px-5 py-2 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                                disabled: message_text.read().is_empty(),
+                                onclick: move |_| send_message(),
+                                "Send Message"
                             }
                         }
-                    }
-                    button {
-                        class: "px-5 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
-                        onclick: move |_| {
-                            send_message();
-                        },
-                        "Send"
                     }
                 }
             }
