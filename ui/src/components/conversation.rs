@@ -52,8 +52,20 @@ pub struct MessageWithReplies {
     pub replies: Vec<MessageWithReplies>,
 }
 
+impl MessageData {
+    /// Check if this message is a top-level post (not a reply to another message)
+    pub fn is_top_level_post(&self) -> bool {
+        self.reply_to_message_id.is_none()
+    }
+
+    /// Get a string ID suitable for use in URLs/routes
+    pub fn id_string(&self) -> String {
+        format!("{:?}", self.message_id.0)
+    }
+}
+
 /// Build a flat list of all messages
-fn get_all_messages(
+pub fn get_all_messages(
     messages_state: &MessagesV1,
     member_info: &MemberInfoV1,
     self_member_id: MemberId,
@@ -125,7 +137,7 @@ fn get_all_messages(
 /// Build a tree of messages with their replies
 /// If parent_id is None, returns top-level messages (those not replying to anything)
 /// If parent_id is Some(id), returns only replies to that specific message
-fn build_reply_tree(
+pub fn build_reply_tree(
     all_messages: &[MessageData],
     parent_id: Option<&MessageId>,
 ) -> Vec<MessageWithReplies> {
@@ -1140,4 +1152,150 @@ fn ReplyTreeNode(
             }
         }
     }
+}
+
+/// Shared component for displaying a single post card
+/// Used by both PostsView (list) and SinglePostView (detail)
+#[component]
+pub fn PostCard(
+    /// The message data to display
+    message: MessageData,
+    /// Whether this is the expanded/detail view (larger styling)
+    #[props(default = false)]
+    expanded: bool,
+    /// Whether to show replies under this post
+    #[props(default = false)]
+    show_replies: bool,
+    /// Optional click handler for the card (used in list view for navigation)
+    #[props(default)]
+    on_click: Option<EventHandler<()>>,
+) -> Element {
+    let author_id = message.author_id;
+    let author_name = message.author_name.clone();
+    let title = message.title_text.clone();
+    let content_html = message.content_html.clone();
+    let time_clamped = message.time_clamped;
+    let message_id = message.message_id.clone();
+
+    let timestamp_ms = message.time.timestamp_millis();
+    let time_str = format_utc_as_local_time(timestamp_ms);
+    let full_time_str = if time_clamped {
+        format!(
+            "{} (sender's clock may be incorrect)",
+            format_utc_as_full_datetime(timestamp_ms)
+        )
+    } else {
+        format_utc_as_full_datetime(timestamp_ms)
+    };
+
+    // Styling based on expanded or list view
+    let (avatar_size, header_padding, content_padding, title_class, content_class) = if expanded {
+        (
+            "w-16 h-16",
+            "px-8 py-6",
+            "px-8 py-8",
+            "text-3xl font-bold text-text mb-6",
+            "text-xl text-text leading-relaxed prose prose-xl dark:prose-invert max-w-none",
+        )
+    } else {
+        (
+            "w-14 h-14",
+            "px-6 py-4",
+            "px-6 py-6",
+            "text-2xl font-bold text-text mb-4",
+            "text-lg text-text leading-relaxed prose prose-lg dark:prose-invert max-w-none",
+        )
+    };
+
+    let card_class = if on_click.is_some() {
+        "bg-panel rounded-2xl border border-border shadow-sm overflow-hidden hover:border-accent/50 transition-colors cursor-pointer"
+    } else {
+        "bg-panel rounded-2xl border border-border shadow-sm overflow-hidden"
+    };
+
+    rsx! {
+        div {
+            class: "{card_class}",
+            onclick: move |_| {
+                if let Some(handler) = &on_click {
+                    handler.call(());
+                }
+            },
+
+            // Post header with author
+            div {
+                class: "flex items-center gap-4 {header_padding} border-b border-border bg-surface/30",
+                img {
+                    src: "{get_avatar(&author_id)}",
+                    alt: "Avatar",
+                    class: "{avatar_size} rounded-full"
+                }
+                div { class: "flex-1 min-w-0",
+                    div {
+                        class: if expanded {
+                            "text-xl font-semibold text-text cursor-pointer hover:text-accent transition-colors"
+                        } else {
+                            "text-lg font-semibold text-text"
+                        },
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            MEMBER_INFO_MODAL.with_mut(|signal| {
+                                signal.member = Some(author_id);
+                            });
+                        },
+                        "{author_name}"
+                    }
+                    span {
+                        class: if time_clamped {
+                            "text-sm text-text-muted italic"
+                        } else {
+                            "text-sm text-text-muted"
+                        },
+                        title: "{full_time_str}",
+                        if time_clamped { "~{time_str}" } else { "{time_str}" }
+                    }
+                }
+            }
+
+            // Post content
+            div { class: "{content_padding}",
+                // Title
+                if !title.is_empty() {
+                    if expanded {
+                        h1 { class: "{title_class}", "{title}" }
+                    } else {
+                        h2 { class: "{title_class}", "{title}" }
+                    }
+                }
+                // Content
+                div {
+                    class: "{content_class}",
+                    span { dangerous_inner_html: "{content_html}" }
+                }
+            }
+        }
+
+        // Replies section (if enabled)
+        if show_replies {
+            div { class: "mt-4",
+                h3 { class: "text-lg font-semibold text-text-muted border-b border-border pb-2 mb-4",
+                    "Replies"
+                }
+                Conversation {
+                    parent_message_id: Some(message_id),
+                }
+            }
+        }
+    }
+}
+
+/// Get all top-level posts (messages that are not replies)
+pub fn get_top_level_posts(all_messages: &[MessageData]) -> Vec<MessageData> {
+    let mut posts: Vec<_> = all_messages
+        .iter()
+        .filter(|m| m.is_top_level_post())
+        .cloned()
+        .collect();
+    posts.sort_by_key(|m| std::cmp::Reverse(m.time));
+    posts
 }
