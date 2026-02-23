@@ -3,4 +3,4 @@ id = "freetalk"
 
 [app]
 type = "dioxus"
-package = "freetalk-ui"
+package-id = "freetalk-ui"
