@@ -14,7 +14,7 @@ use crate::components::conversation::message_input::MessageInput;
 use chrono::{DateTime, Utc};
 use dioxus::logger::tracing::*;
 use dioxus::prelude::*;
-use dioxus_free_icons::icons::fa_solid_icons::FaCircleInfo;
+use dioxus_free_icons::icons::fa_solid_icons::{FaCircleInfo, FaAnchor};
 use dioxus_free_icons::Icon;
 use freenet_scaffold::ComposableState;
 use river_core::room_state::member::MemberId;
@@ -54,6 +54,7 @@ struct MessageGroup {
 
 #[derive(Clone, PartialEq)]
 struct GroupedMessage {
+    title_text: String,
     content_text: String,
     content_html: String,
     #[allow(dead_code)]
@@ -112,6 +113,7 @@ fn group_messages(
             .effective_text(message)
             .unwrap_or_else(|| decrypt_message_content(&message.message.content, secrets));
         let content_html = message_to_html(&content_text);
+        let title_text = decrypt_message_title(&message.message.content, secrets);
         let is_self = author_id == self_member_id;
 
         // Get edited status and reactions
@@ -130,6 +132,7 @@ fn group_messages(
         let receive_delay_secs = get_delay_secs(&message_id, send_time_ms);
 
         let grouped_message = GroupedMessage {
+            title_text,
             content_text: content_text.clone(),
             content_html,
             time: message_time,
@@ -174,6 +177,56 @@ fn group_messages(
     }
 
     groups
+}
+
+fn decrypt_message_title(content: &RoomMessageBody, secrets: &HashMap<u32, [u8; 32]>) -> String {
+    use river_core::room_state::content::{
+        ReplyContentV1, TextContentV1, CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
+    };
+
+    match content {
+        RoomMessageBody::Public {
+            content_type, data, ..
+        } => {
+            if *content_type == CONTENT_TYPE_TEXT {
+                if let Ok(text_content) = TextContentV1::decode(data) {
+                    return text_content.title;
+                }
+            }
+            if *content_type == CONTENT_TYPE_REPLY {
+                if let Ok(reply) = ReplyContentV1::decode(data) {
+                    return reply.title;
+                }
+            }
+            String::new()
+        }
+        RoomMessageBody::Private {
+            content_type,
+            ciphertext,
+            nonce,
+            secret_version,
+            ..
+        } => {
+            if let Some(secret) = secrets.get(secret_version) {
+                use crate::util::ecies::decrypt_with_symmetric_key;
+                if let Ok(decrypted_bytes) =
+                    decrypt_with_symmetric_key(secret, ciphertext.as_slice(), nonce)
+                {
+                    if *content_type == CONTENT_TYPE_TEXT {
+                        if let Ok(text_content) = TextContentV1::decode(&decrypted_bytes) {
+                            return text_content.title;
+                        }
+                    }
+                    if *content_type == CONTENT_TYPE_REPLY {
+                        if let Ok(reply) = ReplyContentV1::decode(&decrypted_bytes) {
+                            return reply.title;
+                        }
+                    }
+                }
+            }
+            String::new()
+        }
+    }
 }
 
 fn decrypt_message_content(content: &RoomMessageBody, secrets: &HashMap<u32, [u8; 32]>) -> String {
@@ -1373,52 +1426,40 @@ fn MessageGroupComponent(
     });
 
     rsx! {
-        div {
-            class: format!(
-                "flex min-w-0 {}",
-                if is_self { "justify-end" } else { "justify-start" }
-            ),
-            div {
-                class: format!(
-                    "max-w-[75%] {}",
-                    if is_self { "items-end" } else { "items-start" }
-                ),
-                // Header with name and time (only for others)
-                if !is_self {
-                    div { class: "flex items-baseline gap-2 mb-1 px-1",
-                        span {
-                            class: "text-sm font-medium text-text cursor-pointer hover:text-accent transition-colors",
-                            title: "Member ID: {group.author_id}",
-                            onclick: move |_| {
-                                MEMBER_INFO_MODAL.with_mut(|signal| {
-                                    signal.member = Some(group.author_id);
-                                });
-                            },
-                            "{group.author_name}"
-                        }
-                        span {
-                            class: if time_clamped {
-                                "text-xs text-text-muted cursor-default italic opacity-70"
-                            } else {
-                                "text-xs text-text-muted cursor-default"
-                            },
-                            title: "{full_time_str}",
-                            if time_clamped { "~{time_str}" } else { "{time_str}" }
-                        }
-                    }
+        div { class: "w-full",
+            // Header with name and time
+            div { class: "flex items-baseline gap-2 mb-2 px-4",
+                span {
+                    class: "text-sm font-medium text-text cursor-pointer hover:text-accent transition-colors",
+                    title: "Member ID: {group.author_id}",
+                    onclick: move |_| {
+                        MEMBER_INFO_MODAL.with_mut(|signal| {
+                            signal.member = Some(group.author_id);
+                        });
+                    },
+                    "{group.author_name}"
                 }
+                if is_self {
+                    span { class: "text-xs text-accent font-medium", "(you)" }
+                }
+                span {
+                    class: if time_clamped {
+                        "text-xs text-text-muted cursor-default italic opacity-70"
+                    } else {
+                        "text-xs text-text-muted cursor-default"
+                    },
+                    title: "{full_time_str}",
+                    if time_clamped { "~{time_str}" } else { "{time_str}" }
+                }
+            }
 
-                // Message bubbles
-                div {
-                    class: format!(
-                        "space-y-1 {}",
-                        if is_self { "flex flex-col items-end" } else { "" }
-                    ),
-                    {
-                        let messages_len = group.messages.len();
-                        group.messages.into_iter().enumerate().map(move |(idx, msg)| {
+            // Messages - full width blocks
+            div { class: "space-y-0",
+                {
+                    let messages_len = group.messages.len();
+                    group.messages.into_iter().enumerate().map(move |(idx, msg)| {
                         let is_last = idx == messages_len - 1;
-                        let is_first = idx == 0;
+                        let _is_first = idx == 0;
                         let has_reactions = !msg.reactions.is_empty();
                         let has_reply = msg.reply_to_author.is_some();
                         let reply_author_val = msg.reply_to_author.clone();
@@ -1542,38 +1583,11 @@ fn MessageGroupComponent(
                                                         rsx! {}
                                                     }
                                                 }
-                                                // Message bubble (overlaps reply strip bottom when reply exists)
+                                                // Message block - full width with hook icon
                                                 div {
                                                     class: format!(
-                                                        "px-3 py-2 text-sm overflow-auto {} {} {} {}",
-                                                        if is_self {
-                                                            "bg-accent text-white"
-                                                        } else {
-                                                            "bg-surface text-text"
-                                                        },
-                                                        // Rounded corners based on position
-                                                        if is_self {
-                                                            if is_first && is_last && !has_reactions {
-                                                                "rounded-2xl"
-                                                            } else if is_first {
-                                                                "rounded-t-2xl rounded-bl-2xl rounded-br-md"
-                                                            } else if is_last && !has_reactions {
-                                                                "rounded-b-2xl rounded-tl-2xl rounded-tr-md"
-                                                            } else {
-                                                                "rounded-l-2xl rounded-r-md"
-                                                            }
-                                                        } else if is_first && is_last && !has_reactions {
-                                                            "rounded-2xl"
-                                                        } else if is_first {
-                                                            "rounded-t-2xl rounded-br-2xl rounded-bl-md"
-                                                        } else if is_last && !has_reactions {
-                                                            "rounded-b-2xl rounded-tr-2xl rounded-tl-md"
-                                                        } else {
-                                                            "rounded-r-2xl rounded-l-md"
-                                                        },
-                                                        // Max width for readability, clip overflow
-                                                        "max-w-prose overflow-hidden",
-                                                        // Overlap reply strip when present
+                                                        "w-full border-b border-border py-4 px-4 {} {}",
+                                                        if is_self { "bg-accent/5" } else { "bg-surface/50" },
                                                         if has_reply { "relative z-10 -mt-3" } else { "" }
                                                     ),
                                                     onmounted: move |cx| {
@@ -1583,18 +1597,38 @@ fn MessageGroupComponent(
                                                             }
                                                         }
                                                     },
-                                                    span {
-                                                        class: "prose prose-sm dark:prose-invert max-w-none",
-                                                        dangerous_inner_html: "{msg.content_html}"
-                                                    }
-                                                    // Edited indicator
-                                                    if msg.edited {
-                                                        span {
-                                                            class: format!(
-                                                                "text-xs ml-2 {}",
-                                                                if is_self { "text-white/70" } else { "text-text-muted" }
-                                                            ),
-                                                            "(edited)"
+                                                    // Flex container: hook icon | title + content
+                                                    div { class: "flex gap-4 items-start",
+                                                        // Hook icon
+                                                        div { class: "flex-shrink-0 pt-1",
+                                                            Icon {
+                                                                icon: FaAnchor,
+                                                                width: 32,
+                                                                height: 32,
+                                                                class: if is_self { "text-accent" } else { "text-text-muted" }
+                                                            }
+                                                        }
+                                                        // Title and content
+                                                        div { class: "flex-1 min-w-0",
+                                                            // Title (if present)
+                                                            if !msg.title_text.is_empty() {
+                                                                h3 { class: "text-lg font-semibold text-text mb-2",
+                                                                    "{msg.title_text}"
+                                                                }
+                                                            }
+                                                            // Content
+                                                            div { class: "text-sm text-text",
+                                                                span {
+                                                                    class: "prose prose-sm dark:prose-invert max-w-none",
+                                                                    dangerous_inner_html: "{msg.content_html}"
+                                                                }
+                                                                // Edited indicator
+                                                                if msg.edited {
+                                                                    span { class: "text-xs ml-2 text-text-muted",
+                                                                        "(edited)"
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -1810,20 +1844,6 @@ fn MessageGroupComponent(
                             }
                         }
                     })
-                    }
-                }
-
-                // Time for self messages (shown at the end)
-                if is_self {
-                    div {
-                        class: if time_clamped {
-                            "text-xs text-text-muted mt-1 px-1 cursor-default italic opacity-70"
-                        } else {
-                            "text-xs text-text-muted mt-1 px-1 cursor-default"
-                        },
-                        title: "{full_time_str}",
-                        if time_clamped { "~{time_str}" } else { "{time_str}" }
-                    }
                 }
             }
         }
