@@ -788,14 +788,16 @@ pub fn Conversation(
                     Some(room_data) => {
                         match room_data.can_participate() {
                             Ok(()) => rsx! {
-                                PostInput {
-                                    handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
-                                        let mut handle = handle_send_message.clone();
-                                        handle(msg)
-                                    },
-                                    replying_to: replying_to,
-                                    on_request_edit_last: move |_| {},
-                                    default_reply_to: default_reply_to.clone(),
+                                div { class: "flex justify-center",
+                                    PostInput {
+                                        handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
+                                            let mut handle = handle_send_message.clone();
+                                            handle(msg)
+                                        },
+                                        replying_to: replying_to,
+                                        on_request_edit_last: move |_| {},
+                                        default_reply_to: default_reply_to.clone(),
+                                    }
                                 }
                             },
                             Err(SendMessageError::UserNotMember) => {
