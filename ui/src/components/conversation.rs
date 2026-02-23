@@ -1267,10 +1267,10 @@ pub fn Conversation() -> Element {
                                 alt: "River Logo"
                             }
                             h1 { class: "text-2xl font-semibold text-text mb-2",
-                                "Welcome to River"
+                                "Welcome to FreeTalk"
                             }
                             p { class: "text-text-muted",
-                                "Create a new room, or get invited to an existing one."
+                                "Create a new board, explore public boards, or get invited to an existing one."
                             }
                         }
                     },

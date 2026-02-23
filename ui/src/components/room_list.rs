@@ -92,99 +92,101 @@ pub fn RoomList() -> Element {
             .iter()
             .find(|(_, _, is_current)| *is_current)
             .map(|(_, name, _)| name.clone())
-            .unwrap_or_else(|| "Select Room".to_string())
+            .unwrap_or_else(|| "Select Board".to_string())
     });
 
     rsx! {
-        div { class: "relative inline-block",
+        div { class: "relative inline-block items-center",
             // Dropdown trigger button
-            button {
-                class: "flex items-center gap-2 px-4 py-2 bg-panel border border-border rounded-lg text-sm text-text hover:bg-surface transition-colors min-w-48",
-                onclick: move |_| {
-                    is_open.set(!is_open());
-                },
-                Icon { width: 16, height: 16, icon: FaComments, class: "text-text-muted" }
-                span { class: "flex-1 text-left truncate", "{current_room_name}" }
-                Icon {
-                    width: 12,
-                    height: 12,
-                    icon: FaChevronDown,
-                    class: format!("text-text-muted transition-transform {}", if is_open() { "rotate-180" } else { "" })
-                }
-            }
-
-            // Dropdown panel
-            if is_open() {
-                // Backdrop to close dropdown when clicking outside
-                div {
-                    class: "fixed inset-0 z-10",
+            div { class: "flex justify-center", style: "width: 100vw;",
+                button {
+                    class: "flex items-center gap-2 px-4 py-2 bg-panel border border-border rounded-lg text-sm text-text hover:bg-surface transition-colors min-w-48",
                     onclick: move |_| {
-                        is_open.set(false);
+                        is_open.set(!is_open());
+                    },
+                    Icon { width: 16, height: 16, icon: FaComments, class: "text-text-muted" }
+                    span { class: "flex-1 text-left truncate", "{current_room_name}" }
+                    Icon {
+                        width: 12,
+                        height: 12,
+                        icon: FaChevronDown,
+                        class: format!("text-text-muted transition-transform {}", if is_open() { "rotate-180" } else { "" })
                     }
                 }
 
-                // Dropdown menu
-                div { class: "absolute left-0 top-full mt-1 z-20 w-64 bg-panel border border-border rounded-lg shadow-lg overflow-hidden",
-                    // Header with create room button
-                    div { class: "px-3 py-2 border-b border-border flex items-center justify-between",
-                        span { class: "text-xs font-semibold text-text-muted uppercase tracking-wide",
-                            "Rooms"
-                        }
-                        button {
-                            class: "p-1 rounded text-text-muted hover:text-accent hover:bg-surface transition-colors",
-                            title: "Create Room",
-                            onclick: move |_| {
-                                CREATE_ROOM_MODAL.write().show = true;
-                                is_open.set(false);
-                            },
-                            Icon { width: 12, height: 12, icon: FaPlus }
+                // Dropdown panel
+                if is_open() {
+                    // Backdrop to close dropdown when clicking outside
+                    div {
+                        class: "fixed inset-0 z-10",
+                        onclick: move |_| {
+                            is_open.set(false);
                         }
                     }
 
-                    // Room list
-                    ul { class: "max-h-64 overflow-y-auto py-1",
-                        {room_items.read().iter().map(|(room_key, room_name, is_current)| {
-                            let room_key = *room_key;
-                            let room_name = room_name.clone();
-                            let is_current = *is_current;
-                            rsx! {
-                                li { key: "{room_key:?}",
-                                    button {
-                                        class: format!(
-                                            "w-full text-left px-3 py-2 text-sm transition-colors {}",
-                                            if is_current {
-                                                "bg-accent/10 text-accent font-medium"
-                                            } else {
-                                                "text-text hover:bg-surface"
-                                            }
-                                        ),
-                                        onclick: move |_| {
-                                            *CURRENT_ROOM.write() = CurrentRoom { owner_key: Some(room_key) };
-                                            mark_current_room_as_read();
-                                            is_open.set(false);
-                                            spawn(async move {
-                                                if let Err(e) = save_rooms_to_delegate().await {
-                                                    error!("Failed to save current room selection: {}", e);
+                    // Dropdown menu
+                    div { class: "absolute left-0 top-full mt-1 z-20 w-64 bg-panel border border-border rounded-lg shadow-lg overflow-hidden",
+                        // Header with create room button
+                        div { class: "px-3 py-2 border-b border-border flex items-center justify-between",
+                            span { class: "text-xs font-semibold text-text-muted uppercase tracking-wide",
+                                "Rooms"
+                            }
+                            button {
+                                class: "p-1 rounded text-text-muted hover:text-accent hover:bg-surface transition-colors",
+                                title: "Create Room",
+                                onclick: move |_| {
+                                    CREATE_ROOM_MODAL.write().show = true;
+                                    is_open.set(false);
+                                },
+                                Icon { width: 12, height: 12, icon: FaPlus }
+                            }
+                        }
+
+                        // Room list
+                        ul { class: "max-h-64 overflow-y-auto py-1",
+                            {room_items.read().iter().map(|(room_key, room_name, is_current)| {
+                                let room_key = *room_key;
+                                let room_name = room_name.clone();
+                                let is_current = *is_current;
+                                rsx! {
+                                    li { key: "{room_key:?}",
+                                        button {
+                                            class: format!(
+                                                "w-full text-left px-3 py-2 text-sm transition-colors {}",
+                                                if is_current {
+                                                    "bg-accent/10 text-accent font-medium"
+                                                } else {
+                                                    "text-text hover:bg-surface"
                                                 }
-                                            });
-                                        },
-                                        span { class: "block truncate", "{room_name}" }
+                                            ),
+                                            onclick: move |_| {
+                                                *CURRENT_ROOM.write() = CurrentRoom { owner_key: Some(room_key) };
+                                                mark_current_room_as_read();
+                                                is_open.set(false);
+                                                spawn(async move {
+                                                    if let Err(e) = save_rooms_to_delegate().await {
+                                                        error!("Failed to save current room selection: {}", e);
+                                                    }
+                                                });
+                                            },
+                                            span { class: "block truncate", "{room_name}" }
+                                        }
                                     }
                                 }
-                            }
-                        }).collect::<Vec<_>>().into_iter()}
+                            }).collect::<Vec<_>>().into_iter()}
 
-                        // Empty state
-                        if room_items.read().is_empty() {
-                            li { class: "px-3 py-4 text-sm text-text-muted text-center",
-                                "No rooms yet"
+                            // Empty state
+                            if room_items.read().is_empty() {
+                                li { class: "px-3 py-4 text-sm text-text-muted text-center",
+                                    "No rooms yet"
+                                }
                             }
                         }
-                    }
 
-                    // Build info footer
-                    div { class: "px-3 py-2 border-t border-border text-xs text-text-muted text-center",
-                        {"Built: "} {format_build_time_local()}
+                        // Build info footer
+                        div { class: "px-3 py-2 border-t border-border text-xs text-text-muted text-center",
+                            {"Built: "} {format_build_time_local()}
+                        }
                     }
                 }
             }
