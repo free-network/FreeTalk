@@ -407,13 +407,13 @@ pub enum RoomMessageBody {
 
 impl RoomMessageBody {
     /// Create a new public text message
-    pub fn public(text: String) -> Self {
+    pub fn public(title: String, content: String) -> Self {
         use crate::room_state::content::{TextContentV1, CONTENT_TYPE_TEXT, TEXT_CONTENT_VERSION};
-        let content = TextContentV1::new(text);
+        let text_content = TextContentV1::new(title, content);
         Self::Public {
             content_type: CONTENT_TYPE_TEXT,
             content_version: TEXT_CONTENT_VERSION,
-            data: content.encode(),
+            data: text_content.encode(),
         }
     }
 
@@ -513,7 +513,8 @@ impl RoomMessageBody {
 
     /// Create a public reply message
     pub fn reply(
-        text: String,
+        title: String,
+        content: String,
         target_message_id: MessageId,
         target_author_name: String,
         target_content_preview: String,
@@ -522,7 +523,8 @@ impl RoomMessageBody {
             ReplyContentV1, CONTENT_TYPE_REPLY, REPLY_CONTENT_VERSION,
         };
         let reply = ReplyContentV1::new(
-            text,
+            title,
+            content,
             target_message_id,
             target_author_name,
             target_content_preview,
@@ -699,7 +701,7 @@ impl Default for MessageV1 {
             room_owner: MemberId(FastHash(0)),
             author: MemberId(FastHash(0)),
             time: SystemTime::UNIX_EPOCH,
-            content: RoomMessageBody::public(String::new()),
+            content: RoomMessageBody::public(String::new(), String::new()),
         }
     }
 }
@@ -769,7 +771,7 @@ mod tests {
             room_owner: owner_id,
             author: author_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public("Test message".to_string()),
+            content: RoomMessageBody::public(String::new(), "Test message".to_string()),
         }
     }
 
@@ -813,7 +815,7 @@ mod tests {
 
         // Test with tampered message
         let mut tampered_message = authorized_message.clone();
-        tampered_message.message.content = RoomMessageBody::public("Tampered content".to_string());
+        tampered_message.message.content = RoomMessageBody::public(String::new(), "Tampered content".to_string());
         assert!(tampered_message.validate(&verifying_key).is_err());
     }
 
@@ -1026,7 +1028,7 @@ mod tests {
                 room_owner: owner_id,
                 author: author_id,
                 time,
-                content: RoomMessageBody::public("Test message".to_string()),
+                content: RoomMessageBody::public(String::new(), "Test message".to_string()),
             };
             AuthorizedMessageV1::new(message, &author_signing_key)
         };
@@ -1122,14 +1124,14 @@ mod tests {
         let msg1 = MessageV1 {
             room_owner: owner_id,
             author: user1_id,
-            content: RoomMessageBody::public("Message from user1".to_string()),
+            content: RoomMessageBody::public(String::new(), "Message from user1".to_string()),
             time: SystemTime::now(),
         };
 
         let msg2 = MessageV1 {
             room_owner: owner_id,
             author: user2_id,
-            content: RoomMessageBody::public("Message from user2".to_string()),
+            content: RoomMessageBody::public(String::new(), "Message from user2".to_string()),
             time: SystemTime::now() + Duration::from_secs(1),
         };
 
@@ -1187,7 +1189,7 @@ mod tests {
             room_owner: owner_id,
             author: author_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public("Original content".to_string()),
+            content: RoomMessageBody::public(String::new(), "Original content".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &signing_key);
         let original_id = auth_original.id();
@@ -1232,7 +1234,7 @@ mod tests {
             room_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public("Original content".to_string()),
+            content: RoomMessageBody::public(String::new(), "Original content".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &owner_sk);
         let original_id = auth_original.id();
@@ -1269,7 +1271,7 @@ mod tests {
             room_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public("Will be deleted".to_string()),
+            content: RoomMessageBody::public(String::new(), "Will be deleted".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &signing_key);
         let original_id = auth_original.id();
@@ -1312,7 +1314,7 @@ mod tests {
             room_owner: owner_id,
             author: user1_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public("React to me!".to_string()),
+            content: RoomMessageBody::public(String::new(), "React to me!".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &user1_sk);
         let original_id = auth_original.id();
@@ -1360,7 +1362,7 @@ mod tests {
             room_owner: owner_id,
             author: user_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public("Test message".to_string()),
+            content: RoomMessageBody::public(String::new(), "Test message".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &user_sk);
         let original_id = auth_original.id();
@@ -1404,7 +1406,7 @@ mod tests {
             room_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public("Will be deleted".to_string()),
+            content: RoomMessageBody::public(String::new(), "Will be deleted".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &signing_key);
         let original_id = auth_original.id();
@@ -1449,7 +1451,7 @@ mod tests {
             room_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public("Hello".to_string()),
+            content: RoomMessageBody::public(String::new(), "Hello".to_string()),
         };
         let auth_msg1 = AuthorizedMessageV1::new(msg1, &signing_key);
         let msg1_id = auth_msg1.id();
@@ -1468,7 +1470,7 @@ mod tests {
             room_owner: owner_id,
             author: owner_id,
             time: SystemTime::now() + Duration::from_secs(2),
-            content: RoomMessageBody::public("World".to_string()),
+            content: RoomMessageBody::public(String::new(), "World".to_string()),
         };
         let auth_msg2 = AuthorizedMessageV1::new(msg2, &signing_key);
 

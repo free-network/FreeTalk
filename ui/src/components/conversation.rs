@@ -189,16 +189,16 @@ fn decrypt_message_content(content: &RoomMessageBody, secrets: &HashMap<u32, [u8
             if *content_type == CONTENT_TYPE_ACTION {
                 return content.to_string_lossy();
             }
-            // Text messages - decode and return text
+            // Text messages - decode and return content
             if *content_type == CONTENT_TYPE_TEXT {
                 if let Ok(text_content) = TextContentV1::decode(data) {
-                    return text_content.text;
+                    return text_content.content;
                 }
             }
-            // Reply messages - decode and return reply text
+            // Reply messages - decode and return reply content
             if *content_type == CONTENT_TYPE_REPLY {
                 if let Ok(reply) = ReplyContentV1::decode(data) {
-                    return reply.text;
+                    return reply.content;
                 }
             }
             // Unknown content type
@@ -221,13 +221,13 @@ fn decrypt_message_content(content: &RoomMessageBody, secrets: &HashMap<u32, [u8
                     // For text messages, decode the content
                     if *content_type == CONTENT_TYPE_TEXT {
                         if let Ok(text_content) = TextContentV1::decode(&decrypted_bytes) {
-                            return text_content.text;
+                            return text_content.content;
                         }
                     }
-                    // For reply messages, decode and return reply text
+                    // For reply messages, decode and return reply content
                     if *content_type == CONTENT_TYPE_REPLY {
                         if let Ok(reply) = ReplyContentV1::decode(&decrypted_bytes) {
-                            return reply.text;
+                            return reply.content;
                         }
                     }
                     // Fallback to UTF-8 string
@@ -901,6 +901,7 @@ pub fn Conversation() -> Element {
                         if is_private {
                             if let Some((secret, version)) = secret_opt {
                                 let reply_content = ReplyContentV1::new(
+                                    String::new(),
                                     message_text.clone(),
                                     reply.message_id,
                                     reply.author_name,
@@ -919,6 +920,7 @@ pub fn Conversation() -> Element {
                             } else {
                                 warn!("Room is private but no secret available, sending reply as public");
                                 RoomMessageBody::reply(
+                                    String::new(),
                                     message_text.clone(),
                                     reply.message_id,
                                     reply.author_name,
@@ -927,6 +929,7 @@ pub fn Conversation() -> Element {
                             }
                         } else {
                             RoomMessageBody::reply(
+                                String::new(),
                                 message_text.clone(),
                                 reply.message_id,
                                 reply.author_name,
@@ -937,7 +940,7 @@ pub fn Conversation() -> Element {
                         // Regular text message
                         if is_private {
                             if let Some((secret, version)) = secret_opt {
-                                let text_content = TextContentV1::new(message_text.clone());
+                                let text_content = TextContentV1::new(String::new(), message_text.clone());
                                 let content_bytes = text_content.encode();
                                 let (ciphertext, nonce) =
                                     encrypt_with_symmetric_key(&secret, &content_bytes);
@@ -950,10 +953,10 @@ pub fn Conversation() -> Element {
                                 )
                             } else {
                                 warn!("Room is private but no secret available, sending as public");
-                                RoomMessageBody::public(message_text.clone())
+                                RoomMessageBody::public(String::new(), message_text.clone())
                             }
                         } else {
-                            RoomMessageBody::public(message_text.clone())
+                            RoomMessageBody::public(String::new(), message_text.clone())
                         }
                     };
 

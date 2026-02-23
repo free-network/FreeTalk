@@ -946,7 +946,7 @@ impl ApiClient {
         let message = river_core::room_state::message::MessageV1 {
             room_owner: MemberId::from(*room_owner_key),
             author: sender_member_id,
-            content: river_core::room_state::message::RoomMessageBody::public(message_content),
+            content: river_core::room_state::message::RoomMessageBody::public(String::new(), message_content),
             time: std::time::SystemTime::now(),
         };
 
@@ -1037,7 +1037,7 @@ impl ApiClient {
         let message = river_core::room_state::message::MessageV1 {
             room_owner: river_core::room_state::member::MemberId::from(*room_owner_key),
             author: river_core::room_state::member::MemberId::from(&signing_key.verifying_key()),
-            content: river_core::room_state::message::RoomMessageBody::public(message_content),
+            content: river_core::room_state::message::RoomMessageBody::public(String::new(), message_content),
             time: std::time::SystemTime::now(),
         };
 
@@ -1400,6 +1400,7 @@ impl ApiClient {
             room_owner: MemberId::from(*room_owner_key),
             author: MemberId::from(&signing_key.verifying_key()),
             content: river_core::room_state::message::RoomMessageBody::reply(
+                String::new(),
                 reply_text,
                 target_message_id,
                 target_author_name,

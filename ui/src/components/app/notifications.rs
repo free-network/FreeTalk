@@ -429,7 +429,7 @@ fn get_message_preview(
         } => {
             if *content_type == CONTENT_TYPE_TEXT {
                 TextContentV1::decode(data)
-                    .map(|t| t.text)
+                    .map(|t| t.content)
                     .unwrap_or_else(|_| "[Failed to decode message]".to_string())
             } else if *content_type == CONTENT_TYPE_ACTION {
                 // Action messages - show action description
@@ -447,7 +447,7 @@ fn get_message_preview(
                     .unwrap_or_else(|_| "[Action]".to_string())
             } else if *content_type == CONTENT_TYPE_REPLY {
                 ReplyContentV1::decode(data)
-                    .map(|r| r.text)
+                    .map(|r| r.content)
                     .unwrap_or_else(|_| "[Failed to decode reply]".to_string())
             } else {
                 "[Unknown message type]".to_string()
@@ -466,11 +466,11 @@ fn get_message_preview(
                     .map(|bytes| {
                         if *content_type == CONTENT_TYPE_TEXT {
                             TextContentV1::decode(&bytes)
-                                .map(|t| t.text)
+                                .map(|t| t.content)
                                 .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string())
                         } else if *content_type == CONTENT_TYPE_REPLY {
                             ReplyContentV1::decode(&bytes)
-                                .map(|r| r.text)
+                                .map(|r| r.content)
                                 .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string())
                         } else {
                             String::from_utf8_lossy(&bytes).to_string()

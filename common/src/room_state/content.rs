@@ -38,12 +38,13 @@ pub const ACTION_TYPE_REMOVE_REACTION: u32 = 4;
 /// Text message content (content_type = 1)
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct TextContentV1 {
-    pub text: String,
+    pub title: String,
+    pub content: String,
 }
 
 impl TextContentV1 {
-    pub fn new(text: String) -> Self {
-        Self { text }
+    pub fn new(title: String, content: String) -> Self {
+        Self { title, content }
     }
 
     /// Encode to CBOR bytes
@@ -167,7 +168,8 @@ pub struct ReactionPayload {
 /// the target message is later deleted or scrolled out of the recent window.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct ReplyContentV1 {
-    pub text: String,
+    pub title: String,
+    pub content: String,
     pub target_message_id: MessageId,
     pub target_author_name: String,
     /// Snapshot of the target message content (~100 chars)
@@ -176,13 +178,15 @@ pub struct ReplyContentV1 {
 
 impl ReplyContentV1 {
     pub fn new(
-        text: String,
+        title: String,
+        content: String,
         target_message_id: MessageId,
         target_author_name: String,
         target_content_preview: String,
     ) -> Self {
         Self {
-            text,
+            title,
+            content,
             target_message_id,
             target_author_name,
             target_content_preview,
@@ -231,8 +235,8 @@ impl DecodedContent {
     /// Get the text content if this is a text or reply message
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            Self::Text(text) => Some(&text.text),
-            Self::Reply(reply) => Some(&reply.text),
+            Self::Text(text) => Some(&text.content),
+            Self::Reply(reply) => Some(&reply.content),
             _ => None,
         }
     }
@@ -240,8 +244,8 @@ impl DecodedContent {
     /// Get a display string for this content
     pub fn to_display_string(&self) -> String {
         match self {
-            Self::Text(text) => text.text.clone(),
-            Self::Reply(reply) => reply.text.clone(),
+            Self::Text(text) => text.content.clone(),
+            Self::Reply(reply) => reply.content.clone(),
             Self::Action(action) => match action.action_type {
                 ACTION_TYPE_EDIT => format!("[Edit of message {}]", action.target),
                 ACTION_TYPE_DELETE => format!("[Delete of message {}]", action.target),
@@ -286,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_text_content_roundtrip() {
-        let content = TextContentV1::new("Hello, world!".to_string());
+        let content = TextContentV1::new("Title".to_string(), "Hello, world!".to_string());
         let encoded = content.encode();
         let decoded = TextContentV1::decode(&encoded).unwrap();
         assert_eq!(content, decoded);
@@ -337,6 +341,7 @@ mod tests {
     #[test]
     fn test_reply_content_roundtrip() {
         let reply = ReplyContentV1::new(
+            "Re: Hello".to_string(),
             "I agree!".to_string(),
             test_message_id(),
             "Alice".to_string(),
@@ -346,7 +351,7 @@ mod tests {
         let decoded = ReplyContentV1::decode(&encoded).unwrap();
         assert_eq!(reply, decoded);
 
-        // Verify DecodedContent::Reply returns text via as_text()
+        // Verify DecodedContent::Reply returns content via as_text()
         let dc = DecodedContent::Reply(reply.clone());
         assert_eq!(dc.as_text(), Some("I agree!"));
         assert_eq!(dc.to_display_string(), "I agree!");
@@ -355,7 +360,7 @@ mod tests {
 
     #[test]
     fn test_decoded_content_display() {
-        let text = DecodedContent::Text(TextContentV1::new("Hello".to_string()));
+        let text = DecodedContent::Text(TextContentV1::new(String::new(), "Hello".to_string()));
         assert_eq!(text.to_display_string(), "Hello");
 
         let unknown = DecodedContent::Unknown {
