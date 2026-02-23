@@ -1,0 +1,80 @@
+[workspace]
+members = [
+    "common",
+    "freetalk-contract",
+    "freetalk-delegate",
+    "ui",
+    "cli",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# Serialization
+ciborium = "0.2.2"
+serde = { version = "1.0.130", features = ["derive"] }
+
+# Cryptography
+ed25519-dalek = { version = "2.1.1", default-features = false, features = ["alloc", "serde"] }
+# For WASM contracts that only need verification
+ed25519-compact = { version = "2.1.1", default-features = false, features = ["std"] }
+blake3 = { version = "1.5.3", features = ["serde"] }
+x25519-dalek = { version = "2.0.0", features = ["static_secrets"] }
+curve25519-dalek = { version = "4.1.3" }
+sha2 = "0.10.8"
+aes-gcm = { version = "0.10.3", features = ["std"] }
+bs58 = "0.5.1"
+
+# Utilities
+byteorder = "1.5.0"
+rand = { version = "0.8.5", features = ["getrandom"], default-features = true }
+getrandom = { version = "0.2.16", features = ["js"] }
+base64 = "0.22.1"
+once_cell = "1.18.0"
+data-encoding = "2.3.3"
+tracing = "0.1.40"
+chrono = { version = "0.4", features = ["serde"] }
+
+# Web-related
+web-sys = { version = "0.3.64", features = ["HtmlInputElement", "WindowClient", "Navigator", "Window", "UrlSearchParams", "Location"] }
+wasm-bindgen = "0.2.104"
+wasm-bindgen-futures = "0.4.43"
+futures-timer = "3.0.2"
+
+# Internal dependencies
+river-core = { path = "common", package = "river-core", default-features = true }
+river = { path = "cli", package = "river" }
+
+# Freenet dependencies
+freenet-scaffold = "0.2.2"
+freenet-scaffold-macro = "0.2.2"
+freenet-stdlib = { version = "0.1.35", features = ["contract"] }
+
+[workspace.package]
+version = "0.1.3"
+edition = "2021"
+
+[profile.release]
+opt-level = 'z'     # Optimize for size
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Reduce number of codegen units to increase optimizations
+panic = 'abort'     # Abort on panic
+strip = true        # Strip symbols from binary
+
+# Optimize dependencies in release mode
+[profile.release.package."*"]
+opt-level = 'z'     # Optimize all dependencies for size as well
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"
+
+[workspace.metadata.dx]
+toolchain = "nightly"
+
+# We need to pin specific versions to resolve dependency conflicts

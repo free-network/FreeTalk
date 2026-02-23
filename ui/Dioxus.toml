@@ -1,0 +1,53 @@
+[application]
+
+# App (Project) Name
+name = "chatui"
+
+# Dioxus App Default Platform
+# web, desktop, fullstack
+default_platform = "web"
+
+# `build` & `serve` dist path
+out_dir = "dist"
+
+# resource (assets) file folder
+asset_dir = "assets"
+
+[web.app]
+
+# base_path will be uncommented during building by the uncomment-base-path task in Makefile.toml, and then
+# re-commented afterwards - so except during building it should be commented out I've requested an
+# improvement to dioxus to avoid this, see https://github.com/DioxusLabs/dioxus/issues/3745
+
+#base_path = "v1/contract/web/raAqMhMG7KUpXBU2SxgCQ3Vh4PYjttxdSWd9ftV7RLv"
+
+# HTML title tag content
+title = "River"
+
+[web.watcher]
+
+# when watcher trigger, regenerate the `index.html`
+reload_html = true
+
+# which files or dirs will be watcher monitoring
+watch_path = ["src", "assets"]
+
+# include `assets` in web platform
+[web.resource]
+
+# CSS style file
+#style = ["bulma.min.css", "main.css", "fontawesome/css/all.min.css"]
+
+# Javascript code file
+script = []
+
+# Static files to be included in the project
+include = []
+
+[web.resource.dev]
+
+# Javascript code file
+# serve: [dev-server] only
+script = []
+
+

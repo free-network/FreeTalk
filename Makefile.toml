@@ -1,0 +1,431 @@
+[config]
+skip_core_tasks = true
+default_to_workspace = false
+
+[env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+CARGO_MAKE_WORKSPACE_INCLUDE_MEMBERS = ["contracts/room-contract", "contracts/web-container-contract", "delegates/chat-delegate", "ui"]
+CONTRACT_TARGET = "wasm32-unknown-unknown"
+CONTRACT_NAME = "room_contract"
+DELEGATE_NAME = "chat_delegate"
+BUILD_PROFILE = "release"
+# Comma-separated list of features to enable
+UI_FEATURES = ""
+
+[tasks.clean]
+description = "Clean build artifacts"
+command = "cargo"
+args = ["clean"]
+
+[tasks.build-tailwind]
+description = "Build Tailwind CSS"
+command = "npm"
+args = ["run", "build:css"]
+cwd = "./ui"
+
+[tasks.watch-tailwind]
+description = "Watch and rebuild Tailwind CSS"
+command = "npm"
+args = ["run", "watch:css"]
+cwd = "./ui"
+
+[tasks.build-room-contract]
+description = "Build the room contract WASM"
+command = "cargo"
+args = ["build", "--profile", "${BUILD_PROFILE}", "--target", "${CONTRACT_TARGET}", "-p", "room-contract", "--target-dir", "target"]
+
+[tasks.sync-cli-wasm]
+description = "Sync room contract WASM to CLI package for crates.io publishing"
+dependencies = ["build-room-contract"]
+script = '''
+#!/bin/bash
+set -e
+
+# Source and destination paths
+SOURCE_WASM="ui/public/contracts/room_contract.wasm"
+DEST_WASM="cli/contracts/room_contract.wasm"
+
+# Check if source exists
+if [ ! -f "$SOURCE_WASM" ]; then
+    echo "Error: Source WASM not found at $SOURCE_WASM"
+    echo "Please run 'cargo make build-room-contract' first"
+    exit 1
+fi
+
+# Create destination directory if it doesn't exist
+mkdir -p cli/contracts
+
+# Copy the WASM file
+cp "$SOURCE_WASM" "$DEST_WASM"
+echo "✓ Synced room_contract.wasm to CLI package"
+
+# Check if the files differ (useful for CI)
+if ! cmp -s "$SOURCE_WASM" "$DEST_WASM"; then
+    echo "Warning: WASM files were out of sync!"
+    exit 1
+fi
+'''
+
+[tasks.publish-cli-dry-run]
+description = "Test publishing River CLI to crates.io (dry run)"
+dependencies = ["sync-cli-wasm"]
+command = "cargo"
+args = ["publish", "--dry-run", "--allow-dirty"]
+cwd = "./cli"
+
+[tasks.publish-cli]
+description = "Publish River CLI to crates.io"
+dependencies = ["sync-cli-wasm"]
+script = '''
+#!/bin/bash
+set -e
+
+echo "⚠️  About to publish River CLI to crates.io!"
+echo "Have you:"
+echo "  1. Updated the version in cli/Cargo.toml?"
+echo "  2. Committed all changes?"
+echo "  3. Created a git tag?"
+echo ""
+read -p "Continue? (y/N) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+fi
+
+cd cli
+cargo publish
+'''
+
+[tasks.build-chat-delegate]
+description = "Build the chat delegate WASM"
+command = "cargo"
+args = ["build", "--profile", "${BUILD_PROFILE}", "--target", "${CONTRACT_TARGET}", "-p", "chat-delegate", "--target-dir", "target"]
+
+[tasks.build-web-container]
+description = "Build the web container contract WASM"
+command = "cargo"
+args = ["build", "--profile", "${BUILD_PROFILE}", "--target", "${CONTRACT_TARGET}", "-p", "web-container-contract", "--target-dir", "target"]
+
+[tasks.build-web-container-tool]
+description = "Build the web container tool for native platform"
+dependencies = ["build-web-container"]
+command = "cargo"
+args = ["build", "--profile", "${BUILD_PROFILE}", "--package", "web-container-tool", "--target-dir", "target/native", "--target", "x86_64-unknown-linux-gnu"]
+
+[tasks.build-ui]
+description = "Build the Dioxus UI"
+# build-chat-delegate is required because UI includes delegate WASM via include_bytes!
+dependencies = ["build-chat-delegate", "build-tailwind", "uncomment-base-path"]
+command = "dx"
+args = ["build", "--${BUILD_PROFILE}", "--features", "${UI_FEATURES}"]
+cwd = "./ui"
+
+[tasks.uncomment-base-path]
+private = true
+script = '''
+# Match lines starting with optional whitespace, '#', optional whitespace, 'base_path', optional whitespace, '=', and the rest.
+# Replace with the leading whitespace and 'base_path = ...', effectively removing the '#' and the space after it.
+sed -i 's/^\([[:space:]]*\)#[[:space:]]*\(base_path[[:space:]]*=.*\)/\1\2/' ui/Dioxus.toml
+'''
+
+[tasks.comment-base-path]
+private = true
+script = '''
+# Match lines starting with optional whitespace, 'base_path', optional whitespace, '=', and the rest.
+# Replace with the leading whitespace, '#', then 'base_path = ...'.
+sed -i 's/^\([[:space:]]*\)\(base_path[[:space:]]*=.*\)/\1#\2/' ui/Dioxus.toml
+'''
+
+[tasks.touch-ui-files]
+private = true
+script = '''
+# Touch main.rs to force rebuild
+touch ui/src/main.rs
+'''
+
+[tasks.build-ui-with-cleanup]
+description = "Build the Dioxus UI and clean up afterwards"
+dependencies = ["touch-ui-files", "build-ui", "comment-base-path"]
+
+
+[tasks.compress-webapp]
+description = "Compress the built webapp into tar.xz"
+dependencies = ["build-ui-with-cleanup"]
+script = '''
+mkdir -p target/webapp
+cd target/dx/river-ui/${BUILD_PROFILE}/web/public && \
+tar -cJf ../../../../../webapp/webapp.tar.xz *
+'''
+
+[tasks.sign-webapp]
+description = "Sign the compressed webapp"
+dependencies = ["compress-webapp", "build-web-container-tool", "build-web-container"]
+script = '''
+seconds=$(date +%s)
+version=$(( seconds / 60 ))
+target/native/x86_64-unknown-linux-gnu/${BUILD_PROFILE}/web-container-tool sign \
+  --input target/webapp/webapp.tar.xz \
+  --output target/webapp/webapp.metadata \
+  --parameters target/webapp/webapp.parameters \
+  --version $version
+'''
+
+[tasks.build-ui-example]
+description = "Build the Dioxus UI with example data"
+env = { UI_FEATURES = "example-data" }
+# build-chat-delegate is required because UI includes delegate WASM via include_bytes!
+dependencies = ["build-chat-delegate"]
+command = "dx"
+args = ["build", "--${BUILD_PROFILE}", "--features", "${UI_FEATURES}"]
+cwd = "./ui"
+
+[tasks.build-ui-no-sync]
+description = "Build the Dioxus UI without Freenet sync"
+env = { UI_FEATURES = "no-sync" }
+# build-chat-delegate is required because UI includes delegate WASM via include_bytes!
+dependencies = ["build-chat-delegate"]
+command = "dx"
+args = ["build", "--${BUILD_PROFILE}", "--features", "${UI_FEATURES}"]
+cwd = "./ui"
+
+[tasks.build-ui-example-no-sync]
+description = "Build the Dioxus UI with example data and no Freenet sync"
+env = { UI_FEATURES = "example-data,no-sync" }
+# build-chat-delegate is required because UI includes delegate WASM via include_bytes!
+dependencies = ["build-chat-delegate"]
+command = "dx"
+args = ["build", "--${BUILD_PROFILE}", "--features", "${UI_FEATURES}"]
+cwd = "./ui"
+
+[tasks.test-web-container]
+description = "Run tests for web-container-contract"
+command = "cargo"
+args = ["test", "--package", "web-container-contract", "--target-dir", "target/native", "--target", "x86_64-unknown-linux-gnu", "--lib", "--bins"]
+
+[tasks.test-web-container-integration]
+description = "Run integration tests for web-container-contract"
+command = "cargo"
+args = ["test", "--package", "web-container-contract", "--target-dir", "target/native", "--target", "x86_64-unknown-linux-gnu", "--test", "integration_tests"]
+
+[tasks.test-room-contract]
+description = "Run tests for room-contract"
+command = "cargo"
+args = ["test", "--package", "room-contract", "--target-dir", "target/native", "--target", "x86_64-unknown-linux-gnu"]
+
+[tasks.test-scaffold]
+description = "Run tests for scaffold crate"
+command = "cargo"
+args = ["test", "--package", "freenet-scaffold", "--target-dir", "target/native", "--target", "x86_64-unknown-linux-gnu"]
+
+[tasks.test-common]
+description = "Run tests for common crate"
+command = "cargo"
+args = ["test", "--package", "river-core", "--target-dir", "target/native", "--target", "x86_64-unknown-linux-gnu"]
+
+[tasks.test-chat-delegate]
+description = "Run tests for chat-delegate"
+command = "cargo"
+args = ["test", "--package", "chat-delegate", "--target-dir", "target/native", "--target", "x86_64-unknown-linux-gnu"]
+
+[tasks.test]
+description = "Run all tests"
+dependencies = ["test-web-container", "test-web-container-integration", "test-room-contract", "test-scaffold", "test-common", "test-chat-delegate"]
+
+[tasks.update-published-contract]
+description = "Build, publish, and update the published contract files"
+dependencies = ["sign-webapp"]
+script = '''
+# Get the contract ID without publishing
+contract_id=$(fdev get-contract-id \
+  --code target/wasm32-unknown-unknown/release/web_container_contract.wasm \
+  --parameters target/webapp/webapp.parameters)
+
+# Update published files
+mkdir -p published-contract
+cp target/wasm32-unknown-unknown/release/web_container_contract.wasm published-contract/
+cp target/webapp/webapp.parameters published-contract/
+echo "$contract_id" > published-contract/contract-id.txt
+echo "Published contract updated with ID: $contract_id"
+echo "Please commit the changes to git"
+'''
+
+[tasks.publish-river]
+description = "Publish River to Freenet using the committed contract version"
+dependencies = ["sign-webapp"]
+script = '''
+if [ ! -f "published-contract/contract-id.txt" ]; then
+    echo "No published contract found"
+    exit 1
+fi
+contract_id=$(cat published-contract/contract-id.txt)
+echo "Publishing using committed contract: $contract_id"
+fdev network publish \
+  --code published-contract/web_container_contract.wasm \
+  --parameters published-contract/webapp.parameters \
+  contract \
+  --webapp-archive target/webapp/webapp.tar.xz \
+  --webapp-metadata target/webapp/webapp.metadata
+'''
+
+[tasks.publish-river-debug]
+description = "Publish River to Freenet in debug mode"
+env = { BUILD_PROFILE = "dev" }
+dependencies = ["sign-webapp"]
+script = '''
+if [ ! -f "published-contract/contract-id.txt" ]; then
+    echo "No published contract found"
+    exit 1
+fi
+contract_id=$(cat published-contract/contract-id.txt)
+echo "Publishing using committed contract in debug mode: $contract_id"
+fdev network publish \
+  --code published-contract/web_container_contract.wasm \
+  --parameters published-contract/webapp.parameters \
+  contract \
+  --webapp-archive target/webapp/webapp.tar.xz \
+  --webapp-metadata target/webapp/webapp.metadata
+'''
+
+# Test publishing tasks - use separate keypair to avoid affecting production
+[tasks.generate-test-keys]
+description = "Generate test keypair for publishing (one-time)"
+dependencies = ["build-web-container-tool"]
+script = '''
+mkdir -p test-contract
+target/native/x86_64-unknown-linux-gnu/${BUILD_PROFILE}/web-container-tool generate \
+  --output test-contract/test-keys.toml
+echo "Test keys generated in test-contract/test-keys.toml"
+echo "Run 'cargo make sign-webapp-test' to sign with test keys"
+'''
+
+[tasks.compress-webapp-test]
+description = "Retarget and compress webapp for test contract"
+dependencies = ["build-ui-with-cleanup", "build-web-container"]
+script = '''
+PROD_ID="raAqMhMG7KUpXBU2SxgCQ3Vh4PYjttxdSWd9ftV7RLv"
+
+# Compute test contract ID from test parameters
+if [ -f "target/webapp/webapp-test.parameters" ]; then
+    TEST_ID=$(fdev get-contract-id \
+        --code target/wasm32-unknown-unknown/release/web_container_contract.wasm \
+        --parameters target/webapp/webapp-test.parameters 2>/dev/null)
+elif [ -f "test-contract/contract-id.txt" ]; then
+    TEST_ID=$(cat test-contract/contract-id.txt)
+else
+    echo "ERROR: Cannot determine test contract ID"
+    exit 1
+fi
+
+echo "Retargeting webapp: $PROD_ID → $TEST_ID"
+
+# Copy build output to temp dir
+TEMP_DIR=$(mktemp -d)
+cp -r target/dx/river-ui/${BUILD_PROFILE}/web/public/* "$TEMP_DIR/"
+
+# Replace contract ID in all files (HTML, JS, WASM - all same byte length)
+find "$TEMP_DIR" -type f \( -name "*.html" -o -name "*.js" -o -name "*.wasm" \) \
+    -exec sed -i "s|$PROD_ID|$TEST_ID|g" {} +
+
+# Compress
+mkdir -p target/webapp
+(cd "$TEMP_DIR" && tar -cJf "$OLDPWD/target/webapp/webapp-test.tar.xz" *)
+rm -rf "$TEMP_DIR"
+echo "Test webapp: target/webapp/webapp-test.tar.xz"
+'''
+
+[tasks.sign-webapp-test]
+description = "Sign webapp with test keypair"
+dependencies = ["compress-webapp-test", "build-web-container-tool", "build-web-container"]
+script = '''
+if [ ! -f "test-contract/test-keys.toml" ]; then
+    echo "No test keys found. Run 'cargo make generate-test-keys' first"
+    exit 1
+fi
+seconds=$(date +%s)
+version=$(( seconds / 60 ))
+target/native/x86_64-unknown-linux-gnu/${BUILD_PROFILE}/web-container-tool sign \
+  --input target/webapp/webapp-test.tar.xz \
+  --output target/webapp/webapp-test.metadata \
+  --parameters target/webapp/webapp-test.parameters \
+  --version $version \
+  --key-file test-contract/test-keys.toml
+'''
+
+[tasks.update-test-contract]
+description = "Update test contract files without publishing"
+dependencies = ["sign-webapp-test"]
+script = '''
+contract_id=$(fdev get-contract-id \
+  --code target/wasm32-unknown-unknown/release/web_container_contract.wasm \
+  --parameters target/webapp/webapp-test.parameters)
+
+mkdir -p test-contract
+cp target/wasm32-unknown-unknown/release/web_container_contract.wasm test-contract/
+cp target/webapp/webapp-test.parameters test-contract/webapp.parameters
+echo "$contract_id" > test-contract/contract-id.txt
+echo "Test contract updated with ID: $contract_id"
+'''
+
+[tasks.publish-river-test]
+description = "Publish River to test contract (separate from production)"
+dependencies = ["sign-webapp-test"]
+script = '''
+if [ ! -f "test-contract/test-keys.toml" ]; then
+    echo "No test keys found. Run 'cargo make generate-test-keys' first"
+    exit 1
+fi
+
+contract_id=$(fdev get-contract-id \
+  --code target/wasm32-unknown-unknown/release/web_container_contract.wasm \
+  --parameters target/webapp/webapp-test.parameters)
+
+echo "Publishing TEST contract: $contract_id"
+fdev network publish \
+  --code target/wasm32-unknown-unknown/release/web_container_contract.wasm \
+  --parameters target/webapp/webapp-test.parameters \
+  contract \
+  --webapp-archive target/webapp/webapp-test.tar.xz \
+  --webapp-metadata target/webapp/webapp-test.metadata
+
+echo ""
+echo "Test River available at: http://127.0.0.1:7509/v1/contract/web/$contract_id/"
+echo "Test contract ID: $contract_id"
+'''
+
+[tasks.clippy]
+description = "Run clippy on all packages"
+command = "cargo"
+args = ["clippy", "--manifest-path", "./Cargo.toml", "--workspace", "--all-targets", "--", "-D", "warnings"]
+
+[tasks.build]
+description = "Build everything in release mode (optimized)"
+dependencies = ["build-ui-with-cleanup", "build-web-container"]
+
+[tasks.dev-example]
+description = "Development build with example data"
+env = { UI_FEATURES = "example-data", BUILD_PROFILE = "dev" }
+# build-chat-delegate is required because UI includes delegate WASM via include_bytes!
+dependencies = ["build-chat-delegate", "build-tailwind"]
+command = "dx"
+args = ["serve", "--features", "${UI_FEATURES}"]
+cwd = "./ui"
+
+[tasks.build-example]
+description = "Build everything in release mode with example data"
+dependencies = ["build-ui-example"]
+
+[tasks.build-debug]
+description = "Build everything in debug mode (faster builds)"
+env = { BUILD_PROFILE = "dev" }
+dependencies = ["build-ui"]
+
+[tasks.dev]
+description = "Development build"
+env = { UI_FEATURES = "" }
+# build-chat-delegate is required because UI includes delegate WASM via include_bytes!
+dependencies = ["build-chat-delegate"]
+command = "dx"
+args = ["serve"]
+cwd = "./ui"
+

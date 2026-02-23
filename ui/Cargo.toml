@@ -1,0 +1,78 @@
+[package]
+name = "freetalk-ui"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = [] # Add a default feature set if needed, often empty
+delegate = [] # Define the delegate feature
+example-data = []
+no-sync = []
+
+[dependencies]
+bs58 = "0.5.0"
+serde.workspace = true
+# Cryptography
+curve25519-dalek.workspace = true
+x25519-dalek.workspace = true
+# We can use rand_core in the UI crate because the wasm runs in a browser
+ed25519-dalek = { workspace = true, features = ["rand_core"] }
+sha2.workspace = true
+aes-gcm.workspace = true
+
+# Randomness
+rand.workspace = true
+getrandom = { version = "0.2.15", features = ["js", "wasm-bindgen", "js-sys"], default-features = false }
+
+# UI Framework
+dioxus = { version = "0.7.2", features = ["web"] }
+dioxus-free-icons = { version = "0.10.0", features = ["font-awesome-brands", "font-awesome-regular", "font-awesome-solid"] }
+
+# Web-related
+web-sys = { workspace = true, features = [
+    "Clipboard",
+    "Document",
+    "DomTokenList",
+    "Element",
+    "EventTarget",
+    "CssStyleDeclaration",
+    "HtmlElement",
+    "HtmlTextAreaElement",
+    "Navigator",
+    "Notification",
+    "NotificationOptions",
+    "NotificationPermission",
+    "Storage",
+    "VisibilityState",
+    "Window",
+    "Crypto",
+    "Headers",
+    "Response",
+    "UrlSearchParams"
+] }
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+lipsum = "0.9.1"
+
+# Utilities
+blake3.workspace = true
+chrono.workspace = true
+markdown = "1.0.0-alpha.21"
+ciborium = "0.2.2"
+js-sys = "0.3.64"
+thiserror = "2.0.12"
+log = "0.4" # Add log crate
+
+# Internal dependencies
+river-core.workspace = true
+
+# Freenet dependencies
+freenet-scaffold.workspace = true
+freenet-stdlib = { workspace = true, features = ["net"] }
+
+futures = "0.3.30"
+futures-timer = "3.0.3"
+
+# Add this section for the build script
+[build-dependencies]
+chrono = "0.4"

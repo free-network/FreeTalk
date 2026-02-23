@@ -1,0 +1,6 @@
+[project]
+id = "freetalk"
+
+[app]
+type = "dioxus"
+package = "freetalk-ui"
