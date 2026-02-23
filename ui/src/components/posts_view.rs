@@ -1,7 +1,9 @@
 use crate::components::app::{Route, CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
+use crate::components::conversation::message_input::PostInput;
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::markdown::text_to_html;
+use crate::util::messaging::{send_message, ReplyContext};
 use crate::util::{format_utc_as_full_datetime, format_utc_as_local_time};
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
@@ -9,6 +11,7 @@ use river_core::room_state::content::{TextContentV1, CONTENT_TYPE_TEXT};
 use river_core::room_state::member::MemberId;
 use river_core::room_state::member_info::MemberInfoV1;
 use river_core::room_state::message::{MessagesV1, RoomMessageBody};
+use river_core::room_state::privacy::PrivacyMode;
 use std::collections::HashMap;
 
 /// A single post for display (text messages only, no replies)
@@ -125,6 +128,8 @@ fn decrypt_text_content(
 
 #[component]
 pub fn PostsView() -> Element {
+    let replying_to = use_signal(|| None::<ReplyContext>);
+
     let current_room_data = {
         let current_room = CURRENT_ROOM.read();
         if let Some(key) = current_room.owner_key {
@@ -134,6 +139,8 @@ pub fn PostsView() -> Element {
             None
         }
     };
+
+    let has_room_selected = current_room_data.is_some();
 
     // Get room name
     let current_room_label = use_memo({
@@ -174,131 +181,210 @@ pub fn PostsView() -> Element {
         None
     });
 
-    rsx! {
-        div { class: "flex-1 flex flex-col min-w-0 bg-bg",
-            // Header with user info
-            {
-                current_room_data.as_ref().map(|room_data| {
-                    let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
-                    let self_nickname = room_data.room_state.member_info.member_info
-                        .iter()
-                        .find(|ami| ami.member_info.member_id == self_member_id)
-                        .map(|ami| {
-                            match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, &room_data.secrets) {
-                                Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-                                Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
-                            }
-                        })
-                        .unwrap_or_else(|| "You".to_string());
-                    let self_avatar = get_avatar(&self_member_id);
-                    rsx! {
-                        // User profile header
-                        div {
-                            class: "flex items-center gap-3 px-6 py-4 cursor-pointer hover:bg-surface/50 transition-colors",
-                            onclick: move |_| {
-                                MEMBER_INFO_MODAL.with_mut(|signal| {
-                                    signal.member = Some(self_member_id);
-                                });
-                            },
-                            img {
-                                src: "{self_avatar}",
-                                alt: "Your avatar",
-                                class: "w-16 h-16 rounded-full"
-                            }
-                            span { class: "text-3xl font-medium text-text",
-                                "{self_nickname}"
-                            }
-                        }
-
-                        // Room name
-                        div { class: "px-6 py-2 border-b border-border",
-                            h2 { class: "text-lg font-semibold text-text-muted",
-                                "{current_room_label}"
-                            }
-                        }
-                    }
-                })
+    // Message sending handler
+    let handle_send_message =
+        move |(title_text, message_text, reply_ctx): (String, String, Option<ReplyContext>)| {
+            if message_text.is_empty() {
+                return;
             }
 
-            // Posts list
-            div { class: "flex-1 overflow-y-auto",
-                div { class: "max-w-4xl mx-auto px-4 py-6",
-                    {
-                        match posts.read().as_ref() {
-                            Some(posts) if !posts.is_empty() => {
-                                rsx! {
-                                    div { class: "space-y-8",
-                                        {posts.iter().map(|post| {
-                                            let time_str = format_utc_as_local_time(post.time.timestamp_millis());
-                                            let full_time_str = format_utc_as_full_datetime(post.time.timestamp_millis());
-                                            let author_id = post.author_id;
-                                            let post_id = post.id.clone();
-                                            rsx! {
-                                                Link {
-                                                    key: "{post.id}",
-                                                    to: Route::Post { id: post_id },
-                                                    class: "block bg-panel rounded-2xl border border-border shadow-sm overflow-hidden hover:border-accent/50 transition-colors",
-                                                    // Post header with author
-                                                    div { class: "flex items-center gap-4 px-6 py-4 border-b border-border bg-surface/30",
-                                                        img {
-                                                            src: "{get_avatar(&post.author_id)}",
-                                                            alt: "Avatar",
-                                                            class: "w-14 h-14 rounded-full"
-                                                        }
-                                                        div { class: "flex-1 min-w-0",
-                                                            div {
-                                                                class: "text-lg font-semibold text-text",
-                                                                onclick: move |e| {
-                                                                    e.stop_propagation();
-                                                                    MEMBER_INFO_MODAL.with_mut(|signal| {
-                                                                        signal.member = Some(author_id);
-                                                                    });
-                                                                },
-                                                                "{post.author_name}"
+            // Get room data for sending
+            let room_info = {
+                let current_room = CURRENT_ROOM.read();
+                if let Some(key) = current_room.owner_key {
+                    let rooms = ROOMS.read();
+                    if let Some(room_data) = rooms.map.get(&key) {
+                        let is_private = room_data
+                            .room_state
+                            .configuration
+                            .configuration
+                            .privacy_mode
+                            == PrivacyMode::Private;
+                        let secret_opt = if is_private {
+                            room_data
+                                .secrets
+                                .iter()
+                                .max_by_key(|(v, _)| *v)
+                                .map(|(v, s)| (*s, *v))
+                        } else {
+                            None
+                        };
+                        Some((
+                            key,
+                            room_data.room_key(),
+                            room_data.self_sk.clone(),
+                            room_data.room_state.clone(),
+                            is_private,
+                            secret_opt,
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            if let Some((current_room, room_key, self_sk, room_state_clone, is_private, secret_opt)) =
+                room_info
+            {
+                spawn(async move {
+                    send_message(
+                        current_room,
+                        room_key,
+                        self_sk,
+                        room_state_clone,
+                        is_private,
+                        secret_opt,
+                        title_text,
+                        message_text,
+                        reply_ctx,
+                    )
+                    .await;
+                });
+            }
+        };
+
+    rsx! {
+        div { class: "flex-1 flex flex-col min-w-0 bg-bg",
+            // Show no-board-selected message or header with user info
+            if !has_room_selected {
+                div { class: "flex-1 flex flex-col items-center justify-center text-text-muted",
+                    p { class: "text-xl", "Select a board from the sidebar above or create one" }
+                }
+            } else {
+                {
+                    current_room_data.as_ref().map(|room_data| {
+                        let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
+                        let self_nickname = room_data.room_state.member_info.member_info
+                            .iter()
+                            .find(|ami| ami.member_info.member_id == self_member_id)
+                            .map(|ami| {
+                                match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, &room_data.secrets) {
+                                    Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+                                    Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
+                                }
+                            })
+                            .unwrap_or_else(|| "You".to_string());
+                        let self_avatar = get_avatar(&self_member_id);
+                        rsx! {
+                            // User profile header
+                            div {
+                                class: "flex items-center gap-3 px-6 py-4 cursor-pointer hover:bg-surface/50 transition-colors",
+                                onclick: move |_| {
+                                    MEMBER_INFO_MODAL.with_mut(|signal| {
+                                        signal.member = Some(self_member_id);
+                                    });
+                                },
+                                img {
+                                    src: "{self_avatar}",
+                                    alt: "Your avatar",
+                                    class: "w-16 h-16 rounded-full"
+                                }
+                                span { class: "text-3xl font-medium text-text",
+                                    "{self_nickname}"
+                                }
+                            }
+
+                            // Room name
+                            div { class: "px-6 py-2 border-b border-border",
+                                h2 { class: "text-lg font-semibold text-text-muted",
+                                    "{current_room_label}"
+                                }
+                            }
+                        }
+                    })
+                }
+
+                // Posts list
+                div { class: "flex-1 overflow-y-auto",
+                    div { class: "max-w-4xl mx-auto px-4 py-6",
+                        {
+                            match posts.read().as_ref() {
+                                Some(posts) if !posts.is_empty() => {
+                                    rsx! {
+                                        div { class: "space-y-8",
+                                            {posts.iter().map(|post| {
+                                                let time_str = format_utc_as_local_time(post.time.timestamp_millis());
+                                                let full_time_str = format_utc_as_full_datetime(post.time.timestamp_millis());
+                                                let author_id = post.author_id;
+                                                let post_id = post.id.clone();
+                                                rsx! {
+                                                    Link {
+                                                        key: "{post.id}",
+                                                        to: Route::Post { id: post_id },
+                                                        class: "block bg-panel rounded-2xl border border-border shadow-sm overflow-hidden hover:border-accent/50 transition-colors",
+                                                        // Post header with author
+                                                        div { class: "flex items-center gap-4 px-6 py-4 border-b border-border bg-surface/30",
+                                                            img {
+                                                                src: "{get_avatar(&post.author_id)}",
+                                                                alt: "Avatar",
+                                                                class: "w-14 h-14 rounded-full"
                                                             }
-                                                            span {
-                                                                class: if post.time_clamped {
-                                                                    "text-sm text-text-muted italic"
-                                                                } else {
-                                                                    "text-sm text-text-muted"
-                                                                },
-                                                                title: "{full_time_str}",
-                                                                if post.time_clamped { "~{time_str}" } else { "{time_str}" }
+                                                            div { class: "flex-1 min-w-0",
+                                                                div {
+                                                                    class: "text-lg font-semibold text-text",
+                                                                    onclick: move |e| {
+                                                                        e.stop_propagation();
+                                                                        MEMBER_INFO_MODAL.with_mut(|signal| {
+                                                                            signal.member = Some(author_id);
+                                                                        });
+                                                                    },
+                                                                    "{post.author_name}"
+                                                                }
+                                                                span {
+                                                                    class: if post.time_clamped {
+                                                                        "text-sm text-text-muted italic"
+                                                                    } else {
+                                                                        "text-sm text-text-muted"
+                                                                    },
+                                                                    title: "{full_time_str}",
+                                                                    if post.time_clamped { "~{time_str}" } else { "{time_str}" }
+                                                                }
                                                             }
                                                         }
-                                                    }
-                                                    // Post content
-                                                    div { class: "px-6 py-6",
-                                                        // Title
-                                                        if !post.title.is_empty() {
-                                                            h2 { class: "text-2xl font-bold text-text mb-4",
-                                                                "{post.title}"
+                                                        // Post content
+                                                        div { class: "px-6 py-6",
+                                                            // Title
+                                                            if !post.title.is_empty() {
+                                                                h2 { class: "text-2xl font-bold text-text mb-4",
+                                                                    "{post.title}"
+                                                                }
                                                             }
-                                                        }
-                                                        // Content
-                                                        div { class: "text-lg text-text leading-relaxed",
-                                                            span {
-                                                                class: "prose prose-lg dark:prose-invert max-w-none",
-                                                                dangerous_inner_html: "{post.content_html}"
+                                                            // Content
+                                                            div { class: "text-lg text-text leading-relaxed",
+                                                                span {
+                                                                    class: "prose prose-lg dark:prose-invert max-w-none",
+                                                                    dangerous_inner_html: "{post.content_html}"
+                                                                }
                                                             }
                                                         }
                                                     }
                                                 }
-                                            }
-                                        })}
+                                            })}
+                                        }
                                     }
                                 }
-                            }
-                            _ => {
-                                rsx! {
-                                    div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
-                                        p { class: "text-xl", "No posts yet." }
-                                        p { class: "text-sm mt-2", "Be the first to share something!" }
+                                _ => {
+                                    rsx! {
+                                        div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
+                                            p { class: "text-xl", "No posts yet." }
+                                            p { class: "text-sm mt-2", "Be the first to share something!" }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                }
+
+                // Post input (compose button and modal)
+                PostInput {
+                    handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
+                        handle_send_message(msg)
+                    },
+                    replying_to: replying_to,
+                    on_request_edit_last: move |_| {},
                 }
             }
         }
@@ -308,16 +394,6 @@ pub fn PostsView() -> Element {
 /// Single post view - displays a single post by ID
 #[component]
 pub fn SinglePostView(post_id: String) -> Element {
-    let current_room_data = {
-        let current_room = CURRENT_ROOM.read();
-        if let Some(key) = current_room.owner_key {
-            let rooms = ROOMS.read();
-            rooms.map.get(&key).cloned()
-        } else {
-            None
-        }
-    };
-
     // Find the post by ID
     let post = use_memo(move || {
         let current_room = CURRENT_ROOM.read();
