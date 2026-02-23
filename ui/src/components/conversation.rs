@@ -1427,32 +1427,6 @@ fn MessageGroupComponent(
 
     rsx! {
         div { class: "w-full",
-            // Header with name and time
-            div { class: "flex items-baseline gap-2 mb-2 px-4",
-                span {
-                    class: "text-sm font-medium text-text cursor-pointer hover:text-accent transition-colors",
-                    title: "Member ID: {group.author_id}",
-                    onclick: move |_| {
-                        MEMBER_INFO_MODAL.with_mut(|signal| {
-                            signal.member = Some(group.author_id);
-                        });
-                    },
-                    "{group.author_name}"
-                }
-                if is_self {
-                    span { class: "text-xs text-accent font-medium", "(you)" }
-                }
-                span {
-                    class: if time_clamped {
-                        "text-xs text-text-muted cursor-default italic opacity-70"
-                    } else {
-                        "text-xs text-text-muted cursor-default"
-                    },
-                    title: "{full_time_str}",
-                    if time_clamped { "~{time_str}" } else { "{time_str}" }
-                }
-            }
-
             // Messages - full width blocks
             div { class: "space-y-0",
                 {
@@ -1608,11 +1582,40 @@ fn MessageGroupComponent(
                                                                 class: if is_self { "text-accent" } else { "text-text-muted" }
                                                             }
                                                         }
-                                                        // Title and content
+                                                        // Author, time, title and content
                                                         div { class: "flex-1 min-w-0",
+                                                            // Author and time
+                                                            div { class: "flex items-baseline justify-between mb-3",
+                                                                // Author name and (you) indicator
+                                                                div { class: "flex items-baseline gap-2",
+                                                                    span {
+                                                                        class: "text-sm font-medium text-text cursor-pointer hover:text-accent transition-colors",
+                                                                        title: "Member ID: {group.author_id}",
+                                                                        onclick: move |_| {
+                                                                            MEMBER_INFO_MODAL.with_mut(|signal| {
+                                                                                signal.member = Some(group.author_id);
+                                                                            });
+                                                                        },
+                                                                        "{group.author_name}"
+                                                                    }
+                                                                    if is_self {
+                                                                        span { class: "text-xs text-accent font-medium", "(you)" }
+                                                                    }
+                                                                }
+                                                                // Time on the right
+                                                                span {
+                                                                    class: if time_clamped {
+                                                                        "text-xs text-text-muted cursor-default italic opacity-70"
+                                                                    } else {
+                                                                        "text-xs text-text-muted cursor-default"
+                                                                    },
+                                                                    title: "{full_time_str}",
+                                                                    if time_clamped { "~{time_str}" } else { "{time_str}" }
+                                                                }
+                                                            }
                                                             // Title (if present)
                                                             if !msg.title_text.is_empty() {
-                                                                h3 { class: "text-lg font-semibold text-text mb-2",
+                                                                h3 { class: "text-lg font-semibold text-text mb-3",
                                                                     "{msg.title_text}"
                                                                 }
                                                             }
