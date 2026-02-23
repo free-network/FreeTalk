@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+use std::rc::Rc;
 use dioxus::prelude::*;
 
 mod components;
@@ -82,5 +83,7 @@ fn main() {
         }
     }
 
-    launch(App);
+    LaunchBuilder::new()
+        .with_cfg(dioxus::web::Config::new().history(Rc::new(dioxus::web::HashHistory::default())))
+        .launch(App);
 }
