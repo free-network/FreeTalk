@@ -46,15 +46,11 @@ pub fn PostInput(
 
     rsx! {
         // Compose button bar
-        div { class: "flex-shrink-0 border-t border-border bg-panel",
-            div { class: "max-w-4xl mx-auto px-4 py-3",
-                button {
-                    class: "flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors",
-                    onclick: move |_| show_modal.set(true),
-                    Icon { icon: FaPen, width: 14, height: 14 }
-                    "Compose Post"
-                }
-            }
+        button {
+            class: "flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors",
+            onclick: move |_| show_modal.set(true),
+            Icon { icon: FaPen, width: 14, height: 14 }
+            "Compose Post"
         }
 
         // Compose modal

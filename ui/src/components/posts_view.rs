@@ -142,29 +142,6 @@ pub fn PostsView() -> Element {
 
     let has_room_selected = current_room_data.is_some();
 
-    // Get room name
-    let current_room_label = use_memo({
-        move || {
-            let current_room = CURRENT_ROOM.read();
-            if let Some(key) = current_room.owner_key {
-                let rooms = ROOMS.read();
-                if let Some(room_data) = rooms.map.get(&key) {
-                    let sealed_name = &room_data
-                        .room_state
-                        .configuration
-                        .configuration
-                        .display
-                        .name;
-                    return match unseal_bytes_with_secrets(sealed_name, &room_data.secrets) {
-                        Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-                        Err(_) => sealed_name.to_string_lossy(),
-                    };
-                }
-            }
-            "No Room Selected".to_string()
-        }
-    });
-
     // Get posts (memoized)
     let posts = use_memo(move || {
         let current_room = CURRENT_ROOM.read();
@@ -268,28 +245,33 @@ pub fn PostsView() -> Element {
                             .unwrap_or_else(|| "You".to_string());
                         let self_avatar = get_avatar(&self_member_id);
                         rsx! {
-                            // User profile header
-                            div {
-                                class: "flex items-center gap-3 px-6 py-4 cursor-pointer hover:bg-surface/50 transition-colors",
-                                onclick: move |_| {
-                                    MEMBER_INFO_MODAL.with_mut(|signal| {
-                                        signal.member = Some(self_member_id);
-                                    });
-                                },
-                                img {
-                                    src: "{self_avatar}",
-                                    alt: "Your avatar",
-                                    class: "w-16 h-16 rounded-full"
+                            div { class:"flex justify-between",
+                                // User profile header
+                                div {
+                                    class: "flex items-center gap-3 px-6 py-4 cursor-pointer hover:bg-surface/50 transition-colors",
+                                    onclick: move |_| {
+                                        MEMBER_INFO_MODAL.with_mut(|signal| {
+                                            signal.member = Some(self_member_id);
+                                        });
+                                    },
+                                    img {
+                                        src: "{self_avatar}",
+                                        alt: "Your avatar",
+                                        class: "w-16 h-16 rounded-full"
+                                    }
+                                    span { class: "text-3xl font-medium text-text",
+                                        "{self_nickname}"
+                                    }
                                 }
-                                span { class: "text-3xl font-medium text-text",
-                                    "{self_nickname}"
-                                }
-                            }
-
-                            // Room name
-                            div { class: "px-6 py-2 border-b border-border",
-                                h2 { class: "text-lg font-semibold text-text-muted",
-                                    "{current_room_label}"
+                                div {
+                                    // Post input (compose button and modal)
+                                    PostInput {
+                                        handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
+                                            handle_send_message(msg)
+                                        },
+                                        replying_to: replying_to,
+                                        on_request_edit_last: move |_| {},
+                                    }
                                 }
                             }
                         }
@@ -376,15 +358,6 @@ pub fn PostsView() -> Element {
                             }
                         }
                     }
-                }
-
-                // Post input (compose button and modal)
-                PostInput {
-                    handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
-                        handle_send_message(msg)
-                    },
-                    replying_to: replying_to,
-                    on_request_edit_last: move |_| {},
                 }
             }
         }
