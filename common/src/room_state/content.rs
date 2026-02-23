@@ -83,11 +83,11 @@ pub struct ActionContentV1 {
 
 impl ActionContentV1 {
     /// Create an edit action
-    pub fn edit(target: MessageId, new_text: String) -> Self {
+    pub fn edit(target: MessageId, new_title: String, new_text: String) -> Self {
         Self {
             action_type: ACTION_TYPE_EDIT,
             target,
-            payload: encode_cbor(&EditPayload { new_text }),
+            payload: encode_cbor(&EditPayload { new_title, new_text }),
         }
     }
 
@@ -152,6 +152,7 @@ impl ActionContentV1 {
 /// Payload for edit actions
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct EditPayload {
+    pub new_title: String,
     pub new_text: String,
 }
 

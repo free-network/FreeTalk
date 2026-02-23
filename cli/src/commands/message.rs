@@ -59,6 +59,9 @@ pub enum MessageCommands {
         room_id: String,
         /// Message ID (from 'message list --json', use the signature field)
         message_id: String,
+        /// New message title (optional)
+        #[clap(long, default_value = "")]
+        new_title: String,
         /// New message content
         new_content: String,
     },
@@ -389,12 +392,13 @@ pub async fn execute(command: MessageCommands, api: ApiClient, format: OutputFor
         MessageCommands::Edit {
             room_id,
             message_id,
+            new_title,
             new_content,
         } => {
             let room_owner_key = parse_room_id(&room_id)?;
             let target_message_id = parse_message_id(&message_id)?;
 
-            api.edit_message(&room_owner_key, target_message_id, new_content.clone())
+            api.edit_message(&room_owner_key, target_message_id, new_title.clone(), new_content.clone())
                 .await?;
 
             match format {

@@ -124,14 +124,14 @@ pub async fn delete_message(ctx: ActionContext, target_message_id: MessageId) {
 }
 
 /// Edit a message
-pub async fn edit_message(ctx: ActionContext, target_message_id: MessageId, new_text: String) {
+pub async fn edit_message(ctx: ActionContext, target_message_id: MessageId, new_title: String, new_text: String) {
     if new_text.is_empty() {
         return;
     }
 
     let content = if ctx.is_private {
         if let Some((secret, version)) = ctx.secret_opt {
-            let action = ActionContentV1::edit(target_message_id, new_text);
+            let action = ActionContentV1::edit(target_message_id, new_title, new_text);
             let action_bytes = action.encode();
             let (ciphertext, nonce) = encrypt_with_symmetric_key(&secret, &action_bytes);
             RoomMessageBody::private_action(ciphertext, nonce, version)
@@ -139,7 +139,7 @@ pub async fn edit_message(ctx: ActionContext, target_message_id: MessageId, new_
             return;
         }
     } else {
-        RoomMessageBody::edit(target_message_id, new_text)
+        RoomMessageBody::edit(target_message_id, new_title, new_text)
     };
 
     send_action_messages(ctx, vec![content]).await;

@@ -398,10 +398,10 @@ pub fn Conversation(
     };
 
     // Handler for editing a message
-    let handle_edit_message = move |target_message_id: MessageId, new_text: String| {
+    let handle_edit_message = move |target_message_id: MessageId, new_title: String, new_text: String| {
         if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_room() {
             spawn_local(async move {
-                crate::util::message_actions::edit_message(ctx, target_message_id, new_text).await;
+                crate::util::message_actions::edit_message(ctx, target_message_id, new_title, new_text).await;
             });
         }
     };
@@ -475,8 +475,8 @@ pub fn Conversation(
                                                             on_request_delete: move |msg_id| {
                                                                 pending_delete.set(Some(msg_id));
                                                             },
-                                                            on_edit: move |(msg_id, new_text)| {
-                                                                handle_edit_message(msg_id, new_text);
+                                                            on_edit: move |(msg_id, new_title, new_text)| {
+                                                                handle_edit_message(msg_id, new_title, new_text);
                                                             },
                                                             on_reply: move |ctx: ReplyContext| {
                                                                 replying_to.set(Some(ctx));
@@ -707,36 +707,63 @@ fn MessageContentDisplay(
 /// Shared edit form component
 #[component]
 fn MessageEditForm(
+    edit_title: Signal<String>,
     edit_text: Signal<String>,
     editing: Signal<bool>,
+    original_title: String,
     original_text: String,
     msg_id: MessageId,
-    on_edit: Option<EventHandler<(MessageId, String)>>,
+    on_edit: Option<EventHandler<(MessageId, String, String)>>,
     size: MessageSize,
 ) -> Element {
-    let (textarea_class, button_class, container_class) = match size {
+    let (input_class, textarea_class, button_class, container_class) = match size {
         MessageSize::Compact => (
+            "w-full p-2 rounded-lg text-sm bg-surface border border-border text-text",
             "w-full p-2 rounded-lg text-sm bg-surface border border-border text-text resize-y min-h-[80px]",
             "text-xs px-2 py-1 rounded",
             "space-y-2",
         ),
         _ => (
+            "w-full p-3 rounded-lg bg-surface border border-border text-text",
             "w-full p-3 rounded-lg bg-surface border border-border text-text resize-y min-h-[120px]",
             "px-4 py-2 rounded-lg",
             "space-y-4",
         ),
     };
 
-    let original_for_key = original_text.clone();
-    let original_for_save = original_text.clone();
+    let original_title_for_key = original_title.clone();
+    let original_title_for_save = original_title.clone();
+    let original_text_for_key = original_text.clone();
+    let original_text_for_save = original_text.clone();
     let msg_id_for_key = msg_id.clone();
     let msg_id_for_save = msg_id.clone();
 
     // Use Ctrl+Enter for Card, Enter for Reply
     let use_ctrl = !matches!(size, MessageSize::Compact);
 
+    // Check if content has changed
+    let has_changes = move || {
+        let new_title = edit_title.read().clone();
+        let new_text = edit_text.read().clone();
+        !new_text.is_empty() && (new_title != original_title_for_key || new_text != original_text_for_key)
+    };
+
     rsx! {
         div { class: "{container_class}",
+            // Title input
+            input {
+                r#type: "text",
+                class: "{input_class}",
+                placeholder: "Title (optional)",
+                value: "{edit_title}",
+                oninput: move |e| edit_title.set(e.value().clone()),
+                onkeydown: move |e: KeyboardEvent| {
+                    if e.key() == Key::Escape {
+                        editing.set(false);
+                    }
+                },
+            }
+            // Content textarea
             textarea {
                 class: "{textarea_class}",
                 value: "{edit_text}",
@@ -753,10 +780,9 @@ fn MessageEditForm(
                         };
                         if should_submit {
                             e.prevent_default();
-                            let new_text = edit_text.read().clone();
-                            if !new_text.is_empty() && new_text != original_for_key {
+                            if has_changes() {
                                 if let Some(ref handler) = on_edit {
-                                    handler.call((msg_id_for_key.clone(), new_text));
+                                    handler.call((msg_id_for_key.clone(), edit_title.read().clone(), edit_text.read().clone()));
                                 }
                             }
                             editing.set(false);
@@ -773,10 +799,11 @@ fn MessageEditForm(
                 button {
                     class: "{button_class} bg-accent text-white",
                     onclick: move |_| {
+                        let new_title = edit_title.read().clone();
                         let new_text = edit_text.read().clone();
-                        if !new_text.is_empty() && new_text != original_for_save {
+                        if !new_text.is_empty() && (new_title != original_title_for_save || new_text != original_text_for_save) {
                             if let Some(ref handler) = on_edit {
-                                handler.call((msg_id_for_save.clone(), new_text));
+                                handler.call((msg_id_for_save.clone(), new_title, new_text));
                             }
                         }
                         editing.set(false);
@@ -866,15 +893,17 @@ fn ReactionDisplay(
 fn ActionButtons(
     msg_id: MessageId,
     is_self: bool,
+    title_text: String,
     content_text: String,
     author_name: String,
     content_preview: String,
     editing: Signal<bool>,
+    edit_title: Signal<String>,
     edit_text: Signal<String>,
     is_hovered: Signal<bool>,
     on_react: Option<EventHandler<(MessageId, String)>>,
     on_reply: Option<EventHandler<ReplyContext>>,
-    on_edit: Option<EventHandler<(MessageId, String)>>,
+    on_edit: Option<EventHandler<(MessageId, String, String)>>,
     on_request_delete: Option<EventHandler<MessageId>>,
     size: MessageSize,
 ) -> Element {
@@ -979,8 +1008,10 @@ fn ActionButtons(
                     button {
                         class: if matches!(size, MessageSize::Compact) { "text-xs text-text-muted hover:text-text px-1" } else { "text-sm text-text-muted hover:text-text px-2" },
                         onclick: {
+                            let title = title_text.clone();
                             let text = content_text.clone();
                             move |_| {
+                                edit_title.set(title.clone());
                                 edit_text.set(text.clone());
                                 editing.set(true);
                             }
@@ -1036,9 +1067,9 @@ pub fn MessageCard(
     /// Handler for delete requests
     #[props(default)]
     on_request_delete: Option<EventHandler<MessageId>>,
-    /// Handler for edits
+    /// Handler for edits (message_id, new_title, new_content)
     #[props(default)]
-    on_edit: Option<EventHandler<(MessageId, String)>>,
+    on_edit: Option<EventHandler<(MessageId, String, String)>>,
     /// Handler for replies
     #[props(default)]
     on_reply: Option<EventHandler<ReplyContext>>,
@@ -1064,6 +1095,7 @@ pub fn MessageCard(
     };
 
     let editing = use_signal(|| false);
+    let edit_title = use_signal(String::new);
     let edit_text = use_signal(String::new);
     let mut is_hovered = use_signal(|| false);
 
@@ -1122,8 +1154,10 @@ pub fn MessageCard(
                         // Content (or edit form)
                         if *editing.read() {
                             MessageEditForm {
+                                edit_title: edit_title,
                                 edit_text: edit_text,
                                 editing: editing,
+                                original_title: title_text.clone(),
                                 original_text: content_text.clone(),
                                 msg_id: msg_id.clone(),
                                 on_edit: on_edit.clone(),
@@ -1153,10 +1187,12 @@ pub fn MessageCard(
                         ActionButtons {
                             msg_id: msg_id.clone(),
                             is_self: is_self,
+                            title_text: title_text.clone(),
                             content_text: content_text.clone(),
                             author_name: author_name.clone(),
                             content_preview: content_preview.clone(),
                             editing: editing,
+                            edit_title: edit_title,
                             edit_text: edit_text,
                             is_hovered: is_hovered,
                             on_react: on_react.clone(),
@@ -1254,8 +1290,10 @@ pub fn MessageCard(
                         div { class: "{content_padding}",
                             if *editing.read() {
                                 MessageEditForm {
+                                    edit_title: edit_title,
                                     edit_text: edit_text,
                                     editing: editing,
+                                    original_title: title_text.clone(),
                                     original_text: content_text.clone(),
                                     msg_id: msg_id.clone(),
                                     on_edit: on_edit.clone(),
@@ -1286,10 +1324,12 @@ pub fn MessageCard(
                         ActionButtons {
                             msg_id: msg_id.clone(),
                             is_self: is_self,
+                            title_text: title_text.clone(),
                             content_text: content_text.clone(),
                             author_name: author_name.clone(),
                             content_preview: content_preview.clone(),
                             editing: editing,
+                            edit_title: edit_title,
                             edit_text: edit_text,
                             is_hovered: is_hovered,
                             on_react: on_react.clone(),

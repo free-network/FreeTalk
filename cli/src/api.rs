@@ -1119,6 +1119,7 @@ impl ApiClient {
         &self,
         room_owner_key: &VerifyingKey,
         target_message_id: river_core::room_state::message::MessageId,
+        new_title: String,
         new_content: String,
     ) -> Result<()> {
         info!(
@@ -1138,6 +1139,7 @@ impl ApiClient {
             author: MemberId::from(&signing_key.verifying_key()),
             content: river_core::room_state::message::RoomMessageBody::edit(
                 target_message_id,
+                new_title,
                 new_content,
             ),
             time: std::time::SystemTime::now(),

@@ -460,11 +460,11 @@ impl RoomMessageBody {
     }
 
     /// Create an edit action (public)
-    pub fn edit(target: MessageId, new_text: String) -> Self {
+    pub fn edit(target: MessageId, new_title: String, new_text: String) -> Self {
         use crate::room_state::content::{
             ActionContentV1, ACTION_CONTENT_VERSION, CONTENT_TYPE_ACTION,
         };
-        let action = ActionContentV1::edit(target, new_text);
+        let action = ActionContentV1::edit(target, new_title, new_text);
         Self::Public {
             content_type: CONTENT_TYPE_ACTION,
             content_version: ACTION_CONTENT_VERSION,

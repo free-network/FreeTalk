@@ -131,10 +131,10 @@ pub fn PostsView() -> Element {
     };
 
     // Handler for editing messages
-    let handle_edit_message = move |target_message_id: MessageId, new_text: String| {
+    let handle_edit_message = move |target_message_id: MessageId, new_title: String, new_text: String| {
         if let Some(ctx) = ActionContext::from_current_room() {
             spawn_local(async move {
-                message_actions::edit_message(ctx, target_message_id, new_text).await;
+                message_actions::edit_message(ctx, target_message_id, new_title, new_text).await;
             });
         }
     };
@@ -239,8 +239,8 @@ pub fn PostsView() -> Element {
                                                                 on_request_delete: move |msg_id| {
                                                                     pending_delete.set(Some(msg_id));
                                                                 },
-                                                                on_edit: move |(msg_id, new_text)| {
-                                                                    handle_edit_message(msg_id, new_text);
+                                                                on_edit: move |(msg_id, new_title, new_text)| {
+                                                                    handle_edit_message(msg_id, new_title, new_text);
                                                                 },
                                                             }
                                                         }
@@ -349,10 +349,10 @@ pub fn SinglePostView(post_id: String) -> Element {
     };
 
     // Handler for editing messages
-    let handle_edit_message = move |target_message_id: MessageId, new_text: String| {
+    let handle_edit_message = move |target_message_id: MessageId, new_title: String, new_text: String| {
         if let Some(ctx) = ActionContext::from_current_room() {
             spawn_local(async move {
-                message_actions::edit_message(ctx, target_message_id, new_text).await;
+                message_actions::edit_message(ctx, target_message_id, new_title, new_text).await;
             });
         }
     };
@@ -387,8 +387,8 @@ pub fn SinglePostView(post_id: String) -> Element {
                                         on_request_delete: move |msg_id| {
                                             pending_delete.set(Some(msg_id));
                                         },
-                                        on_edit: move |(msg_id, new_text)| {
-                                            handle_edit_message(msg_id, new_text);
+                                        on_edit: move |(msg_id, new_title, new_text)| {
+                                            handle_edit_message(msg_id, new_title, new_text);
                                         },
                                     }
                                 }
