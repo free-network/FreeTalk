@@ -810,7 +810,7 @@ pub fn Conversation(
                             },
                             Err(SendMessageError::UserBanned) => rsx! {
                                 div { class: "px-4 py-3 mx-4 mb-4 bg-error-bg text-red-700 dark:text-red-400 rounded-lg text-sm",
-                                    "You have been banned from sending messages in this room."
+                                    "You have been banned from sending messages in this board."
                                 }
                             },
                         }
