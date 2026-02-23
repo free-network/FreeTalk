@@ -100,12 +100,12 @@ pub fn RoomList() -> Element {
             // Dropdown trigger button
             div { class: "flex justify-center", style: "width: 100vw;",
                 button {
-                    class: "flex items-center gap-2 px-4 py-2 bg-panel text-sm text-text hover:bg-surface transition-colors min-w-48 min-h-24", style: "min-width: 60vw;",
+                    class: "flex items-center gap-6 px-4 py-2 bg-panel text-sm text-text hover:bg-surface transition-colors min-w-48 min-h-24", style: "min-width: 60vw;",
                     onclick: move |_| {
                         is_open.set(!is_open());
                     },
-                    Icon { width: 16, height: 16, icon: FaComments, class: "text-text-muted" }
-                    span { class: "flex-1 text-left truncate", "{current_room_name}" }
+                    Icon { width: 48, height: 48, icon: FaComments, class: "text-text-muted" }
+                    span { class: "flex-1 text-left text-4xl truncate", "{current_room_name}" }
                     Icon {
                         width: 12,
                         height: 12,
