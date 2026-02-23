@@ -871,6 +871,7 @@ fn ActionButtons(
     content_preview: String,
     editing: Signal<bool>,
     edit_text: Signal<String>,
+    is_hovered: Signal<bool>,
     on_react: Option<EventHandler<(MessageId, String)>>,
     on_reply: Option<EventHandler<ReplyContext>>,
     on_edit: Option<EventHandler<(MessageId, String)>>,
@@ -882,19 +883,19 @@ fn ActionButtons(
 
     let has_actions = on_react.is_some() || on_reply.is_some() || (is_self && (on_edit.is_some() || on_request_delete.is_some()));
 
-    if !has_actions {
+    if !has_actions || !*is_hovered.read() {
         return rsx! {};
     }
 
     let (container_class, button_class, picker_button_class, picker_grid_class) = match size {
         MessageSize::Compact => (
-            "absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded shadow border border-border px-1 py-0.5",
+            "absolute right-2 top-2 flex gap-1 bg-panel rounded shadow border border-border px-1 py-0.5",
             "text-xs text-text-muted hover:text-accent px-1",
             "p-1 rounded hover:bg-surface text-lg",
             "grid gap-[2px]",
         ),
         _ => (
-            "absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded-lg shadow border border-border px-2 py-1",
+            "absolute right-4 top-4 flex gap-1 bg-panel rounded-lg shadow border border-border px-2 py-1",
             "text-sm text-text-muted hover:text-accent px-2",
             "p-2 rounded hover:bg-surface text-xl",
             "grid gap-1",
@@ -1064,6 +1065,7 @@ pub fn MessageCard(
 
     let editing = use_signal(|| false);
     let edit_text = use_signal(String::new);
+    let mut is_hovered = use_signal(|| false);
 
     let msg_id = msg.message_id.clone();
     let content_preview = msg.content_text.chars().take(100).collect::<String>();
@@ -1099,8 +1101,10 @@ pub fn MessageCard(
                     class: "{indent_class}",
                     // Message card
                     div {
-                        class: "group relative border-l-2 pl-4 py-2 hover:bg-surface/30 transition-colors",
+                        class: "relative border-l-2 pl-4 py-2 hover:bg-surface/30 transition-colors",
                         style: if is_self { "border-color: var(--accent);" } else { "border-color: var(--border);" },
+                        onmouseenter: move |_| is_hovered.set(true),
+                        onmouseleave: move |_| is_hovered.set(false),
 
                         // Header
                         div { class: "flex items-center gap-3 mb-2",
@@ -1154,6 +1158,7 @@ pub fn MessageCard(
                             content_preview: content_preview.clone(),
                             editing: editing,
                             edit_text: edit_text,
+                            is_hovered: is_hovered,
                             on_react: on_react.clone(),
                             on_reply: on_reply.clone(),
                             on_edit: on_edit.clone(),
@@ -1219,7 +1224,9 @@ pub fn MessageCard(
             rsx! {
                 div {
                     key: "{msg_id:?}",
-                    class: "group relative",
+                    class: "relative",
+                    onmouseenter: move |_| is_hovered.set(true),
+                    onmouseleave: move |_| is_hovered.set(false),
 
                     div {
                         class: "{card_class}",
@@ -1284,6 +1291,7 @@ pub fn MessageCard(
                             content_preview: content_preview.clone(),
                             editing: editing,
                             edit_text: edit_text,
+                            is_hovered: is_hovered,
                             on_react: on_react.clone(),
                             on_reply: on_reply.clone(),
                             on_edit: on_edit.clone(),
