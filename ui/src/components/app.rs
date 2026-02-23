@@ -12,6 +12,7 @@ use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatu
 use crate::components::app::freenet_api::FreenetSynchronizer;
 use crate::components::members::member_info_modal::MemberInfoModal;
 use crate::components::members::Invitation;
+use crate::components::posts_view::{PostsView, SinglePostView};
 use crate::components::room_list::create_room_modal::CreateRoomModal;
 use crate::components::room_list::edit_room_modal::EditRoomModal;
 use crate::components::room_list::receive_invitation_modal::{
@@ -27,6 +28,18 @@ use freenet_stdlib::client_api::WebApi;
 use river_core::room_state::member::MemberId;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
+
+/// Application routes
+#[derive(Clone, Debug, PartialEq, Routable)]
+#[rustfmt::skip]
+pub enum Route {
+    #[route("/")]
+    Posts,
+    #[route("/post/:id")]
+    Post { id: String },
+    #[route("/conversation")]
+    ConversationView,
+}
 
 pub static ROOMS: GlobalSignal<Rooms> = Global::new(initial_rooms);
 pub static CURRENT_ROOM: GlobalSignal<CurrentRoom> =
@@ -177,14 +190,9 @@ pub fn App() -> Element {
         Stylesheet { href: asset!("/assets/styles.css") }
         Stylesheet { href: asset!("/assets/main.css") }
 
-        // Main chat layout - grid with fixed sidebars and flexible center
-        /* div { class: "flex h-screen bg-bg overflow-hidden",
-            RoomList {}
-            Conversation {}
-            MemberList {}
-        } */
+        // Main layout with router
         RoomList {}
-        Conversation {}
+        Router::<Route> {}
         MemberList {}
         EditRoomModal {}
         MemberInfoModal {}
@@ -194,6 +202,24 @@ pub fn App() -> Element {
         }
         DocumentTitleUpdater {}
     }
+}
+
+/// Route component for posts list view
+#[component]
+fn Posts() -> Element {
+    rsx! { PostsView {} }
+}
+
+/// Route component for single post view
+#[component]
+fn Post(id: String) -> Element {
+    rsx! { SinglePostView { post_id: id } }
+}
+
+/// Route component for conversation view
+#[component]
+fn ConversationView() -> Element {
+    rsx! { Conversation {} }
 }
 
 #[cfg(not(feature = "example-data"))]
