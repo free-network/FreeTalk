@@ -2,6 +2,7 @@ use crate::components::app::notifications::request_permission_on_first_message;
 use crate::components::app::receive_times::{format_delay, get_delay_secs};
 use crate::components::app::{CURRENT_ROOM, EDIT_ROOM_MODAL, MEMBER_INFO_MODAL, NEEDS_SYNC, ROOMS};
 use crate::room_data::SendMessageError;
+use crate::util::avatar::get_avatar;
 use crate::util::ecies::{encrypt_with_symmetric_key, unseal_bytes_with_secrets};
 use crate::util::{format_utc_as_full_datetime, format_utc_as_local_time, get_current_system_time};
 mod emoji_picker;
@@ -14,7 +15,7 @@ use crate::components::conversation::message_input::MessageInput;
 use chrono::{DateTime, Utc};
 use dioxus::logger::tracing::*;
 use dioxus::prelude::*;
-use dioxus_free_icons::icons::fa_solid_icons::{FaCircleInfo, FaAnchor};
+use dioxus_free_icons::icons::fa_solid_icons::FaCircleInfo;
 use dioxus_free_icons::Icon;
 use freenet_scaffold::ComposableState;
 use river_core::room_state::member::MemberId;
@@ -1571,15 +1572,14 @@ fn MessageGroupComponent(
                                                             }
                                                         }
                                                     },
-                                                    // Flex container: hook icon | title + content
+                                                    // Flex container: avatar | title + content
                                                     div { class: "flex gap-4 items-start",
-                                                        // Hook icon
-                                                        div { class: "flex-shrink-0 pt-1",
-                                                            Icon {
-                                                                icon: FaAnchor,
-                                                                width: 32,
-                                                                height: 32,
-                                                                class: if is_self { "text-accent" } else { "text-text-muted" }
+                                                        // Avatar
+                                                        div { class: "flex-shrink-0",
+                                                            img {
+                                                                src: "{get_avatar(&group.author_id)}",
+                                                                alt: "Avatar",
+                                                                class: "w-10 h-10 rounded-full"
                                                             }
                                                         }
                                                         // Author, time, title and content
