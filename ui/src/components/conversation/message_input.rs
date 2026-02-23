@@ -5,10 +5,10 @@ use dioxus_free_icons::Icon;
 use super::emoji_picker::EmojiPicker;
 use super::ReplyContext;
 
-/// Message input component with a compose button that opens a modal.
+/// Post input component with a compose button that opens a modal.
 /// The modal contains fields for title and content.
 #[component]
-pub fn MessageInput(
+pub fn PostInput(
     handle_send_message: EventHandler<(String, String, Option<ReplyContext>)>,
     replying_to: Signal<Option<ReplyContext>>,
     on_request_edit_last: EventHandler<()>,
@@ -52,7 +52,7 @@ pub fn MessageInput(
                     class: "flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors",
                     onclick: move |_| show_modal.set(true),
                     Icon { icon: FaPen, width: 14, height: 14 }
-                    "Compose Message"
+                    "Compose Post"
                 }
             }
         }
@@ -72,7 +72,7 @@ pub fn MessageInput(
                     // Modal header
                     div { class: "flex items-center justify-between px-6 py-4 border-b border-border",
                         h2 { class: "text-lg font-semibold text-text",
-                            if replying_to.read().is_some() { "Reply to Message" } else { "New Message" }
+                            if replying_to.read().is_some() { "Reply to Post" } else { "New Post" }
                         }
                         button {
                             class: "p-2 rounded-lg text-text-muted hover:text-text hover:bg-surface transition-colors",
@@ -129,7 +129,7 @@ pub fn MessageInput(
                         // Content field
                         div { class: "space-y-1.5",
                             label { class: "block text-sm font-medium text-text",
-                                "Message"
+                                "Post"
                             }
                             div { class: "relative",
                                 // Emoji picker backdrop
@@ -205,7 +205,7 @@ pub fn MessageInput(
                                 class: "px-5 py-2 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
                                 disabled: message_text.read().is_empty(),
                                 onclick: move |_| send_message(),
-                                "Send Message"
+                                "Send Post"
                             }
                         }
                     }

@@ -11,7 +11,7 @@ mod message_input;
 mod not_member_notification;
 use self::emoji_picker::FREQUENT_EMOJIS;
 use self::not_member_notification::NotMemberNotification;
-use crate::components::conversation::message_input::MessageInput;
+use crate::components::conversation::message_input::PostInput;
 use chrono::{DateTime, Utc};
 use dioxus::logger::tracing::*;
 use dioxus::prelude::*;
@@ -919,7 +919,7 @@ pub fn Conversation() -> Element {
         }
     };
 
-    // Message sending handler - receives title, content, and reply context from MessageInput component
+    // Message sending handler - receives title, content, and reply context from PostInput component
     let handle_send_message = {
         let current_room_data = current_room_data.clone();
         move |(title_text, message_text, reply_ctx): (String, String, Option<ReplyContext>)| {
@@ -1292,7 +1292,7 @@ pub fn Conversation() -> Element {
                     Some(room_data) => {
                         match room_data.can_participate() {
                             Ok(()) => rsx! {
-                                MessageInput {
+                                PostInput {
                                     handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
                                         let mut handle = handle_send_message.clone();
                                         handle(msg)
