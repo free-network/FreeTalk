@@ -871,13 +871,15 @@ fn ActionButtons(
     content_preview: String,
     editing: Signal<bool>,
     edit_text: Signal<String>,
-    open_emoji_picker: Signal<bool>,
     on_react: Option<EventHandler<(MessageId, String)>>,
     on_reply: Option<EventHandler<ReplyContext>>,
     on_edit: Option<EventHandler<(MessageId, String)>>,
     on_request_delete: Option<EventHandler<MessageId>>,
     size: MessageSize,
 ) -> Element {
+    // Create emoji picker state locally to ensure it's element-specific
+    let mut open_emoji_picker = use_signal(|| false);
+
     let has_actions = on_react.is_some() || on_reply.is_some() || (is_self && (on_edit.is_some() || on_request_delete.is_some()));
 
     if !has_actions {
@@ -1062,7 +1064,6 @@ pub fn MessageCard(
 
     let editing = use_signal(|| false);
     let edit_text = use_signal(String::new);
-    let open_emoji_picker = use_signal(|| false);
 
     let msg_id = msg.message_id.clone();
     let content_preview = msg.content_text.chars().take(100).collect::<String>();
@@ -1153,7 +1154,6 @@ pub fn MessageCard(
                             content_preview: content_preview.clone(),
                             editing: editing,
                             edit_text: edit_text,
-                            open_emoji_picker: open_emoji_picker,
                             on_react: on_react.clone(),
                             on_reply: on_reply.clone(),
                             on_edit: on_edit.clone(),
@@ -1284,7 +1284,6 @@ pub fn MessageCard(
                             content_preview: content_preview.clone(),
                             editing: editing,
                             edit_text: edit_text,
-                            open_emoji_picker: open_emoji_picker,
                             on_react: on_react.clone(),
                             on_reply: on_reply.clone(),
                             on_edit: on_edit.clone(),
