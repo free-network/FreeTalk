@@ -1,6 +1,5 @@
-use crate::components::app::receive_times::{format_delay, get_delay_secs};
-use crate::components::app::{CURRENT_ROOM, EDIT_ROOM_MODAL, MEMBER_INFO_MODAL, NEEDS_SYNC, ROOMS};
-use crate::room_data::SendMessageError;
+use crate::components::app::receive_times::get_delay_secs;
+use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, NEEDS_SYNC, ROOMS};
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::markdown::text_to_html;
@@ -13,11 +12,9 @@ mod not_member_notification;
 use self::emoji_picker::FREQUENT_EMOJIS;
 use self::not_member_notification::NotMemberNotification;
 use crate::components::conversation::message_input::PostInput;
+use crate::room_data::SendMessageError;
 use chrono::{DateTime, Utc};
-use dioxus::logger::tracing::*;
 use dioxus::prelude::*;
-use dioxus_free_icons::icons::fa_solid_icons::FaCircleInfo;
-use dioxus_free_icons::Icon;
 use freenet_scaffold::ComposableState;
 use river_core::room_state::member::MemberId;
 use river_core::room_state::member_info::MemberInfoV1;
@@ -26,59 +23,44 @@ use river_core::room_state::message::{
 };
 use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1Delta};
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::time::Duration;
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use web_sys;
 
-/// A group of consecutive messages from the same sender within a time window
-#[derive(Clone, PartialEq)]
-struct MessageGroup {
-    author_id: MemberId,
-    author_name: String,
-    is_self: bool,
-    first_time: DateTime<Utc>,
-    /// True if any message in this group had a future timestamp that was clamped
-    time_clamped: bool,
-    /// Propagation delay for the first message in the group (shown in header)
-    first_delay_secs: Option<i64>,
-    messages: Vec<GroupedMessage>,
+/// A single message for display
+#[derive(Clone, PartialEq, Debug)]
+pub struct MessageData {
+    pub message_id: MessageId,
+    pub author_id: MemberId,
+    pub author_name: String,
+    pub is_self: bool,
+    pub title_text: String,
+    pub content_text: String,
+    pub content_html: String,
+    pub time: DateTime<Utc>,
+    pub time_clamped: bool,
+    pub edited: bool,
+    pub reactions: HashMap<String, Vec<MemberId>>,
+    pub reply_to_message_id: Option<MessageId>,
+    pub reply_to_author: Option<String>,
+    pub reply_to_preview: Option<String>,
+    pub receive_delay_secs: Option<i64>,
 }
 
-#[derive(Clone, PartialEq)]
-struct GroupedMessage {
-    title_text: String,
-    content_text: String,
-    content_html: String,
-    #[allow(dead_code)]
-    time: DateTime<Utc>,
-    /// True if the original timestamp was in the future and was clamped to now
-    #[allow(dead_code)]
-    time_clamped: bool,
-    id: String,
-    message_id: MessageId,
-    edited: bool,
-    reactions: HashMap<String, Vec<MemberId>>,
-    reply_to_author: Option<String>,
-    reply_to_preview: Option<String>,
-    reply_to_message_id: Option<MessageId>,
-    /// Propagation delay in seconds (send → receive), if known and significant
-    #[allow(dead_code)]
-    receive_delay_secs: Option<i64>,
+/// A message with its nested replies
+#[derive(Clone, PartialEq, Debug)]
+pub struct MessageWithReplies {
+    pub message: MessageData,
+    pub replies: Vec<MessageWithReplies>,
 }
 
-/// Group consecutive messages from the same sender within 5 minutes
-fn group_messages(
+/// Build a flat list of all messages
+fn get_all_messages(
     messages_state: &MessagesV1,
     member_info: &MemberInfoV1,
     self_member_id: MemberId,
     secrets: &HashMap<u32, [u8; 32]>,
-) -> Vec<MessageGroup> {
-    let mut groups: Vec<MessageGroup> = Vec::new();
-    let group_threshold = Duration::from_secs(5 * 60); // 5 minutes
+) -> Vec<MessageData> {
+    let mut messages = Vec::new();
 
-    // Only iterate over displayable messages (non-deleted, non-action)
     for message in messages_state.display_messages() {
         let author_id = message.message.author;
         let now = Utc::now();
@@ -92,7 +74,6 @@ fn group_messages(
             .iter()
             .find(|ami| ami.member_info.member_id == author_id)
             .map(|ami| {
-                // Decrypt nickname using version-aware decryption
                 match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, secrets) {
                     Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                     Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
@@ -100,9 +81,6 @@ fn group_messages(
             })
             .unwrap_or_else(|| "Unknown".to_string());
 
-        // Get effective content (may be edited)
-        // effective_text returns edited content if available, or decoded public text
-        // For encrypted messages, it returns None and we need to decrypt
         let content_text = messages_state
             .effective_text(message)
             .unwrap_or_else(|| decrypt_message_content(&message.message.content, secrets));
@@ -110,67 +88,68 @@ fn group_messages(
         let title_text = decrypt_message_title(&message.message.content, secrets);
         let is_self = author_id == self_member_id;
 
-        // Get edited status and reactions
         let edited = messages_state.is_edited(&message_id);
         let reactions = messages_state
             .reactions(&message_id)
             .cloned()
             .unwrap_or_default();
 
-        // Extract reply context if this is a reply message
         let (reply_to_author, reply_to_preview, reply_to_message_id) =
             extract_reply_context(&message.message.content, secrets);
 
-        // Look up propagation delay (send time → receive time)
         let send_time_ms = raw_time.timestamp_millis();
         let receive_delay_secs = get_delay_secs(&message_id, send_time_ms);
 
-        let grouped_message = GroupedMessage {
+        messages.push(MessageData {
+            message_id,
+            author_id,
+            author_name,
+            is_self,
             title_text,
-            content_text: content_text.clone(),
+            content_text,
             content_html,
             time: message_time,
             time_clamped,
-            id: format!("{:?}", message_id.0),
-            message_id,
             edited,
             reactions,
+            reply_to_message_id,
             reply_to_author,
             reply_to_preview,
-            reply_to_message_id,
             receive_delay_secs,
-        };
-
-        // Check if we should add to the last group
-        let should_group = groups.last().is_some_and(|last_group| {
-            last_group.author_id == author_id
-                && (message_time - last_group.messages.last().unwrap().time)
-                    .to_std()
-                    .unwrap_or(Duration::MAX)
-                    < group_threshold
         });
-
-        if should_group {
-            let group = groups.last_mut().unwrap();
-            if time_clamped {
-                group.time_clamped = true;
-            }
-            group.messages.push(grouped_message);
-        } else {
-            let first_delay = receive_delay_secs;
-            groups.push(MessageGroup {
-                author_id,
-                author_name,
-                is_self,
-                first_time: message_time,
-                time_clamped,
-                first_delay_secs: first_delay,
-                messages: vec![grouped_message],
-            });
-        }
     }
 
-    groups
+    messages
+}
+
+/// Build a tree of messages with their replies
+/// If parent_id is None, returns top-level messages (those not replying to anything)
+/// If parent_id is Some(id), returns only replies to that specific message
+fn build_reply_tree(
+    all_messages: &[MessageData],
+    parent_id: Option<&MessageId>,
+) -> Vec<MessageWithReplies> {
+    // Find messages that reply to the given parent
+    let direct_replies: Vec<&MessageData> = all_messages
+        .iter()
+        .filter(|m| m.reply_to_message_id.as_ref() == parent_id)
+        .collect();
+
+    // Sort by time
+    let mut sorted_replies: Vec<_> = direct_replies.into_iter().cloned().collect();
+    sorted_replies.sort_by_key(|m| m.time);
+
+    // Recursively build replies for each message
+    sorted_replies
+        .into_iter()
+        .map(|message| {
+            let nested_replies = build_reply_tree(all_messages, Some(&message.message_id));
+            MessageWithReplies {
+                message,
+                replies: nested_replies,
+            }
+        })
+        .collect()
 }
 
 fn decrypt_message_title(content: &RoomMessageBody, secrets: &HashMap<u32, [u8; 32]>) -> String {
@@ -232,23 +211,19 @@ fn decrypt_message_content(content: &RoomMessageBody, secrets: &HashMap<u32, [u8
         RoomMessageBody::Public {
             content_type, data, ..
         } => {
-            // Action messages - display as action description
             if *content_type == CONTENT_TYPE_ACTION {
                 return content.to_string_lossy();
             }
-            // Text messages - decode and return content
             if *content_type == CONTENT_TYPE_TEXT {
                 if let Ok(text_content) = TextContentV1::decode(data) {
                     return text_content.content;
                 }
             }
-            // Reply messages - decode and return reply content
             if *content_type == CONTENT_TYPE_REPLY {
                 if let Ok(reply) = ReplyContentV1::decode(data) {
                     return reply.content;
                 }
             }
-            // Unknown content type
             content.to_string_lossy()
         }
         RoomMessageBody::Private {
@@ -258,26 +233,21 @@ fn decrypt_message_content(content: &RoomMessageBody, secrets: &HashMap<u32, [u8
             secret_version,
             ..
         } => {
-            // Look up the secret for this message's version
             if let Some(secret) = secrets.get(secret_version) {
                 use crate::util::ecies::decrypt_with_symmetric_key;
-                // Decrypt the ciphertext
                 if let Ok(decrypted_bytes) =
                     decrypt_with_symmetric_key(secret, ciphertext.as_slice(), nonce)
                 {
-                    // For text messages, decode the content
                     if *content_type == CONTENT_TYPE_TEXT {
                         if let Ok(text_content) = TextContentV1::decode(&decrypted_bytes) {
                             return text_content.content;
                         }
                     }
-                    // For reply messages, decode and return reply content
                     if *content_type == CONTENT_TYPE_REPLY {
                         if let Ok(reply) = ReplyContentV1::decode(&decrypted_bytes) {
                             return reply.content;
                         }
                     }
-                    // Fallback to UTF-8 string
                     return String::from_utf8_lossy(&decrypted_bytes).to_string();
                 }
                 content.to_string_lossy()
@@ -292,8 +262,6 @@ fn decrypt_message_content(content: &RoomMessageBody, secrets: &HashMap<u32, [u8
     }
 }
 
-/// Extract reply context from a message body, if it is a reply.
-/// Returns (author_name, content_preview, target_message_id) or (None, None, None).
 fn extract_reply_context(
     content: &RoomMessageBody,
     secrets: &HashMap<u32, [u8; 32]>,
@@ -339,8 +307,13 @@ fn extract_reply_context(
     (None, None, None)
 }
 
+/// Conversation component that shows replies to a specific parent message
+/// If parent_message_id is None, this is a standalone conversation (legacy behavior)
+/// If parent_message_id is Some(id), shows only replies to that message
 #[component]
-pub fn Conversation() -> Element {
+pub fn Conversation(
+    #[props(default)] parent_message_id: Option<MessageId>,
+) -> Element {
     let current_room_data = {
         let current_room = CURRENT_ROOM.read();
         if let Some(key) = current_room.owner_key {
@@ -350,64 +323,29 @@ pub fn Conversation() -> Element {
             None
         }
     };
-    let last_chat_element = use_signal(|| None as Option<Rc<MountedData>>);
-    let mut is_at_bottom = use_signal(|| true);
-    let mut replying_to: Signal<Option<ReplyContext>> = use_signal(|| None);
 
-    // State for delete confirmation modal
+    let mut replying_to: Signal<Option<ReplyContext>> = use_signal(|| None);
     let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
-    // Trigger for editing a message from outside MessageGroupComponent (e.g. up-arrow in input)
-    // Value is (message_id_str, message_text)
-    let mut edit_trigger: Signal<Option<(String, String)>> = use_signal(|| None);
-
-    let current_room_label = use_memo({
+    // Build message tree for the given parent
+    let message_tree = use_memo({
+        let parent_id = parent_message_id.clone();
         move || {
             let current_room = CURRENT_ROOM.read();
             if let Some(key) = current_room.owner_key {
                 let rooms = ROOMS.read();
                 if let Some(room_data) = rooms.map.get(&key) {
-                    let sealed_name = &room_data
-                        .room_state
-                        .configuration
-                        .configuration
-                        .display
-                        .name;
-                    return match unseal_bytes_with_secrets(sealed_name, &room_data.secrets) {
-                        Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-                        Err(_) => sealed_name.to_string_lossy(),
-                    };
-                }
-            }
-            "No Room Selected".to_string()
-        }
-    });
-
-    // Memoize expensive message grouping (decryption + markdown parsing)
-    // This prevents re-computing on every render/keystroke
-    // Returns (groups, self_member_id, member_names) so we can highlight user's reactions and show names in tooltips
-    let message_groups = use_memo(move || {
-        let current_room = CURRENT_ROOM.read();
-        if let Some(key) = current_room.owner_key {
-            let rooms = ROOMS.read();
-            if let Some(room_data) = rooms.map.get(&key) {
-                let room_state = &room_data.room_state;
-                // Check if there are any displayable messages
-                if room_state
-                    .recent_messages
-                    .display_messages()
-                    .next()
-                    .is_some()
-                {
                     let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
-                    let groups = group_messages(
-                        &room_state.recent_messages,
-                        &room_state.member_info,
+                    let all_messages = get_all_messages(
+                        &room_data.room_state.recent_messages,
+                        &room_data.room_state.member_info,
                         self_member_id,
                         &room_data.secrets,
                     );
-                    // Build member name lookup for reaction tooltips
-                    let member_names: HashMap<MemberId, String> = room_state
+
+                    // Build member name lookup
+                    let member_names: HashMap<MemberId, String> = room_data
+                        .room_state
                         .member_info
                         .member_info
                         .iter()
@@ -422,27 +360,16 @@ pub fn Conversation() -> Element {
                             (ami.member_info.member_id, name)
                         })
                         .collect();
-                    return Some((groups, self_member_id, member_names));
+
+                    let tree = build_reply_tree(&all_messages, parent_id.as_ref());
+                    return Some((tree, self_member_id, member_names));
                 }
             }
-        }
-        None
-    });
-
-    // Trigger scroll to bottom when recent messages change (only if user is near bottom)
-    use_effect(move || {
-        let container = last_chat_element();
-        let should_scroll = *is_at_bottom.peek();
-        if should_scroll {
-            if let Some(container) = container {
-                wasm_bindgen_futures::spawn_local(async move {
-                    let _ = container.scroll_to(ScrollBehavior::Smooth).await;
-                });
-            }
+            None
         }
     });
 
-    // Handler for toggling a reaction on a message (add or remove)
+    // Handler for toggling a reaction
     let handle_toggle_reaction = {
         let current_room_data = current_room_data.clone();
         move |target_message_id: MessageId, emoji: String| {
@@ -452,18 +379,11 @@ pub fn Conversation() -> Element {
                 let room_key = current_room_data.room_key();
                 let self_sk = current_room_data.self_sk.clone();
                 let room_state_clone = current_room_data.room_state.clone();
-                let is_private = current_room_data
-                    .room_state
-                    .configuration
-                    .configuration
-                    .privacy_mode
-                    == river_core::room_state::privacy::PrivacyMode::Private;
+                let is_private = current_room_data.is_private();
                 let secret_opt = current_room_data
                     .get_secret()
                     .map(|(secret, version)| (*secret, version));
 
-                // Check user's existing reaction on this message (if any)
-                // Rule: one reaction per user per message
                 let self_member_id = MemberId::from(&self_sk.verifying_key());
                 let existing_reaction: Option<String> = current_room_data
                     .room_state
@@ -480,19 +400,14 @@ pub fn Conversation() -> Element {
                     });
 
                 let clicked_same = existing_reaction.as_ref() == Some(&emoji);
-                let has_existing = existing_reaction.is_some();
 
                 spawn_local(async move {
                     use crate::util::ecies::encrypt_with_symmetric_key;
                     use river_core::room_state::content::ActionContentV1;
 
-                    // Build list of actions:
-                    // - If clicking same emoji: just remove it
-                    // - If clicking different emoji: remove old (if any) + add new
                     let mut messages_to_send = Vec::new();
 
                     if clicked_same {
-                        // Remove the existing reaction
                         let content = if is_private {
                             if let Some((secret, version)) = &secret_opt {
                                 let action = ActionContentV1::remove_reaction(
@@ -504,18 +419,13 @@ pub fn Conversation() -> Element {
                                     encrypt_with_symmetric_key(secret, &action_bytes);
                                 RoomMessageBody::private_action(ciphertext, nonce, *version)
                             } else {
-                                warn!("Room is private but no secret available");
                                 return;
                             }
                         } else {
-                            RoomMessageBody::remove_reaction(
-                                target_message_id.clone(),
-                                emoji.clone(),
-                            )
+                            RoomMessageBody::remove_reaction(target_message_id.clone(), emoji.clone())
                         };
                         messages_to_send.push(content);
                     } else {
-                        // Remove old reaction if exists, then add new one
                         if let Some(old_emoji) = existing_reaction {
                             let content = if is_private {
                                 if let Some((secret, version)) = &secret_opt {
@@ -528,31 +438,23 @@ pub fn Conversation() -> Element {
                                         encrypt_with_symmetric_key(secret, &action_bytes);
                                     RoomMessageBody::private_action(ciphertext, nonce, *version)
                                 } else {
-                                    warn!("Room is private but no secret available");
                                     return;
                                 }
                             } else {
-                                RoomMessageBody::remove_reaction(
-                                    target_message_id.clone(),
-                                    old_emoji,
-                                )
+                                RoomMessageBody::remove_reaction(target_message_id.clone(), old_emoji)
                             };
                             messages_to_send.push(content);
                         }
 
-                        // Add new reaction
                         let content = if is_private {
                             if let Some((secret, version)) = &secret_opt {
-                                let action = ActionContentV1::reaction(
-                                    target_message_id.clone(),
-                                    emoji.clone(),
-                                );
+                                let action =
+                                    ActionContentV1::reaction(target_message_id.clone(), emoji.clone());
                                 let action_bytes = action.encode();
                                 let (ciphertext, nonce) =
                                     encrypt_with_symmetric_key(secret, &action_bytes);
                                 RoomMessageBody::private_action(ciphertext, nonce, *version)
                             } else {
-                                warn!("Room is private but no secret available");
                                 return;
                             }
                         } else {
@@ -561,7 +463,6 @@ pub fn Conversation() -> Element {
                         messages_to_send.push(content);
                     }
 
-                    // Sign and collect all messages
                     let mut auth_messages = Vec::new();
                     for content in messages_to_send {
                         let message = MessageV1 {
@@ -572,14 +473,13 @@ pub fn Conversation() -> Element {
                         };
 
                         let mut message_bytes = Vec::new();
-                        if let Err(e) = ciborium::ser::into_writer(&message, &mut message_bytes) {
-                            error!("Failed to serialize reaction message: {:?}", e);
+                        if ciborium::ser::into_writer(&message, &mut message_bytes).is_err() {
                             return;
                         }
 
                         let signature = crate::signing::sign_message_with_fallback(
                             room_key,
-                            message_bytes.clone(),
+                            message_bytes,
                             &self_sk,
                         )
                         .await;
@@ -587,27 +487,22 @@ pub fn Conversation() -> Element {
                         auth_messages.push(AuthorizedMessageV1::with_signature(message, signature));
                     }
 
-                    // Apply all messages in one delta
                     if !auth_messages.is_empty() {
                         let delta = ChatRoomStateV1Delta {
                             recent_messages: Some(auth_messages),
                             ..Default::default()
                         };
-                        info!(
-                            "Toggling reaction (clicked_same={}, had_existing={})",
-                            clicked_same, has_existing
-                        );
                         ROOMS.with_mut(|rooms| {
                             if let Some(room_data) = rooms.map.get_mut(&current_room) {
-                                if let Err(e) = room_data.room_state.apply_delta(
-                                    &room_state_clone,
-                                    &ChatRoomParametersV1 {
-                                        owner: current_room,
-                                    },
-                                    &Some(delta),
-                                ) {
-                                    error!("Failed to apply reaction delta: {:?}", e);
-                                } else {
+                                if room_data
+                                    .room_state
+                                    .apply_delta(
+                                        &room_state_clone,
+                                        &ChatRoomParametersV1 { owner: current_room },
+                                        &Some(delta),
+                                    )
+                                    .is_ok()
+                                {
                                     NEEDS_SYNC.write().insert(current_room);
                                 }
                             }
@@ -628,12 +523,7 @@ pub fn Conversation() -> Element {
                 let room_key = current_room_data.room_key();
                 let self_sk = current_room_data.self_sk.clone();
                 let room_state_clone = current_room_data.room_state.clone();
-                let is_private = current_room_data
-                    .room_state
-                    .configuration
-                    .configuration
-                    .privacy_mode
-                    == river_core::room_state::privacy::PrivacyMode::Private;
+                let is_private = current_room_data.is_private();
                 let secret_opt = current_room_data
                     .get_secret()
                     .map(|(secret, version)| (*secret, version));
@@ -642,7 +532,6 @@ pub fn Conversation() -> Element {
                     use crate::util::ecies::encrypt_with_symmetric_key;
                     use river_core::room_state::content::ActionContentV1;
 
-                    // Create the action content - encrypt if private room
                     let content = if is_private {
                         if let Some((secret, version)) = secret_opt {
                             let action = ActionContentV1::delete(target_message_id.clone());
@@ -651,7 +540,6 @@ pub fn Conversation() -> Element {
                                 encrypt_with_symmetric_key(&secret, &action_bytes);
                             RoomMessageBody::private_action(ciphertext, nonce, version)
                         } else {
-                            warn!("Room is private but no secret available, cannot send delete");
                             return;
                         }
                     } else {
@@ -666,8 +554,7 @@ pub fn Conversation() -> Element {
                     };
 
                     let mut message_bytes = Vec::new();
-                    if let Err(e) = ciborium::ser::into_writer(&message, &mut message_bytes) {
-                        error!("Failed to serialize delete message: {:?}", e);
+                    if ciborium::ser::into_writer(&message, &mut message_bytes).is_err() {
                         return;
                     }
 
@@ -683,18 +570,17 @@ pub fn Conversation() -> Element {
                         recent_messages: Some(vec![auth_message]),
                         ..Default::default()
                     };
-                    info!("Sending delete action");
                     ROOMS.with_mut(|rooms| {
                         if let Some(room_data) = rooms.map.get_mut(&current_room) {
-                            if let Err(e) = room_data.room_state.apply_delta(
-                                &room_state_clone,
-                                &ChatRoomParametersV1 {
-                                    owner: current_room,
-                                },
-                                &Some(delta),
-                            ) {
-                                error!("Failed to apply delete delta: {:?}", e);
-                            } else {
+                            if room_data
+                                .room_state
+                                .apply_delta(
+                                    &room_state_clone,
+                                    &ChatRoomParametersV1 { owner: current_room },
+                                    &Some(delta),
+                                )
+                                .is_ok()
+                            {
                                 NEEDS_SYNC.write().insert(current_room);
                             }
                         }
@@ -709,7 +595,6 @@ pub fn Conversation() -> Element {
         let current_room_data = current_room_data.clone();
         move |target_message_id: MessageId, new_text: String| {
             if new_text.is_empty() {
-                warn!("Edit text is empty");
                 return;
             }
             if let (Some(current_room), Some(current_room_data)) =
@@ -718,12 +603,7 @@ pub fn Conversation() -> Element {
                 let room_key = current_room_data.room_key();
                 let self_sk = current_room_data.self_sk.clone();
                 let room_state_clone = current_room_data.room_state.clone();
-                let is_private = current_room_data
-                    .room_state
-                    .configuration
-                    .configuration
-                    .privacy_mode
-                    == river_core::room_state::privacy::PrivacyMode::Private;
+                let is_private = current_room_data.is_private();
                 let secret_opt = current_room_data
                     .get_secret()
                     .map(|(secret, version)| (*secret, version));
@@ -732,21 +612,17 @@ pub fn Conversation() -> Element {
                     use crate::util::ecies::encrypt_with_symmetric_key;
                     use river_core::room_state::content::ActionContentV1;
 
-                    // Create the edit action content
                     let content = if is_private {
                         if let Some((secret, version)) = secret_opt {
-                            // For private rooms, encrypt the action
                             let action = ActionContentV1::edit(target_message_id.clone(), new_text);
                             let action_bytes = action.encode();
                             let (ciphertext, nonce) =
                                 encrypt_with_symmetric_key(&secret, &action_bytes);
                             RoomMessageBody::private_action(ciphertext, nonce, version)
                         } else {
-                            warn!("Room is private but no secret available, cannot send edit");
                             return;
                         }
                     } else {
-                        // For public rooms, use the public edit constructor
                         RoomMessageBody::edit(target_message_id, new_text)
                     };
 
@@ -758,8 +634,7 @@ pub fn Conversation() -> Element {
                     };
 
                     let mut message_bytes = Vec::new();
-                    if let Err(e) = ciborium::ser::into_writer(&message, &mut message_bytes) {
-                        error!("Failed to serialize edit message: {:?}", e);
+                    if ciborium::ser::into_writer(&message, &mut message_bytes).is_err() {
                         return;
                     }
 
@@ -775,18 +650,17 @@ pub fn Conversation() -> Element {
                         recent_messages: Some(vec![auth_message]),
                         ..Default::default()
                     };
-                    info!("Sending edit action");
                     ROOMS.with_mut(|rooms| {
                         if let Some(room_data) = rooms.map.get_mut(&current_room) {
-                            if let Err(e) = room_data.room_state.apply_delta(
-                                &room_state_clone,
-                                &ChatRoomParametersV1 {
-                                    owner: current_room,
-                                },
-                                &Some(delta),
-                            ) {
-                                error!("Failed to apply edit delta: {:?}", e);
-                            } else {
+                            if room_data
+                                .room_state
+                                .apply_delta(
+                                    &room_state_clone,
+                                    &ChatRoomParametersV1 { owner: current_room },
+                                    &Some(delta),
+                                )
+                                .is_ok()
+                            {
                                 NEEDS_SYNC.write().insert(current_room);
                             }
                         }
@@ -796,13 +670,10 @@ pub fn Conversation() -> Element {
         }
     };
 
-    // Message sending handler - receives title, content, and reply context from PostInput component
+    // Message sending handler
     let handle_send_message = {
         let current_room_data = current_room_data.clone();
         move |(title_text, message_text, reply_ctx): (String, String, Option<ReplyContext>)| {
-            // Always scroll to bottom when user sends their own message
-            is_at_bottom.set(true);
-
             if let (Some(current_room), Some(current_room_data)) =
                 (CURRENT_ROOM.read().owner_key, current_room_data.clone())
             {
@@ -833,148 +704,60 @@ pub fn Conversation() -> Element {
     };
 
     rsx! {
-        div {
-            // Room header
-            {
-                current_room_data.as_ref().map(|room_data| {
-                    let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
-                    let self_nickname = room_data.room_state.member_info.member_info
-                        .iter()
-                        .find(|ami| ami.member_info.member_id == self_member_id)
-                        .map(|ami| {
-                            match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, &room_data.secrets) {
-                                Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-                                Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
-                            }
-                        })
-                        .unwrap_or_else(|| "You".to_string());
-                    let self_avatar = get_avatar(&self_member_id);
-                    rsx! {
-                        // User avatar and nickname link
-                        div {
-                            class: "flex items-center gap-2 px-3 py-1.5 transition-colors cursor-pointer",
-                            title: "Your profile",
-                            onclick: move |_| {
-                                MEMBER_INFO_MODAL.with_mut(|signal| {
-                                    signal.member = Some(self_member_id);
-                                });
-                            },
-                            img {
-                                src: "{self_avatar}",
-                                alt: "Your avatar",
-                                class: "w-16 h-16 rounded-full"
-                            }
-                            span { class: "text-4xl text-text-muted",
-                                "{self_nickname}"
-                            }
-                        }
-
-                        div { class: "flex-shrink-0 px-6 py-3 border-b border-border bg-panel",
-                            div { class: "flex items-center justify-between max-w-4xl mx-auto",
-                                button {
-                                    class: "flex items-center gap-2 px-3 py-1.5 -mx-3 rounded-lg bg-transparent hover:bg-surface transition-colors cursor-pointer",
-                                    title: "Room details",
-                                    onclick: move |_| {
-                                        if let Some(current_room) = CURRENT_ROOM.read().owner_key {
-                                            EDIT_ROOM_MODAL.with_mut(|modal| {
-                                                modal.room = Some(current_room);
-                                            });
-                                        }
-                                    },
-                                    h2 { class: "text-lg font-semibold text-text",
-                                        "{current_room_label}"
-                                    }
-                                    span {
-                                        class: "text-text-muted",
-                                        Icon { icon: FaCircleInfo, width: 16, height: 16 }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                })
-            }
-
-            // Message area with constrained width
-            // Outer div handles flex sizing; inner div handles scrolling.
-            // Combining flex-1 with overflow on the same element causes the
-            // scroll container to shift behind the sidebar during re-renders.
-            div {
-                class: "flex-1 min-h-0",
-                div {
-                    class: "h-full overflow-y-auto",
-                    id: "chat-scroll-container",
-                    onscroll: move |_| {
-                        if let Some(window) = web_sys::window() {
-                            if let Some(doc) = window.document() {
-                                if let Some(el) = doc.get_element_by_id("chat-scroll-container") {
-                                    let at_bottom = el.scroll_top() + el.client_height()
-                                        >= el.scroll_height() - 100;
-                                    is_at_bottom.set(at_bottom);
-                                }
-                            }
-                        }
-                    },
-                    div { class: "max-w-4xl mx-auto px-4 py-4",
+        div { class: "flex flex-col h-full",
+            // Reply thread area
+            div { class: "flex-1 overflow-y-auto",
+                div { class: "max-w-4xl mx-auto px-4 py-4",
                     {
-                        // Use memoized message groups to avoid expensive re-computation on keystrokes
                         if current_room_data.is_some() {
-                            match message_groups.read().as_ref() {
-                                Some((groups, self_member_id, member_names)) => {
-                                    let groups = groups.clone();
+                            match message_tree.read().as_ref() {
+                                Some((tree, self_member_id, member_names)) if !tree.is_empty() => {
+                                    let tree = tree.clone();
                                     let self_member_id = *self_member_id;
                                     let member_names = member_names.clone();
-                                    let groups_len = groups.len();
                                     Some(rsx! {
-                                        div { class: "space-y-4",
-                                            {groups.into_iter().enumerate().map({
-                                                let handle_toggle_reaction = handle_toggle_reaction.clone();
-                                                let member_names = member_names.clone();
-                                                move |(group_idx, group)| {
-                                                let is_last_group = group_idx == groups_len - 1;
-                                                let key = group.messages[0].id.clone();
+                                        div { class: "space-y-2",
+                                            {tree.into_iter().map({
                                                 let handle_toggle_reaction = handle_toggle_reaction.clone();
                                                 let handle_edit_message = handle_edit_message.clone();
                                                 let member_names = member_names.clone();
-                                                rsx! {
-                                                    MessageGroupComponent {
-                                                        key: "{key}",
-                                                        group: group,
-                                                        self_member_id: self_member_id,
-                                                        member_names: member_names,
-                                                        last_chat_element: if is_last_group { Some(last_chat_element) } else { None },
-                                                        edit_trigger: edit_trigger,
-                                                        on_react: move |(msg_id, emoji)| {
-                                                            handle_toggle_reaction(msg_id, emoji);
-                                                        },
-                                                        on_request_delete: move |msg_id| {
-                                                            pending_delete.set(Some(msg_id));
-                                                        },
-                                                        on_edit: move |(msg_id, new_text)| {
-                                                            handle_edit_message(msg_id, new_text);
-                                                        },
-                                                        on_reply: move |ctx: ReplyContext| {
-                                                            replying_to.set(Some(ctx));
-                                                            // Focus the message input textarea
-                                                            if let Some(window) = web_sys::window() {
-                                                                if let Some(doc) = window.document() {
-                                                                    if let Some(el) = doc.get_element_by_id("message-input") {
-                                                                        if let Some(el) = el.dyn_ref::<web_sys::HtmlElement>() {
-                                                                            let _ = el.focus();
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        },
+                                                move |msg_with_replies| {
+                                                    let handle_toggle_reaction = handle_toggle_reaction.clone();
+                                                    let handle_edit_message = handle_edit_message.clone();
+                                                    let member_names = member_names.clone();
+                                                    rsx! {
+                                                        ReplyTreeNode {
+                                                            message_with_replies: msg_with_replies,
+                                                            self_member_id: self_member_id,
+                                                            member_names: member_names,
+                                                            depth: 0,
+                                                            on_react: move |(msg_id, emoji)| {
+                                                                handle_toggle_reaction(msg_id, emoji);
+                                                            },
+                                                            on_request_delete: move |msg_id| {
+                                                                pending_delete.set(Some(msg_id));
+                                                            },
+                                                            on_edit: move |(msg_id, new_text)| {
+                                                                handle_edit_message(msg_id, new_text);
+                                                            },
+                                                            on_reply: move |ctx: ReplyContext| {
+                                                                replying_to.set(Some(ctx));
+                                                            },
+                                                        }
                                                     }
                                                 }
-                                            }})}
+                                            })}
                                         }
                                     })
                                 }
+                                Some(_) => Some(rsx! {
+                                    div { class: "flex flex-col items-center justify-center h-32 text-text-muted",
+                                        p { "No replies yet." }
+                                    }
+                                }),
                                 None => Some(rsx! {
-                                    div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
-                                        p { "No messages yet. Start the conversation!" }
+                                    div { class: "flex flex-col items-center justify-center h-32 text-text-muted",
+                                        p { "No messages." }
                                     }
                                 })
                             }
@@ -984,24 +767,9 @@ pub fn Conversation() -> Element {
                     }
                 }
             }
-            }
 
-            // Message input or status
+            // Message input
             {
-                // Find user's most recent message for up-arrow-to-edit
-                let request_edit_last = move |_| {
-                    if let Some((groups, _, _)) = message_groups.read().as_ref() {
-                        for group in groups.iter().rev() {
-                            if group.is_self {
-                                if let Some(msg) = group.messages.last() {
-                                    edit_trigger.set(Some((msg.id.clone(), msg.content_text.clone())));
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                };
-
                 match current_room_data.as_ref() {
                     Some(room_data) => {
                         match room_data.can_participate() {
@@ -1012,7 +780,7 @@ pub fn Conversation() -> Element {
                                         handle(msg)
                                     },
                                     replying_to: replying_to,
-                                    on_request_edit_last: request_edit_last,
+                                    on_request_edit_last: move |_| {},
                                 }
                             },
                             Err(SendMessageError::UserNotMember) => {
@@ -1030,21 +798,7 @@ pub fn Conversation() -> Element {
                             },
                         }
                     },
-                    None => rsx! {
-                        div { class: "flex-1 flex flex-col items-center justify-center text-center p-8",
-                            img {
-                                class: "w-24 h-24 mb-6 opacity-50",
-                                src: asset!("/assets/river_logo.svg"),
-                                alt: "River Logo"
-                            }
-                            h1 { class: "text-2xl font-semibold text-text mb-2",
-                                "Welcome to FreeTalk"
-                            }
-                            p { class: "text-text-muted",
-                                "Create a new board, explore public boards, or get invited to an existing one."
-                            }
-                        }
-                    },
+                    None => rsx! {},
                 }
             }
 
@@ -1060,7 +814,7 @@ pub fn Conversation() -> Element {
                             "Delete Message?"
                         }
                         p { class: "text-text-muted text-sm mb-4",
-                            "This action cannot be undone. The message will be permanently deleted."
+                            "This action cannot be undone."
                         }
                         div { class: "flex gap-3 justify-end",
                             button {
@@ -1087,480 +841,301 @@ pub fn Conversation() -> Element {
     }
 }
 
+/// Recursive component for rendering a message with its nested replies
 #[component]
-fn MessageGroupComponent(
-    group: MessageGroup,
+fn ReplyTreeNode(
+    message_with_replies: MessageWithReplies,
     self_member_id: MemberId,
     member_names: HashMap<MemberId, String>,
-    last_chat_element: Option<Signal<Option<Rc<MountedData>>>>,
-    edit_trigger: Signal<Option<(String, String)>>,
+    depth: u32,
     on_react: EventHandler<(MessageId, String)>,
     on_request_delete: EventHandler<MessageId>,
     on_edit: EventHandler<(MessageId, String)>,
     on_reply: EventHandler<ReplyContext>,
 ) -> Element {
-    let timestamp_ms = group.first_time.timestamp_millis();
+    // Clone everything we need to avoid borrow issues
+    let msg = message_with_replies.message.clone();
+    let replies = message_with_replies.replies.clone();
+    let is_self = msg.is_self;
+
+    let timestamp_ms = msg.time.timestamp_millis();
     let time_str = format_utc_as_local_time(timestamp_ms);
-    let delay_suffix = group
-        .first_delay_secs
-        .map(|s| format!(" (received after {} delay)", format_delay(s)));
-    let full_time_str = if group.time_clamped {
+    let full_time_str = if msg.time_clamped {
         format!(
-            "{} (sender's clock may be incorrect — original timestamp was in the future)",
+            "{} (sender's clock may be incorrect)",
             format_utc_as_full_datetime(timestamp_ms)
         )
-    } else if let Some(ref suffix) = delay_suffix {
-        format!("{}{}", format_utc_as_full_datetime(timestamp_ms), suffix)
     } else {
         format_utc_as_full_datetime(timestamp_ms)
     };
-    let time_clamped = group.time_clamped;
-    let is_self = group.is_self;
 
-    // Track which message's emoji picker is open (by message ID string)
-    let mut open_emoji_picker: Signal<Option<String>> = use_signal(|| None);
+    let mut editing = use_signal(|| false);
+    let mut edit_text = use_signal(String::new);
+    let mut open_emoji_picker = use_signal(|| false);
 
-    // Track if emoji picker should appear above (true) or below (false) the button
-    let mut picker_show_above: Signal<bool> = use_signal(|| false);
+    // Indent based on depth (max 4 levels visually)
+    let indent_class = match depth.min(4) {
+        0 => "",
+        1 => "ml-8",
+        2 => "ml-16",
+        3 => "ml-24",
+        _ => "ml-32",
+    };
 
-    // Track which message is being edited and its current text
-    let mut editing_message: Signal<Option<String>> = use_signal(|| None);
-    let mut edit_text: Signal<String> = use_signal(String::new);
-
-    // Watch for external edit requests (e.g. up-arrow in empty input)
-    let message_ids: Vec<String> = group.messages.iter().map(|m| m.id.clone()).collect();
-    use_effect(move || {
-        let trigger = edit_trigger.read().clone();
-        if let Some((trigger_id, trigger_text)) = trigger {
-            if message_ids.contains(&trigger_id) {
-                edit_text.set(trigger_text);
-                editing_message.set(Some(trigger_id));
-                edit_trigger.set(None);
-            }
-        }
-    });
+    let msg_id_for_key = msg.message_id.clone();
+    let msg_id_for_edit_1 = msg.message_id.clone();
+    let msg_id_for_edit_2 = msg.message_id.clone();
+    let msg_id_for_delete = msg.message_id.clone();
+    let msg_id_for_reply = msg.message_id.clone();
+    let msg_id_for_react = msg.message_id.clone();
+    let msg_id_for_react_picker = msg.message_id.clone();
+    let author_name_for_reply = msg.author_name.clone();
+    let content_preview = msg.content_text.chars().take(100).collect::<String>();
+    let author_id = msg.author_id;
+    let author_name = msg.author_name.clone();
+    let title_text = msg.title_text.clone();
+    let content_html = msg.content_html.clone();
+    let content_text_for_edit = msg.content_text.clone();
+    let content_text_for_edit_2 = msg.content_text.clone();
+    let edited = msg.edited;
+    let reactions = msg.reactions.clone();
 
     rsx! {
-        div { class: "w-full",
-            // Messages - full width blocks
-            div { class: "space-y-0",
-                {
-                    let messages_len = group.messages.len();
-                    group.messages.into_iter().enumerate().map(move |(idx, msg)| {
-                        let is_last = idx == messages_len - 1;
-                        let _is_first = idx == 0;
-                        let has_reactions = !msg.reactions.is_empty();
-                        let has_reply = msg.reply_to_author.is_some();
-                        let reply_author_val = msg.reply_to_author.clone();
-                        let reply_preview_val = msg.reply_to_preview.clone();
-                        let reply_target_id_val = msg.reply_to_message_id.clone();
+        div {
+            key: "{msg_id_for_key:?}",
+            class: "{indent_class}",
+            // Message card
+            div {
+                class: "group relative border-l-2 pl-4 py-2 hover:bg-surface/30 transition-colors",
+                style: if is_self { "border-color: var(--accent);" } else { "border-color: var(--border);" },
 
-                        rsx! {
-                            div {
-                                key: "{msg.id}",
-                                id: "msg-{msg.id}",
-                                class: "flex flex-col group",
-                                // Container for message bubble + hover actions
-                                div {
-                                    class: "relative",
-                                    // Message bubble (or edit form if editing)
-                                    {
-                                        let is_editing = editing_message.read().as_ref() == Some(&msg.id);
-                                        let msg_id_for_save = msg.message_id.clone();
-                                        let original_text = msg.content_text.clone();
-                                        if is_editing {
-                                            let save_msg_id = msg_id_for_save.clone();
-                                            let save_original = original_text.clone();
-                                            rsx! {
-                                                div {
-                                                    class: format!(
-                                                        "p-3 {}",
-                                                        if is_self { "bg-accent" } else { "bg-surface" }
-                                                    ),
-                                                    style: "width: 550px; overflow: visible;",
-                                                    tabindex: "0",
-                                                    // Scroll into view when edit dialog appears (#93)
-                                                    onmounted: move |cx| {
-                                                        let el = cx.data();
-                                                        wasm_bindgen_futures::spawn_local(async move {
-                                                            let _ = el.scroll_to(ScrollBehavior::Smooth).await;
-                                                        });
-                                                    },
-                                                    // Global key bindings on the container (#94)
-                                                    onkeydown: {
-                                                        let msg_id = msg_id_for_save.clone();
-                                                        let original = original_text.clone();
-                                                        move |e: KeyboardEvent| {
-                                                            if e.key() == Key::Escape {
-                                                                editing_message.set(None);
-                                                            } else if e.key() == Key::Enter && !e.modifiers().shift() {
-                                                                e.prevent_default();
-                                                                let new_text = edit_text.read().clone();
-                                                                if !new_text.is_empty() && new_text != original {
-                                                                    on_edit.call((msg_id.clone(), new_text));
-                                                                }
-                                                                editing_message.set(None);
-                                                            }
-                                                        }
-                                                    },
-                                                    textarea {
-                                                        class: format!(
-                                                            "w-full min-h-[240px] p-2 rounded-lg text-sm resize-y focus:outline-none {}",
-                                                            if is_self { "bg-white/10 text-white placeholder-white/50 border border-white/20" } else { "bg-bg text-text border border-border" }
-                                                        ),
-                                                        value: "{edit_text}",
-                                                        autofocus: true,
-                                                        oninput: move |e| edit_text.set(e.value().clone()),
-                                                    }
-                                                    div { class: "flex justify-end gap-3 mt-3",
-                                                        style: "overflow: visible;",
-                                                        button {
-                                                            class: if is_self {
-                                                                "flex-shrink-0 px-3 py-1.5 text-xs rounded-lg bg-white/20 text-white hover:bg-white/30"
-                                                            } else {
-                                                                "flex-shrink-0 px-3 py-1.5 text-xs rounded-lg bg-surface text-text hover:bg-border"
-                                                            },
-                                                            onclick: move |_| editing_message.set(None),
-                                                            "Cancel (Esc)"
-                                                        }
-                                                        button {
-                                                            class: "flex-shrink-0 px-3 py-1.5 text-xs rounded-lg font-medium hover:opacity-90",
-                                                            style: "background-color: #2563eb; color: white;",
-                                                            onclick: move |_| {
-                                                                let new_text = edit_text.read().clone();
-                                                                if !new_text.is_empty() && new_text != save_original {
-                                                                    on_edit.call((save_msg_id.clone(), new_text));
-                                                                }
-                                                                editing_message.set(None);
-                                                            },
-                                                            "Save (Enter)"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            rsx! {
-                                                // Reply context strip (separate element, peeks out above bubble)
-                                                {
-                                                    let r_author = reply_author_val.clone();
-                                                    let r_preview = reply_preview_val.clone();
-                                                    let r_target = reply_target_id_val.clone();
-                                                    if let (Some(author), Some(preview)) = (r_author, r_preview) {
-                                                        let target_id_str = r_target.map(|id| format!("{:?}", id.0)).unwrap_or_default();
-                                                        rsx! {
-                                                            div {
-                                                                class: format!(
-                                                                    "reply-strip text-[11px] leading-normal px-3 pt-1.5 pb-6 cursor-pointer rounded-t-2xl max-w-prose {}",
-                                                                    if is_self { "bg-accent/40 text-accent" } else { "bg-black/[0.12] text-text-muted" }
-                                                                ),
-                                                                title: "Click to scroll to original message",
-                                                                onclick: move |_| {
-                                                                    if let Some(window) = web_sys::window() {
-                                                                        if let Some(doc) = window.document() {
-                                                                            if let Some(el) = doc.get_element_by_id(&format!("msg-{}", target_id_str)) {
-                                                                                el.scroll_into_view();
-                                                                                let _ = el.class_list().add_1("reply-highlight");
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                },
-                                                                span { class: "font-medium", "\u{21a9} @{author}: " }
-                                                                span { "{preview}" }
-                                                            }
-                                                        }
-                                                    } else {
-                                                        rsx! {}
-                                                    }
-                                                }
-                                                // Message block - full width with hook icon
-                                                div {
-                                                    class: format!(
-                                                        "w-full border-b border-border py-4 px-4 {} {}",
-                                                        if is_self { "bg-accent/5" } else { "bg-surface/50" },
-                                                        if has_reply { "relative z-10 -mt-3" } else { "" }
-                                                    ),
-                                                    onmounted: move |cx| {
-                                                        if is_last {
-                                                            if let Some(mut last_el) = last_chat_element {
-                                                                last_el.set(Some(cx.data()));
-                                                            }
-                                                        }
-                                                    },
-                                                    // Flex container: avatar | title + content
-                                                    div { class: "flex gap-4 items-start",
-                                                        // Avatar
-                                                        div { class: "flex-shrink-0",
-                                                            img {
-                                                                src: "{get_avatar(&group.author_id)}",
-                                                                alt: "Avatar",
-                                                                class: "w-10 h-10 rounded-full"
-                                                            }
-                                                        }
-                                                        // Author, time, title and content
-                                                        div { class: "flex-1 min-w-0",
-                                                            // Author and time
-                                                            div { class: "flex items-baseline justify-between mb-3",
-                                                                // Author name and (you) indicator
-                                                                div { class: "flex items-baseline gap-2",
-                                                                    span {
-                                                                        class: "text-sm font-medium text-text cursor-pointer hover:text-accent transition-colors",
-                                                                        title: "Member ID: {group.author_id}",
-                                                                        onclick: move |_| {
-                                                                            MEMBER_INFO_MODAL.with_mut(|signal| {
-                                                                                signal.member = Some(group.author_id);
-                                                                            });
-                                                                        },
-                                                                        "{group.author_name}"
-                                                                    }
-                                                                    if is_self {
-                                                                        span { class: "text-xs text-accent font-medium", "(you)" }
-                                                                    }
-                                                                }
-                                                                // Time on the right
-                                                                span {
-                                                                    class: if time_clamped {
-                                                                        "text-xs text-text-muted cursor-default italic opacity-70"
-                                                                    } else {
-                                                                        "text-xs text-text-muted cursor-default"
-                                                                    },
-                                                                    title: "{full_time_str}",
-                                                                    if time_clamped { "~{time_str}" } else { "{time_str}" }
-                                                                }
-                                                            }
-                                                            // Title (if present)
-                                                            if !msg.title_text.is_empty() {
-                                                                h3 { class: "text-lg font-semibold text-text mb-3",
-                                                                    "{msg.title_text}"
-                                                                }
-                                                            }
-                                                            // Content
-                                                            div { class: "text-sm text-text",
-                                                                span {
-                                                                    class: "prose prose-sm dark:prose-invert max-w-none",
-                                                                    dangerous_inner_html: "{msg.content_html}"
-                                                                }
-                                                                // Edited indicator
-                                                                if msg.edited {
-                                                                    span { class: "text-xs ml-2 text-text-muted",
-                                                                        "(edited)"
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
+                // Header: avatar, name, time
+                div { class: "flex items-center gap-3 mb-2",
+                    img {
+                        src: "{get_avatar(&author_id)}",
+                        alt: "Avatar",
+                        class: "w-8 h-8 rounded-full"
+                    }
+                    span {
+                        class: "text-sm font-medium text-text cursor-pointer hover:text-accent transition-colors",
+                        onclick: move |_| {
+                            MEMBER_INFO_MODAL.with_mut(|signal| {
+                                signal.member = Some(author_id);
+                            });
+                        },
+                        "{author_name}"
+                    }
+                    if is_self {
+                        span { class: "text-xs text-accent", "(you)" }
+                    }
+                    span {
+                        class: if msg.time_clamped { "text-xs text-text-muted italic" } else { "text-xs text-text-muted" },
+                        title: "{full_time_str}",
+                        "{time_str}"
+                    }
+                }
+
+                // Content (or edit form)
+                if *editing.read() {
+                    div { class: "space-y-2",
+                        textarea {
+                            class: "w-full p-2 rounded-lg text-sm bg-surface border border-border text-text resize-y min-h-[80px]",
+                            value: "{edit_text}",
+                            autofocus: true,
+                            oninput: move |e| edit_text.set(e.value().clone()),
+                            onkeydown: {
+                                let original = content_text_for_edit.clone();
+                                let msg_id = msg_id_for_edit_1.clone();
+                                move |e: KeyboardEvent| {
+                                    if e.key() == Key::Escape {
+                                        editing.set(false);
+                                    } else if e.key() == Key::Enter && !e.modifiers().shift() {
+                                        e.prevent_default();
+                                        let new_text = edit_text.read().clone();
+                                        if !new_text.is_empty() && new_text != original {
+                                            on_edit.call((msg_id.clone(), new_text));
                                         }
+                                        editing.set(false);
                                     }
-                                    // Hover action bar (reply for all, edit/delete for own)
-                                    {
-                                        let msg_id_str_for_edit = msg.id.clone();
-                                        let msg_id_for_delete = msg.message_id.clone();
-                                        let msg_id_for_reply = msg.message_id.clone();
-                                        let current_text = msg.content_text.clone();
-                                        let reply_text_preview = msg.content_text.chars().take(100).collect::<String>();
-                                        let reply_author_name = group.author_name.clone();
-                                        rsx! {
-                                            div {
-                                                class: format!(
-                                                    "absolute top-1/2 -translate-y-1/2 transition-opacity z-50 flex flex-col items-start bg-panel rounded-lg shadow-md border border-border px-2 py-1.5 opacity-0 group-hover:opacity-100 {} {}",
-                                                    if is_self { "left-0 -translate-x-full -ml-2" } else { "right-0 translate-x-full ml-2" },
-                                                    ""
-                                                ),
-                                                // Reply button - available for all messages
-                                                button {
-                                                    class: "text-xs text-text-muted hover:text-accent transition-colors",
-                                                    title: "Reply",
-                                                    onclick: move |_| {
-                                                        on_reply.call(ReplyContext {
-                                                            message_id: msg_id_for_reply.clone(),
-                                                            author_name: reply_author_name.clone(),
-                                                            content_preview: reply_text_preview.clone(),
-                                                        });
-                                                    },
-                                                    "reply"
-                                                }
-                                                // Edit/Delete buttons - only for own messages
-                                                if is_self {
-                                                    button {
-                                                        class: "text-xs text-text-muted hover:text-text transition-colors",
-                                                        title: "Edit message",
-                                                        onclick: move |_| {
-                                                            edit_text.set(current_text.clone());
-                                                            editing_message.set(Some(msg_id_str_for_edit.clone()));
-                                                        },
-                                                        "edit"
-                                                    }
-                                                    button {
-                                                        class: "text-xs text-text-muted hover:text-red-500 transition-colors",
-                                                        title: "Delete message",
-                                                        onclick: move |_| {
-                                                            on_request_delete.call(msg_id_for_delete.clone());
-                                                        },
-                                                        "delete"
-                                                    }
-                                                }
+                                }
+                            },
+                        }
+                        div { class: "flex gap-2",
+                            button {
+                                class: "text-xs px-2 py-1 rounded bg-surface hover:bg-border text-text",
+                                onclick: move |_| editing.set(false),
+                                "Cancel"
+                            }
+                            button {
+                                class: "text-xs px-2 py-1 rounded bg-accent text-white",
+                                onclick: {
+                                    let original = content_text_for_edit_2.clone();
+                                    let msg_id = msg_id_for_edit_2.clone();
+                                    move |_| {
+                                        let new_text = edit_text.read().clone();
+                                        if !new_text.is_empty() && new_text != original {
+                                            on_edit.call((msg_id.clone(), new_text));
+                                        }
+                                        editing.set(false);
+                                    }
+                                },
+                                "Save"
+                            }
+                        }
+                    }
+                } else {
+                    div {
+                        // Title
+                        if !title_text.is_empty() {
+                            h4 { class: "font-semibold text-text mb-1",
+                                "{title_text}"
+                            }
+                        }
+                        // Content
+                        div { class: "text-sm text-text",
+                            span {
+                                class: "prose prose-sm dark:prose-invert max-w-none",
+                                dangerous_inner_html: "{content_html}"
+                            }
+                            if edited {
+                                span { class: "text-xs ml-2 text-text-muted", "(edited)" }
+                            }
+                        }
+                    }
+                }
+
+                // Reactions
+                if !reactions.is_empty() {
+                    div { class: "flex flex-wrap items-center gap-1 mt-2",
+                        {
+                            let mut sorted: Vec<_> = reactions.iter().collect();
+                            sorted.sort_by_key(|(e, _)| e.as_str());
+                            sorted.into_iter().map(|(emoji, reactors)| {
+                                let count = reactors.len();
+                                let is_user = reactors.contains(&self_member_id);
+                                let emoji_click = emoji.clone();
+                                let msg_id_click = msg_id_for_react.clone();
+                                let names: Vec<String> = reactors.iter().map(|id| {
+                                    if *id == self_member_id { "You".to_string() }
+                                    else { member_names.get(id).cloned().unwrap_or("Unknown".to_string()) }
+                                }).collect();
+                                let tooltip = names.join(", ");
+                                rsx! {
+                                    span {
+                                        key: "{emoji}",
+                                        class: format!(
+                                            "inline-flex items-center gap-0.5 text-sm {}",
+                                            if is_user { "cursor-pointer underline decoration-accent" } else { "" }
+                                        ),
+                                        title: "{tooltip}",
+                                        onclick: move |_| {
+                                            if is_user {
+                                                on_react.call((msg_id_click.clone(), emoji_click.clone()));
                                             }
+                                        },
+                                        "{emoji}"
+                                        if count > 1 {
+                                            span { class: "text-xs text-text-muted", "{count}" }
                                         }
                                     }
                                 }
-                                // Reactions display with inline add button
-                                {
-                                    let msg_id_for_inline = msg.id.clone();
-                                    let msg_id_react = msg.message_id.clone();
-                                    let is_inline_picker_open = open_emoji_picker.read().as_ref() == Some(&format!("inline-{}", msg_id_for_inline));
+                            })
+                        }
+                    }
+                }
 
-                                    // Find user's current reaction on this message (if any)
-                                    let user_reaction: Option<String> = msg.reactions.iter().find_map(|(emoji, reactors)| {
-                                        if reactors.contains(&self_member_id) {
-                                            Some(emoji.clone())
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                    let user_reaction_for_picker = user_reaction.clone();
-
-                                    rsx! {
-                                        div {
-                                            class: format!(
-                                                "flex flex-wrap items-center gap-1 mt-0.5 {}",
-                                                if is_self { "justify-end" } else { "justify-start" }
-                                            ),
-                                            // Existing reactions (clickable to toggle if user has reacted)
-                                            {
-                                                let mut sorted_reactions: Vec<_> = msg.reactions.iter().collect();
-                                                sorted_reactions.sort_by_key(|(emoji, _)| emoji.as_str());
-                                                sorted_reactions.into_iter().map(|(emoji, reactors)| {
-                                                    let count = reactors.len();
-                                                    let is_user_reaction = reactors.contains(&self_member_id);
-                                                    let emoji_for_click = emoji.clone();
-                                                    let msg_id_for_click = msg_id_react.clone();
-
-                                                    // Build list of reactor names for tooltip
-                                                    let reactor_names: Vec<String> = reactors.iter().map(|reactor_id| {
-                                                        if *reactor_id == self_member_id {
-                                                            "You".to_string()
-                                                        } else {
-                                                            member_names.get(reactor_id)
-                                                                .cloned()
-                                                                .unwrap_or_else(|| "Unknown".to_string())
-                                                        }
-                                                    }).collect();
-                                                    let names_str = reactor_names.join(", ");
-
-                                                    let tooltip = if is_user_reaction {
-                                                        format!("{} (click to remove)", names_str)
-                                                    } else {
-                                                        names_str
-                                                    };
-
-                                                    rsx! {
-                                                        span {
-                                                            key: "{emoji}",
-                                                            class: format!(
-                                                                "inline-flex items-center gap-0.5 text-base transition-transform {}",
-                                                                if is_user_reaction {
-                                                                    // Subtle indicator: underline for user's reaction
-                                                                    "cursor-pointer hover:scale-110 underline decoration-accent decoration-2 underline-offset-4"
-                                                                } else {
-                                                                    "cursor-default hover:scale-110"
-                                                                }
-                                                            ),
-                                                            title: "{tooltip}",
-                                                            onclick: move |_| {
-                                                                if is_user_reaction {
-                                                                    on_react.call((msg_id_for_click.clone(), emoji_for_click.clone()));
-                                                                }
-                                                            },
-                                                            "{emoji}"
-                                                            if count > 1 {
-                                                                span { class: "text-xs text-text-muted", "{count}" }
-                                                            }
-                                                        }
-                                                    }
-                                                })
-                                            }
-                                            // Inline add reaction button (same line height as reactions)
-                                            div {
-                                                class: "relative group/react inline-flex items-center",
-                                                // Invisible backdrop when picker is open
-                                                if is_inline_picker_open {
-                                                    div {
-                                                        class: "fixed inset-0 z-40",
-                                                        onclick: move |_| open_emoji_picker.set(None),
-                                                    }
-                                                }
-                                                button {
-                                                    class: format!(
-                                                        "add-reaction-btn inline-flex items-center justify-center text-xl leading-none hover:scale-110 {}",
-                                                        if has_reactions || is_inline_picker_open { "has-reactions" } else { "" }
-                                                    ),
-                                                    title: "Add reaction",
-                                                    onclick: {
-                                                        let picker_id = format!("inline-{}", msg_id_for_inline);
-                                                        move |e: MouseEvent| {
-                                                            e.stop_propagation();
-                                                            let current = open_emoji_picker.read().clone();
-                                                            if current.as_ref() == Some(&picker_id) {
-                                                                open_emoji_picker.set(None);
-                                                            } else {
-                                                                // Determine if picker should appear above or below based on click position
-                                                                // If click is in bottom 40% of viewport, show picker above
-                                                                let click_y = e.client_coordinates().y;
-                                                                let viewport_height = web_sys::window()
-                                                                    .and_then(|w| w.inner_height().ok())
-                                                                    .and_then(|h| h.as_f64())
-                                                                    .unwrap_or(800.0);
-                                                                picker_show_above.set(click_y > viewport_height * 0.6);
-                                                                open_emoji_picker.set(Some(picker_id.clone()));
-                                                            }
-                                                        }
-                                                    },
-                                                    "+"
-                                                }
-                                                // Emoji picker for inline button (flips based on viewport position)
-                                                if is_inline_picker_open {
-                                                    div {
-                                                        class: format!(
-                                                            "absolute p-1.5 bg-panel rounded-xl shadow-xl border border-border z-50 grid {} {}",
-                                                            if *picker_show_above.read() { "bottom-full mb-1" } else { "top-full mt-1" },
-                                                            if is_self { "right-0" } else { "left-0" }
-                                                        ),
-                                                        style: "grid-template-columns: repeat(4, 1fr); gap: 2px;",
-                                                        onclick: move |e: MouseEvent| e.stop_propagation(),
-                                                        {FREQUENT_EMOJIS.iter().map(|emoji| {
-                                                            let emoji_str = emoji.to_string();
-                                                            let msg_id = msg_id_react.clone();
-                                                            let is_current = user_reaction_for_picker.as_ref() == Some(&emoji_str);
-                                                            rsx! {
-                                                                button {
-                                                                    key: "{emoji}",
-                                                                    class: format!(
-                                                                        "p-1 rounded hover:bg-surface transition-colors text-xl leading-none {}",
-                                                                        if is_current { "bg-accent/20 ring-2 ring-accent" } else { "" }
-                                                                    ),
-                                                                    title: if is_current {
-                                                                        format!("Remove {} reaction", emoji)
-                                                                    } else {
-                                                                        format!("React with {}", emoji)
-                                                                    },
-                                                                    onclick: move |_| {
-                                                                        on_react.call((msg_id.clone(), emoji_str.clone()));
-                                                                        open_emoji_picker.set(None);
-                                                                    },
-                                                                    "{emoji}"
-                                                                }
-                                                            }
-                                                        })}
-                                                    }
-                                                }
+                // Action buttons (hover)
+                div {
+                    class: "absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded shadow border border-border px-1 py-0.5",
+                    // React button
+                    div { class: "relative",
+                        button {
+                            class: "text-xs text-text-muted hover:text-accent px-1",
+                            onclick: move |_| open_emoji_picker.set(!open_emoji_picker()),
+                            "+"
+                        }
+                        if *open_emoji_picker.read() {
+                            div {
+                                class: "fixed inset-0 z-40",
+                                onclick: move |_| open_emoji_picker.set(false),
+                            }
+                            div {
+                                class: "absolute right-0 top-full mt-1 p-1 bg-panel rounded shadow border border-border z-50 grid",
+                                style: "grid-template-columns: repeat(4, 1fr); gap: 2px;",
+                                {FREQUENT_EMOJIS.iter().map({
+                                    let msg_id = msg_id_for_react_picker.clone();
+                                    move |emoji| {
+                                        let e = emoji.to_string();
+                                        let mid = msg_id.clone();
+                                        rsx! {
+                                            button {
+                                                key: "{emoji}",
+                                                class: "p-1 rounded hover:bg-surface text-lg",
+                                                onclick: move |_| {
+                                                    on_react.call((mid.clone(), e.clone()));
+                                                    open_emoji_picker.set(false);
+                                                },
+                                                "{emoji}"
                                             }
                                         }
                                     }
+                                })}
+                            }
+                        }
+                    }
+                    button {
+                        class: "text-xs text-text-muted hover:text-accent px-1",
+                        onclick: move |_| {
+                            on_reply.call(ReplyContext {
+                                message_id: msg_id_for_reply.clone(),
+                                author_name: author_name_for_reply.clone(),
+                                content_preview: content_preview.clone(),
+                            });
+                        },
+                        "reply"
+                    }
+                    if is_self {
+                        button {
+                            class: "text-xs text-text-muted hover:text-text px-1",
+                            onclick: {
+                                let text = msg.content_text.clone();
+                                move |_| {
+                                    edit_text.set(text.clone());
+                                    editing.set(true);
+                                }
+                            },
+                            "edit"
+                        }
+                        button {
+                            class: "text-xs text-text-muted hover:text-red-500 px-1",
+                            onclick: move |_| on_request_delete.call(msg_id_for_delete.clone()),
+                            "delete"
+                        }
+                    }
+                }
+            }
+
+            // Nested replies (recursive)
+            if !replies.is_empty() {
+                div { class: "mt-1",
+                    {replies.iter().map({
+                        let member_names = member_names.clone();
+                        move |reply| {
+                            let member_names = member_names.clone();
+                            rsx! {
+                                ReplyTreeNode {
+                                    message_with_replies: reply.clone(),
+                                    self_member_id: self_member_id,
+                                    member_names: member_names,
+                                    depth: depth + 1,
+                                    on_react: move |(id, e)| on_react.call((id, e)),
+                                    on_request_delete: move |id| on_request_delete.call(id),
+                                    on_edit: move |(id, t)| on_edit.call((id, t)),
+                                    on_reply: move |ctx| on_reply.call(ctx),
                                 }
                             }
                         }
-                    })
+                    })}
                 }
             }
         }

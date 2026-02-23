@@ -1,5 +1,7 @@
 use crate::components::app::{Route, CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
 use crate::components::conversation::message_input::PostInput;
+use crate::components::conversation::Conversation;
+use crate::room_data::SendMessageError;
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::markdown::text_to_html;
@@ -10,14 +12,14 @@ use dioxus::prelude::*;
 use river_core::room_state::content::{TextContentV1, CONTENT_TYPE_TEXT};
 use river_core::room_state::member::MemberId;
 use river_core::room_state::member_info::MemberInfoV1;
-use river_core::room_state::message::{MessagesV1, RoomMessageBody};
+use river_core::room_state::message::{MessageId, MessagesV1, RoomMessageBody};
 use river_core::room_state::privacy::PrivacyMode;
 use std::collections::HashMap;
-use crate::room_data::SendMessageError;
 
 /// A single post for display (text messages only, no replies)
 #[derive(Clone, PartialEq)]
 struct Post {
+    message_id: MessageId,
     author_id: MemberId,
     author_name: String,
     title: String,
@@ -65,6 +67,7 @@ fn get_posts(
         let content_html = text_to_html(&content_text);
 
         posts.push(Post {
+            message_id: message_id.clone(),
             author_id,
             author_name,
             title,
@@ -383,11 +386,11 @@ pub fn PostsView() -> Element {
     }
 }
 
-/// Single post view - displays a single post by ID
+/// Single post view - displays a single post by ID with replies
 #[component]
 pub fn SinglePostView(post_id: String) -> Element {
-    // Find the post by ID
-    let post = use_memo(move || {
+    // Find the post by ID and get its MessageId
+    let post_data = use_memo(move || {
         let current_room = CURRENT_ROOM.read();
         if let Some(key) = current_room.owner_key {
             let rooms = ROOMS.read();
@@ -414,74 +417,86 @@ pub fn SinglePostView(post_id: String) -> Element {
                 }
             }
 
-            // Post content
-            div { class: "flex-1 overflow-y-auto",
-                div { class: "max-w-4xl mx-auto px-4 py-6",
-                    {
-                        match post.read().as_ref() {
-                            Some(post) => {
-                                let time_str = format_utc_as_local_time(post.time.timestamp_millis());
-                                let full_time_str = format_utc_as_full_datetime(post.time.timestamp_millis());
-                                let author_id = post.author_id;
-                                rsx! {
-                                    div { class: "bg-panel rounded-2xl border border-border shadow-sm overflow-hidden",
-                                        // Post header with author
-                                        div { class: "flex items-center gap-4 px-8 py-6 border-b border-border bg-surface/30",
-                                            img {
-                                                src: "{get_avatar(&post.author_id)}",
-                                                alt: "Avatar",
-                                                class: "w-16 h-16 rounded-full"
+            // Post content and replies
+            {
+                match post_data.read().as_ref() {
+                    Some(post) => {
+                        let time_str = format_utc_as_local_time(post.time.timestamp_millis());
+                        let full_time_str = format_utc_as_full_datetime(post.time.timestamp_millis());
+                        let author_id = post.author_id;
+                        let parent_message_id = post.message_id.clone();
+                        rsx! {
+                            // Original post
+                            div { class: "max-w-4xl mx-auto px-4 py-6",
+                                div { class: "bg-panel rounded-2xl border border-border shadow-sm overflow-hidden",
+                                    // Post header with author
+                                    div { class: "flex items-center gap-4 px-8 py-6 border-b border-border bg-surface/30",
+                                        img {
+                                            src: "{get_avatar(&post.author_id)}",
+                                            alt: "Avatar",
+                                            class: "w-16 h-16 rounded-full"
+                                        }
+                                        div { class: "flex-1 min-w-0",
+                                            div {
+                                                class: "text-xl font-semibold text-text cursor-pointer hover:text-accent transition-colors",
+                                                onclick: move |_| {
+                                                    MEMBER_INFO_MODAL.with_mut(|signal| {
+                                                        signal.member = Some(author_id);
+                                                    });
+                                                },
+                                                "{post.author_name}"
                                             }
-                                            div { class: "flex-1 min-w-0",
-                                                div {
-                                                    class: "text-xl font-semibold text-text cursor-pointer hover:text-accent transition-colors",
-                                                    onclick: move |_| {
-                                                        MEMBER_INFO_MODAL.with_mut(|signal| {
-                                                            signal.member = Some(author_id);
-                                                        });
-                                                    },
-                                                    "{post.author_name}"
-                                                }
-                                                span {
-                                                    class: if post.time_clamped {
-                                                        "text-sm text-text-muted italic"
-                                                    } else {
-                                                        "text-sm text-text-muted"
-                                                    },
-                                                    title: "{full_time_str}",
-                                                    if post.time_clamped { "~{time_str}" } else { "{time_str}" }
-                                                }
+                                            span {
+                                                class: if post.time_clamped {
+                                                    "text-sm text-text-muted italic"
+                                                } else {
+                                                    "text-sm text-text-muted"
+                                                },
+                                                title: "{full_time_str}",
+                                                if post.time_clamped { "~{time_str}" } else { "{time_str}" }
                                             }
                                         }
-                                        // Post content - larger for single view
-                                        div { class: "px-8 py-8",
-                                            // Title
-                                            if !post.title.is_empty() {
-                                                h1 { class: "text-3xl font-bold text-text mb-6",
-                                                    "{post.title}"
-                                                }
+                                    }
+                                    // Post content - larger for single view
+                                    div { class: "px-8 py-8",
+                                        // Title
+                                        if !post.title.is_empty() {
+                                            h1 { class: "text-3xl font-bold text-text mb-6",
+                                                "{post.title}"
                                             }
-                                            // Content
-                                            div { class: "text-xl text-text leading-relaxed",
-                                                span {
-                                                    class: "prose prose-xl dark:prose-invert max-w-none",
-                                                    dangerous_inner_html: "{post.content_html}"
-                                                }
+                                        }
+                                        // Content
+                                        div { class: "text-xl text-text leading-relaxed",
+                                            span {
+                                                class: "prose prose-xl dark:prose-invert max-w-none",
+                                                dangerous_inner_html: "{post.content_html}"
                                             }
                                         }
                                     }
                                 }
                             }
-                            None => {
-                                rsx! {
-                                    div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
-                                        p { class: "text-xl", "Post not found." }
-                                        Link {
-                                            to: Route::Posts,
-                                            class: "mt-4 text-accent hover:text-accent/80 transition-colors",
-                                            "← Back to posts"
-                                        }
-                                    }
+
+                            // Replies section header
+                            div { class: "max-w-4xl mx-auto px-4 pb-2",
+                                h2 { class: "text-lg font-semibold text-text-muted border-b border-border pb-2",
+                                    "Replies"
+                                }
+                            }
+
+                            // Conversation component showing replies to this post
+                            Conversation {
+                                parent_message_id: Some(parent_message_id),
+                            }
+                        }
+                    }
+                    None => {
+                        rsx! {
+                            div { class: "flex-1 flex flex-col items-center justify-center h-64 text-text-muted",
+                                p { class: "text-xl", "Post not found." }
+                                Link {
+                                    to: Route::Posts,
+                                    class: "mt-4 text-accent hover:text-accent/80 transition-colors",
+                                    "← Back to posts"
                                 }
                             }
                         }
