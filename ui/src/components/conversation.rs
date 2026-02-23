@@ -740,10 +740,12 @@ pub fn Conversation(
                                                     let handle_edit_message = handle_edit_message.clone();
                                                     let member_names = member_names.clone();
                                                     rsx! {
-                                                        ReplyTreeNode {
-                                                            message_with_replies: msg_with_replies,
+                                                        MessageCard {
+                                                            message: msg_with_replies.message.clone(),
+                                                            variant: MessageCardVariant::Reply,
                                                             self_member_id: self_member_id,
                                                             member_names: member_names,
+                                                            replies: msg_with_replies.replies.clone(),
                                                             depth: 0,
                                                             on_react: move |(msg_id, emoji)| {
                                                                 handle_toggle_reaction(msg_id, emoji);
@@ -791,7 +793,7 @@ pub fn Conversation(
                                 div { class: "flex justify-center",
                                     PostInput {
                                         handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
-                                            let mut handle = handle_send_message.clone();
+                                            let handle = handle_send_message.clone();
                                             handle(msg)
                                         },
                                         replying_to: replying_to,
@@ -858,21 +860,62 @@ pub fn Conversation(
     }
 }
 
-/// Recursive component for rendering a message with its nested replies
+/// Display variant for MessageCard
+#[derive(Clone, Copy, PartialEq, Default)]
+pub enum MessageCardVariant {
+    /// Reply style: border-left, compact, indented
+    #[default]
+    Reply,
+    /// Card style: full card with header, larger text
+    Card,
+}
+
+/// Unified component for rendering messages in either card or reply style
+/// Replaces both ReplyTreeNode and PostCard
 #[component]
-fn ReplyTreeNode(
-    message_with_replies: MessageWithReplies,
+pub fn MessageCard(
+    /// The message to display
+    message: MessageData,
+    /// Display variant (Card or Reply)
+    #[props(default)]
+    variant: MessageCardVariant,
+    /// Self member ID for determining edit/delete permissions
     self_member_id: MemberId,
+    /// Member names lookup for reaction tooltips
+    #[props(default)]
     member_names: HashMap<MemberId, String>,
+    /// Nested replies (for Reply variant)
+    #[props(default)]
+    replies: Vec<MessageWithReplies>,
+    /// Nesting depth for indentation (Reply variant only)
+    #[props(default = 0)]
     depth: u32,
-    on_react: EventHandler<(MessageId, String)>,
-    on_request_delete: EventHandler<MessageId>,
-    on_edit: EventHandler<(MessageId, String)>,
-    on_reply: EventHandler<ReplyContext>,
+    /// Whether this is expanded view with larger styling (Card variant only)
+    #[props(default = false)]
+    expanded: bool,
+    /// Click handler for card navigation (Card variant only)
+    #[props(default)]
+    on_click: Option<EventHandler<()>>,
+    /// Handler for reactions
+    #[props(default)]
+    on_react: Option<EventHandler<(MessageId, String)>>,
+    /// Handler for delete requests
+    #[props(default)]
+    on_request_delete: Option<EventHandler<MessageId>>,
+    /// Handler for edits
+    #[props(default)]
+    on_edit: Option<EventHandler<(MessageId, String)>>,
+    /// Handler for replies
+    #[props(default)]
+    on_reply: Option<EventHandler<ReplyContext>>,
+    /// Whether to show replies section below (Card variant only)
+    #[props(default = false)]
+    show_replies: bool,
+    /// Default reply context for replies section
+    #[props(default)]
+    default_reply_to: Option<ReplyContext>,
 ) -> Element {
-    // Clone everything we need to avoid borrow issues
-    let msg = message_with_replies.message.clone();
-    let replies = message_with_replies.replies.clone();
+    let msg = message.clone();
     let is_self = msg.is_self;
 
     let timestamp_ms = msg.time.timestamp_millis();
@@ -890,15 +933,7 @@ fn ReplyTreeNode(
     let mut edit_text = use_signal(String::new);
     let mut open_emoji_picker = use_signal(|| false);
 
-    // Indent based on depth (max 4 levels visually)
-    let indent_class = match depth.min(4) {
-        0 => "",
-        1 => "ml-8",
-        2 => "ml-16",
-        3 => "ml-24",
-        _ => "ml-32",
-    };
-
+    // Clone message IDs for various handlers
     let msg_id_for_key = msg.message_id.clone();
     let msg_id_for_edit_1 = msg.message_id.clone();
     let msg_id_for_edit_2 = msg.message_id.clone();
@@ -906,6 +941,7 @@ fn ReplyTreeNode(
     let msg_id_for_reply = msg.message_id.clone();
     let msg_id_for_react = msg.message_id.clone();
     let msg_id_for_react_picker = msg.message_id.clone();
+    let msg_id_for_replies = msg.message_id.clone();
     let author_name_for_reply = msg.author_name.clone();
     let content_preview = msg.content_text.chars().take(100).collect::<String>();
     let author_id = msg.author_id;
@@ -917,390 +953,599 @@ fn ReplyTreeNode(
     let edited = msg.edited;
     let reactions = msg.reactions.clone();
 
-    rsx! {
-        div {
-            key: "{msg_id_for_key:?}",
-            class: "{indent_class}",
-            // Message card
-            div {
-                class: "group relative border-l-2 pl-4 py-2 hover:bg-surface/30 transition-colors",
-                style: if is_self { "border-color: var(--accent);" } else { "border-color: var(--border);" },
+    // Check if we have action handlers
+    let has_actions = on_react.is_some() || on_reply.is_some() || (is_self && (on_edit.is_some() || on_request_delete.is_some()));
 
-                // Header: avatar, name, time
-                div { class: "flex items-center gap-3 mb-2",
-                    img {
-                        src: "{get_avatar(&author_id)}",
-                        alt: "Avatar",
-                        class: "w-8 h-8 rounded-full"
-                    }
-                    span {
-                        class: "text-sm font-medium text-text cursor-pointer hover:text-accent transition-colors",
-                        onclick: move |_| {
-                            MEMBER_INFO_MODAL.with_mut(|signal| {
-                                signal.member = Some(author_id);
-                            });
-                        },
-                        "{author_name}"
-                    }
-                    if is_self {
-                        span { class: "text-xs text-accent", "(you)" }
-                    }
-                    span {
-                        class: if msg.time_clamped { "text-xs text-text-muted italic" } else { "text-xs text-text-muted" },
-                        title: "{full_time_str}",
-                        "{time_str}"
-                    }
-                }
+    match variant {
+        MessageCardVariant::Reply => {
+            // Indent based on depth (max 4 levels visually)
+            let indent_class = match depth.min(4) {
+                0 => "",
+                1 => "ml-8",
+                2 => "ml-16",
+                3 => "ml-24",
+                _ => "ml-32",
+            };
 
-                // Content (or edit form)
-                if *editing.read() {
-                    div { class: "space-y-2",
-                        textarea {
-                            class: "w-full p-2 rounded-lg text-sm bg-surface border border-border text-text resize-y min-h-[80px]",
-                            value: "{edit_text}",
-                            autofocus: true,
-                            oninput: move |e| edit_text.set(e.value().clone()),
-                            onkeydown: {
-                                let original = content_text_for_edit.clone();
-                                let msg_id = msg_id_for_edit_1.clone();
-                                move |e: KeyboardEvent| {
-                                    if e.key() == Key::Escape {
-                                        editing.set(false);
-                                    } else if e.key() == Key::Enter && !e.modifiers().shift() {
-                                        e.prevent_default();
-                                        let new_text = edit_text.read().clone();
-                                        if !new_text.is_empty() && new_text != original {
-                                            on_edit.call((msg_id.clone(), new_text));
-                                        }
-                                        editing.set(false);
-                                    }
-                                }
-                            },
-                        }
-                        div { class: "flex gap-2",
-                            button {
-                                class: "text-xs px-2 py-1 rounded bg-surface hover:bg-border text-text",
-                                onclick: move |_| editing.set(false),
-                                "Cancel"
-                            }
-                            button {
-                                class: "text-xs px-2 py-1 rounded bg-accent text-white",
-                                onclick: {
-                                    let original = content_text_for_edit_2.clone();
-                                    let msg_id = msg_id_for_edit_2.clone();
-                                    move |_| {
-                                        let new_text = edit_text.read().clone();
-                                        if !new_text.is_empty() && new_text != original {
-                                            on_edit.call((msg_id.clone(), new_text));
-                                        }
-                                        editing.set(false);
-                                    }
-                                },
-                                "Save"
-                            }
-                        }
-                    }
-                } else {
+            rsx! {
+                div {
+                    key: "{msg_id_for_key:?}",
+                    class: "{indent_class}",
+                    // Message card
                     div {
-                        // Title
-                        if !title_text.is_empty() {
-                            h4 { class: "font-semibold text-text mb-1",
-                                "{title_text}"
-                            }
-                        }
-                        // Content
-                        div { class: "text-sm text-text",
-                            span {
-                                class: "prose prose-sm dark:prose-invert max-w-none",
-                                dangerous_inner_html: "{content_html}"
-                            }
-                            if edited {
-                                span { class: "text-xs ml-2 text-text-muted", "(edited)" }
-                            }
-                        }
-                    }
-                }
+                        class: "group relative border-l-2 pl-4 py-2 hover:bg-surface/30 transition-colors",
+                        style: if is_self { "border-color: var(--accent);" } else { "border-color: var(--border);" },
 
-                // Reactions
-                if !reactions.is_empty() {
-                    div { class: "flex flex-wrap items-center gap-1 mt-2",
-                        {
-                            let mut sorted: Vec<_> = reactions.iter().collect();
-                            sorted.sort_by_key(|(e, _)| e.as_str());
-                            sorted.into_iter().map(|(emoji, reactors)| {
-                                let count = reactors.len();
-                                let is_user = reactors.contains(&self_member_id);
-                                let emoji_click = emoji.clone();
-                                let msg_id_click = msg_id_for_react.clone();
-                                let names: Vec<String> = reactors.iter().map(|id| {
-                                    if *id == self_member_id { "You".to_string() }
-                                    else { member_names.get(id).cloned().unwrap_or("Unknown".to_string()) }
-                                }).collect();
-                                let tooltip = names.join(", ");
-                                rsx! {
-                                    span {
-                                        key: "{emoji}",
-                                        class: format!(
-                                            "inline-flex items-center gap-0.5 text-sm {}",
-                                            if is_user { "cursor-pointer underline decoration-accent" } else { "" }
-                                        ),
-                                        title: "{tooltip}",
-                                        onclick: move |_| {
-                                            if is_user {
-                                                on_react.call((msg_id_click.clone(), emoji_click.clone()));
+                        // Header: avatar, name, time
+                        div { class: "flex items-center gap-3 mb-2",
+                            img {
+                                src: "{get_avatar(&author_id)}",
+                                alt: "Avatar",
+                                class: "w-8 h-8 rounded-full"
+                            }
+                            span {
+                                class: "text-sm font-medium text-text cursor-pointer hover:text-accent transition-colors",
+                                onclick: move |_| {
+                                    MEMBER_INFO_MODAL.with_mut(|signal| {
+                                        signal.member = Some(author_id);
+                                    });
+                                },
+                                "{author_name}"
+                            }
+                            if is_self {
+                                span { class: "text-xs text-accent", "(you)" }
+                            }
+                            span {
+                                class: if msg.time_clamped { "text-xs text-text-muted italic" } else { "text-xs text-text-muted" },
+                                title: "{full_time_str}",
+                                "{time_str}"
+                            }
+                        }
+
+                        // Content (or edit form)
+                        if *editing.read() {
+                            div { class: "space-y-2",
+                                textarea {
+                                    class: "w-full p-2 rounded-lg text-sm bg-surface border border-border text-text resize-y min-h-[80px]",
+                                    value: "{edit_text}",
+                                    autofocus: true,
+                                    oninput: move |e| edit_text.set(e.value().clone()),
+                                    onkeydown: {
+                                        let original = content_text_for_edit.clone();
+                                        let msg_id = msg_id_for_edit_1.clone();
+                                        move |e: KeyboardEvent| {
+                                            if e.key() == Key::Escape {
+                                                editing.set(false);
+                                            } else if e.key() == Key::Enter && !e.modifiers().shift() {
+                                                e.prevent_default();
+                                                let new_text = edit_text.read().clone();
+                                                if !new_text.is_empty() && new_text != original {
+                                                    if let Some(ref handler) = on_edit {
+                                                        handler.call((msg_id.clone(), new_text));
+                                                    }
+                                                }
+                                                editing.set(false);
+                                            }
+                                        }
+                                    },
+                                }
+                                div { class: "flex gap-2",
+                                    button {
+                                        class: "text-xs px-2 py-1 rounded bg-surface hover:bg-border text-text",
+                                        onclick: move |_| editing.set(false),
+                                        "Cancel"
+                                    }
+                                    button {
+                                        class: "text-xs px-2 py-1 rounded bg-accent text-white",
+                                        onclick: {
+                                            let original = content_text_for_edit_2.clone();
+                                            let msg_id = msg_id_for_edit_2.clone();
+                                            move |_| {
+                                                let new_text = edit_text.read().clone();
+                                                if !new_text.is_empty() && new_text != original {
+                                                    if let Some(ref handler) = on_edit {
+                                                        handler.call((msg_id.clone(), new_text));
+                                                    }
+                                                }
+                                                editing.set(false);
                                             }
                                         },
-                                        "{emoji}"
-                                        if count > 1 {
-                                            span { class: "text-xs text-text-muted", "{count}" }
-                                        }
+                                        "Save"
                                     }
                                 }
-                            })
-                        }
-                    }
-                }
-
-                // Action buttons (hover)
-                div {
-                    class: "absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded shadow border border-border px-1 py-0.5",
-                    // React button
-                    div { class: "relative",
-                        button {
-                            class: "text-xs text-text-muted hover:text-accent px-1",
-                            onclick: move |_| open_emoji_picker.set(!open_emoji_picker()),
-                            "+"
-                        }
-                        if *open_emoji_picker.read() {
-                            div {
-                                class: "fixed inset-0 z-40",
-                                onclick: move |_| open_emoji_picker.set(false),
                             }
+                        } else {
                             div {
-                                class: "absolute right-0 top-full mt-1 p-1 bg-panel rounded shadow border border-border z-50 grid",
-                                style: "grid-template-columns: repeat(4, 1fr); gap: 2px;",
-                                {FREQUENT_EMOJIS.iter().map({
-                                    let msg_id = msg_id_for_react_picker.clone();
-                                    move |emoji| {
-                                        let e = emoji.to_string();
-                                        let mid = msg_id.clone();
+                                // Title
+                                if !title_text.is_empty() {
+                                    h4 { class: "font-semibold text-text mb-1",
+                                        "{title_text}"
+                                    }
+                                }
+                                // Content
+                                div { class: "text-sm text-text",
+                                    span {
+                                        class: "prose prose-sm dark:prose-invert max-w-none",
+                                        dangerous_inner_html: "{content_html}"
+                                    }
+                                    if edited {
+                                        span { class: "text-xs ml-2 text-text-muted", "(edited)" }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Reactions
+                        if !reactions.is_empty() {
+                            div { class: "flex flex-wrap items-center gap-1 mt-2",
+                                {
+                                    let mut sorted: Vec<_> = reactions.iter().collect();
+                                    sorted.sort_by_key(|(e, _)| e.as_str());
+                                    sorted.into_iter().map(|(emoji, reactors)| {
+                                        let count = reactors.len();
+                                        let is_user = reactors.contains(&self_member_id);
+                                        let emoji_click = emoji.clone();
+                                        let msg_id_click = msg_id_for_react.clone();
+                                        let names: Vec<String> = reactors.iter().map(|id| {
+                                            if *id == self_member_id { "You".to_string() }
+                                            else { member_names.get(id).cloned().unwrap_or("Unknown".to_string()) }
+                                        }).collect();
+                                        let tooltip = names.join(", ");
                                         rsx! {
-                                            button {
+                                            span {
                                                 key: "{emoji}",
-                                                class: "p-1 rounded hover:bg-surface text-lg",
+                                                class: format!(
+                                                    "inline-flex items-center gap-0.5 text-sm {}",
+                                                    if is_user { "cursor-pointer underline decoration-accent" } else { "" }
+                                                ),
+                                                title: "{tooltip}",
                                                 onclick: move |_| {
-                                                    on_react.call((mid.clone(), e.clone()));
-                                                    open_emoji_picker.set(false);
+                                                    if is_user {
+                                                        if let Some(ref handler) = on_react {
+                                                            handler.call((msg_id_click.clone(), emoji_click.clone()));
+                                                        }
+                                                    }
                                                 },
                                                 "{emoji}"
+                                                if count > 1 {
+                                                    span { class: "text-xs text-text-muted", "{count}" }
+                                                }
+                                            }
+                                        }
+                                    })
+                                }
+                            }
+                        }
+
+                        // Action buttons (hover)
+                        if has_actions {
+                            div {
+                                class: "absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded shadow border border-border px-1 py-0.5",
+                                // React button
+                                if on_react.is_some() {
+                                    div { class: "relative",
+                                        button {
+                                            class: "text-xs text-text-muted hover:text-accent px-1",
+                                            onclick: move |_| open_emoji_picker.set(!open_emoji_picker()),
+                                            "+"
+                                        }
+                                        if *open_emoji_picker.read() {
+                                            div {
+                                                class: "fixed inset-0 z-40",
+                                                onclick: move |_| open_emoji_picker.set(false),
+                                            }
+                                            div {
+                                                class: "absolute right-0 top-full mt-1 p-1 bg-panel rounded shadow border border-border z-50 grid",
+                                                style: "grid-template-columns: repeat(4, 1fr); gap: 2px;",
+                                                {FREQUENT_EMOJIS.iter().map({
+                                                    let msg_id = msg_id_for_react_picker.clone();
+                                                    move |emoji| {
+                                                        let e = emoji.to_string();
+                                                        let mid = msg_id.clone();
+                                                        rsx! {
+                                                            button {
+                                                                key: "{emoji}",
+                                                                class: "p-1 rounded hover:bg-surface text-lg",
+                                                                onclick: move |_| {
+                                                                    if let Some(ref handler) = on_react {
+                                                                        handler.call((mid.clone(), e.clone()));
+                                                                    }
+                                                                    open_emoji_picker.set(false);
+                                                                },
+                                                                "{emoji}"
+                                                            }
+                                                        }
+                                                    }
+                                                })}
                                             }
                                         }
                                     }
-                                })}
+                                }
+                                if let Some(ref reply_handler) = on_reply {
+                                    button {
+                                        class: "text-xs text-text-muted hover:text-accent px-1",
+                                        onclick: {
+                                            let handler = reply_handler.clone();
+                                            let msg_id = msg_id_for_reply.clone();
+                                            let author = author_name_for_reply.clone();
+                                            let preview = content_preview.clone();
+                                            move |_| {
+                                                handler.call(ReplyContext {
+                                                    message_id: msg_id.clone(),
+                                                    author_name: author.clone(),
+                                                    content_preview: preview.clone(),
+                                                });
+                                            }
+                                        },
+                                        "reply"
+                                    }
+                                }
+                                if is_self {
+                                    if on_edit.is_some() {
+                                        button {
+                                            class: "text-xs text-text-muted hover:text-text px-1",
+                                            onclick: {
+                                                let text = msg.content_text.clone();
+                                                move |_| {
+                                                    edit_text.set(text.clone());
+                                                    editing.set(true);
+                                                }
+                                            },
+                                            "edit"
+                                        }
+                                    }
+                                    if let Some(ref delete_handler) = on_request_delete {
+                                        button {
+                                            class: "text-xs text-text-muted hover:text-red-500 px-1",
+                                            onclick: {
+                                                let handler = delete_handler.clone();
+                                                let msg_id = msg_id_for_delete.clone();
+                                                move |_| handler.call(msg_id.clone())
+                                            },
+                                            "delete"
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
-                    button {
-                        class: "text-xs text-text-muted hover:text-accent px-1",
-                        onclick: move |_| {
-                            on_reply.call(ReplyContext {
-                                message_id: msg_id_for_reply.clone(),
-                                author_name: author_name_for_reply.clone(),
-                                content_preview: content_preview.clone(),
-                            });
-                        },
-                        "reply"
-                    }
-                    if is_self {
-                        button {
-                            class: "text-xs text-text-muted hover:text-text px-1",
-                            onclick: {
-                                let text = msg.content_text.clone();
-                                move |_| {
-                                    edit_text.set(text.clone());
-                                    editing.set(true);
-                                }
-                            },
-                            "edit"
-                        }
-                        button {
-                            class: "text-xs text-text-muted hover:text-red-500 px-1",
-                            onclick: move |_| on_request_delete.call(msg_id_for_delete.clone()),
-                            "delete"
-                        }
-                    }
-                }
-            }
 
-            // Nested replies (recursive)
-            if !replies.is_empty() {
-                div { class: "mt-1",
-                    {replies.iter().map({
-                        let member_names = member_names.clone();
-                        move |reply| {
-                            let member_names = member_names.clone();
-                            rsx! {
-                                ReplyTreeNode {
-                                    message_with_replies: reply.clone(),
-                                    self_member_id: self_member_id,
-                                    member_names: member_names,
-                                    depth: depth + 1,
-                                    on_react: move |(id, e)| on_react.call((id, e)),
-                                    on_request_delete: move |id| on_request_delete.call(id),
-                                    on_edit: move |(id, t)| on_edit.call((id, t)),
-                                    on_reply: move |ctx| on_reply.call(ctx),
+                    // Nested replies (recursive)
+                    if !replies.is_empty() {
+                        div { class: "mt-1",
+                            {replies.iter().map({
+                                let member_names = member_names.clone();
+                                move |reply| {
+                                    let member_names = member_names.clone();
+                                    rsx! {
+                                        MessageCard {
+                                            message: reply.message.clone(),
+                                            variant: MessageCardVariant::Reply,
+                                            self_member_id: self_member_id,
+                                            member_names: member_names,
+                                            replies: reply.replies.clone(),
+                                            depth: depth + 1,
+                                            on_react: on_react.clone(),
+                                            on_request_delete: on_request_delete.clone(),
+                                            on_edit: on_edit.clone(),
+                                            on_reply: on_reply.clone(),
+                                        }
+                                    }
                                 }
-                            }
+                            })}
                         }
-                    })}
+                    }
                 }
             }
         }
-    }
-}
 
-/// Shared component for displaying a single post card
-/// Used by both PostsView (list) and SinglePostView (detail)
-#[component]
-pub fn PostCard(
-    /// The message data to display
-    message: MessageData,
-    /// Whether this is the expanded/detail view (larger styling)
-    #[props(default = false)]
-    expanded: bool,
-    /// Whether to show replies under this post
-    #[props(default = false)]
-    show_replies: bool,
-    /// Optional click handler for the card (used in list view for navigation)
-    #[props(default)]
-    on_click: Option<EventHandler<()>>,
-) -> Element {
-    let author_id = message.author_id;
-    let author_name = message.author_name.clone();
-    let title = message.title_text.clone();
-    let content_text = message.content_text.clone();
-    let content_html = message.content_html.clone();
-    let time_clamped = message.time_clamped;
-    let message_id = message.message_id.clone();
+        MessageCardVariant::Card => {
+            // Styling based on expanded or list view
+            let (avatar_size, header_padding, content_padding, title_class, content_class) = if expanded {
+                (
+                    "w-16 h-16",
+                    "px-8 py-6",
+                    "px-8 py-8",
+                    "text-3xl font-bold text-text mb-6",
+                    "text-xl text-text leading-relaxed prose prose-xl dark:prose-invert max-w-none",
+                )
+            } else {
+                (
+                    "w-14 h-14",
+                    "px-6 py-4",
+                    "px-6 py-6",
+                    "text-2xl font-bold text-text mb-4",
+                    "text-lg text-text leading-relaxed prose prose-lg dark:prose-invert max-w-none",
+                )
+            };
 
-    // Create reply context for when show_replies is enabled
-    let reply_context = if show_replies {
-        Some(ReplyContext {
-            message_id: message_id.clone(),
-            author_name: author_name.clone(),
-            content_preview: content_text.chars().take(100).collect(),
-        })
-    } else {
-        None
-    };
+            let card_class = if on_click.is_some() {
+                "bg-panel rounded-2xl border border-border shadow-sm overflow-hidden hover:border-accent/50 transition-colors cursor-pointer"
+            } else {
+                "bg-panel rounded-2xl border border-border shadow-sm overflow-hidden"
+            };
 
-    let timestamp_ms = message.time.timestamp_millis();
-    let time_str = format_utc_as_local_time(timestamp_ms);
-    let full_time_str = if time_clamped {
-        format!(
-            "{} (sender's clock may be incorrect)",
-            format_utc_as_full_datetime(timestamp_ms)
-        )
-    } else {
-        format_utc_as_full_datetime(timestamp_ms)
-    };
+            // Create reply context for when show_replies is enabled
+            let reply_context_for_section = if show_replies {
+                Some(ReplyContext {
+                    message_id: msg_id_for_replies.clone(),
+                    author_name: author_name.clone(),
+                    content_preview: content_preview.clone(),
+                })
+            } else {
+                None
+            };
 
-    // Styling based on expanded or list view
-    let (avatar_size, header_padding, content_padding, title_class, content_class) = if expanded {
-        (
-            "w-16 h-16",
-            "px-8 py-6",
-            "px-8 py-8",
-            "text-3xl font-bold text-text mb-6",
-            "text-xl text-text leading-relaxed prose prose-xl dark:prose-invert max-w-none",
-        )
-    } else {
-        (
-            "w-14 h-14",
-            "px-6 py-4",
-            "px-6 py-6",
-            "text-2xl font-bold text-text mb-4",
-            "text-lg text-text leading-relaxed prose prose-lg dark:prose-invert max-w-none",
-        )
-    };
-
-    let card_class = if on_click.is_some() {
-        "bg-panel rounded-2xl border border-border shadow-sm overflow-hidden hover:border-accent/50 transition-colors cursor-pointer"
-    } else {
-        "bg-panel rounded-2xl border border-border shadow-sm overflow-hidden"
-    };
-
-    rsx! {
-        div {
-            class: "{card_class}",
-            onclick: move |_| {
-                if let Some(handler) = &on_click {
-                    handler.call(());
-                }
-            },
-
-            // Post header with author
-            div {
-                class: "flex items-center gap-4 {header_padding} border-b border-border bg-surface/30",
-                img {
-                    src: "{get_avatar(&author_id)}",
-                    alt: "Avatar",
-                    class: "{avatar_size} rounded-full"
-                }
-                div { class: "flex-1 min-w-0",
-                    div {
-                        class: if expanded {
-                            "text-xl font-semibold text-text cursor-pointer hover:text-accent transition-colors"
-                        } else {
-                            "text-lg font-semibold text-text"
-                        },
-                        onclick: move |e| {
-                            e.stop_propagation();
-                            MEMBER_INFO_MODAL.with_mut(|signal| {
-                                signal.member = Some(author_id);
-                            });
-                        },
-                        "{author_name}"
-                    }
-                    span {
-                        class: if time_clamped {
-                            "text-sm text-text-muted italic"
-                        } else {
-                            "text-sm text-text-muted"
-                        },
-                        title: "{full_time_str}",
-                        if time_clamped { "~{time_str}" } else { "{time_str}" }
-                    }
-                }
-            }
-
-            // Post content
-            div { class: "{content_padding}",
-                // Title
-                if !title.is_empty() {
-                    if expanded {
-                        h1 { class: "{title_class}", "{title}" }
-                    } else {
-                        h2 { class: "{title_class}", "{title}" }
-                    }
-                }
-                // Content
+            rsx! {
                 div {
-                    class: "{content_class}",
-                    span { dangerous_inner_html: "{content_html}" }
-                }
-            }
-        }
+                    key: "{msg_id_for_key:?}",
+                    class: "group relative",
 
-        // Replies section (if enabled)
-        if show_replies {
-            div { class: "mt-4",
-                h3 { class: "text-lg font-semibold text-text-muted border-b border-border pb-2 mb-4",
-                    "Replies"
-                }
-                Conversation {
-                    parent_message_id: Some(message_id),
-                    default_reply_to: reply_context,
+                    div {
+                        class: "{card_class}",
+                        onclick: move |_| {
+                            if let Some(ref handler) = on_click {
+                                handler.call(());
+                            }
+                        },
+
+                        // Post header with author
+                        div {
+                            class: "flex items-center gap-4 {header_padding} border-b border-border bg-surface/30",
+                            img {
+                                src: "{get_avatar(&author_id)}",
+                                alt: "Avatar",
+                                class: "{avatar_size} rounded-full"
+                            }
+                            div { class: "flex-1 min-w-0",
+                                div {
+                                    class: if expanded {
+                                        "text-xl font-semibold text-text cursor-pointer hover:text-accent transition-colors"
+                                    } else {
+                                        "text-lg font-semibold text-text cursor-pointer hover:text-accent transition-colors"
+                                    },
+                                    onclick: move |e| {
+                                        e.stop_propagation();
+                                        MEMBER_INFO_MODAL.with_mut(|signal| {
+                                            signal.member = Some(author_id);
+                                        });
+                                    },
+                                    "{author_name}"
+                                }
+                                span {
+                                    class: if msg.time_clamped {
+                                        "text-sm text-text-muted italic"
+                                    } else {
+                                        "text-sm text-text-muted"
+                                    },
+                                    title: "{full_time_str}",
+                                    if msg.time_clamped { "~{time_str}" } else { "{time_str}" }
+                                }
+                            }
+                        }
+
+                        // Post content (or edit form)
+                        div { class: "{content_padding}",
+                            if *editing.read() {
+                                div { class: "space-y-4",
+                                    textarea {
+                                        class: "w-full p-3 rounded-lg bg-surface border border-border text-text resize-y min-h-[120px]",
+                                        value: "{edit_text}",
+                                        autofocus: true,
+                                        oninput: move |e| edit_text.set(e.value().clone()),
+                                        onkeydown: {
+                                            let original = content_text_for_edit.clone();
+                                            let msg_id = msg_id_for_edit_1.clone();
+                                            move |e: KeyboardEvent| {
+                                                if e.key() == Key::Escape {
+                                                    editing.set(false);
+                                                } else if e.key() == Key::Enter && (e.modifiers().ctrl() || e.modifiers().meta()) {
+                                                    e.prevent_default();
+                                                    let new_text = edit_text.read().clone();
+                                                    if !new_text.is_empty() && new_text != original {
+                                                        if let Some(ref handler) = on_edit {
+                                                            handler.call((msg_id.clone(), new_text));
+                                                        }
+                                                    }
+                                                    editing.set(false);
+                                                }
+                                            }
+                                        },
+                                    }
+                                    div { class: "flex gap-3",
+                                        button {
+                                            class: "px-4 py-2 rounded-lg bg-surface hover:bg-border text-text",
+                                            onclick: move |_| editing.set(false),
+                                            "Cancel"
+                                        }
+                                        button {
+                                            class: "px-4 py-2 rounded-lg bg-accent text-white",
+                                            onclick: {
+                                                let original = content_text_for_edit_2.clone();
+                                                let msg_id = msg_id_for_edit_2.clone();
+                                                move |_| {
+                                                    let new_text = edit_text.read().clone();
+                                                    if !new_text.is_empty() && new_text != original {
+                                                        if let Some(ref handler) = on_edit {
+                                                            handler.call((msg_id.clone(), new_text));
+                                                        }
+                                                    }
+                                                    editing.set(false);
+                                                }
+                                            },
+                                            "Save"
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Title
+                                if !title_text.is_empty() {
+                                    if expanded {
+                                        h1 { class: "{title_class}", "{title_text}" }
+                                    } else {
+                                        h2 { class: "{title_class}", "{title_text}" }
+                                    }
+                                }
+                                // Content
+                                div {
+                                    class: "{content_class}",
+                                    span { dangerous_inner_html: "{content_html}" }
+                                    if edited {
+                                        span { class: "text-sm ml-2 text-text-muted", "(edited)" }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Reactions (shown below content in card view)
+                        if !reactions.is_empty() {
+                            div { class: "flex flex-wrap items-center gap-2 px-6 pb-4",
+                                {
+                                    let mut sorted: Vec<_> = reactions.iter().collect();
+                                    sorted.sort_by_key(|(e, _)| e.as_str());
+                                    sorted.into_iter().map(|(emoji, reactors)| {
+                                        let count = reactors.len();
+                                        let is_user = reactors.contains(&self_member_id);
+                                        let emoji_click = emoji.clone();
+                                        let msg_id_click = msg_id_for_react.clone();
+                                        let names: Vec<String> = reactors.iter().map(|id| {
+                                            if *id == self_member_id { "You".to_string() }
+                                            else { member_names.get(id).cloned().unwrap_or("Unknown".to_string()) }
+                                        }).collect();
+                                        let tooltip = names.join(", ");
+                                        rsx! {
+                                            span {
+                                                key: "{emoji}",
+                                                class: format!(
+                                                    "inline-flex items-center gap-1 px-2 py-1 rounded-full bg-surface text-base {}",
+                                                    if is_user { "cursor-pointer ring-1 ring-accent" } else { "" }
+                                                ),
+                                                title: "{tooltip}",
+                                                onclick: move |e| {
+                                                    e.stop_propagation();
+                                                    if is_user {
+                                                        if let Some(ref handler) = on_react {
+                                                            handler.call((msg_id_click.clone(), emoji_click.clone()));
+                                                        }
+                                                    }
+                                                },
+                                                "{emoji}"
+                                                if count > 1 {
+                                                    span { class: "text-sm text-text-muted", "{count}" }
+                                                }
+                                            }
+                                        }
+                                    })
+                                }
+                            }
+                        }
+
+                        // Action buttons (hover) - positioned at top right of card
+                        if has_actions {
+                            div {
+                                class: "absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-panel rounded-lg shadow border border-border px-2 py-1",
+                                onclick: move |e| e.stop_propagation(),
+                                // React button
+                                if on_react.is_some() {
+                                    div { class: "relative",
+                                        button {
+                                            class: "text-sm text-text-muted hover:text-accent px-2",
+                                            onclick: move |_| open_emoji_picker.set(!open_emoji_picker()),
+                                            "+"
+                                        }
+                                        if *open_emoji_picker.read() {
+                                            div {
+                                                class: "fixed inset-0 z-40",
+                                                onclick: move |_| open_emoji_picker.set(false),
+                                            }
+                                            div {
+                                                class: "absolute right-0 top-full mt-1 p-2 bg-panel rounded-lg shadow border border-border z-50 grid",
+                                                style: "grid-template-columns: repeat(4, 1fr); gap: 4px;",
+                                                {FREQUENT_EMOJIS.iter().map({
+                                                    let msg_id = msg_id_for_react_picker.clone();
+                                                    move |emoji| {
+                                                        let e = emoji.to_string();
+                                                        let mid = msg_id.clone();
+                                                        rsx! {
+                                                            button {
+                                                                key: "{emoji}",
+                                                                class: "p-2 rounded hover:bg-surface text-xl",
+                                                                onclick: move |_| {
+                                                                    if let Some(ref handler) = on_react {
+                                                                        handler.call((mid.clone(), e.clone()));
+                                                                    }
+                                                                    open_emoji_picker.set(false);
+                                                                },
+                                                                "{emoji}"
+                                                            }
+                                                        }
+                                                    }
+                                                })}
+                                            }
+                                        }
+                                    }
+                                }
+                                if let Some(ref reply_handler) = on_reply {
+                                    button {
+                                        class: "text-sm text-text-muted hover:text-accent px-2",
+                                        onclick: {
+                                            let handler = reply_handler.clone();
+                                            let msg_id = msg_id_for_reply.clone();
+                                            let author = author_name_for_reply.clone();
+                                            let preview = content_preview.clone();
+                                            move |_| {
+                                                handler.call(ReplyContext {
+                                                    message_id: msg_id.clone(),
+                                                    author_name: author.clone(),
+                                                    content_preview: preview.clone(),
+                                                });
+                                            }
+                                        },
+                                        "reply"
+                                    }
+                                }
+                                if is_self {
+                                    if let Some(ref _edit_handler) = on_edit {
+                                        button {
+                                            class: "text-sm text-text-muted hover:text-text px-2",
+                                            onclick: {
+                                                let text = msg.content_text.clone();
+                                                move |_| {
+                                                    edit_text.set(text.clone());
+                                                    editing.set(true);
+                                                }
+                                            },
+                                            "edit"
+                                        }
+                                    }
+                                    if let Some(ref delete_handler) = on_request_delete {
+                                        button {
+                                            class: "text-sm text-text-muted hover:text-red-500 px-2",
+                                            onclick: {
+                                                let handler = delete_handler.clone();
+                                                let msg_id = msg_id_for_delete.clone();
+                                                move |_| handler.call(msg_id.clone())
+                                            },
+                                            "delete"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Replies section (if enabled)
+                    if show_replies {
+                        div { class: "mt-4",
+                            h3 { class: "text-lg font-semibold text-text-muted border-b border-border pb-2 mb-4",
+                                "Replies"
+                            }
+                            Conversation {
+                                parent_message_id: Some(msg_id_for_replies),
+                                default_reply_to: reply_context_for_section.or(default_reply_to),
+                            }
+                        }
+                    }
                 }
             }
         }

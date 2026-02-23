@@ -1,6 +1,6 @@
 use crate::components::app::{Route, CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
 use crate::components::conversation::message_input::PostInput;
-use crate::components::conversation::{get_all_messages, get_top_level_posts, PostCard};
+use crate::components::conversation::{get_all_messages, get_top_level_posts, MessageCard, MessageCardVariant};
 use crate::room_data::SendMessageError;
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
@@ -177,8 +177,10 @@ pub fn PostsView() -> Element {
                 div { class: "flex-1 overflow-y-auto",
                     div { class: "max-w-4xl mx-auto px-4 py-6",
                         {
-                            match posts.read().as_ref() {
-                                Some(posts) if !posts.is_empty() => {
+                            let self_member_id_for_posts = current_room_data.as_ref()
+                                .map(|rd| MemberId::from(&rd.self_sk.verifying_key()));
+                            match (posts.read().as_ref(), self_member_id_for_posts) {
+                                (Some(posts), Some(self_member_id)) if !posts.is_empty() => {
                                     rsx! {
                                         div { class: "space-y-8",
                                             {posts.iter().map(|post| {
@@ -186,8 +188,10 @@ pub fn PostsView() -> Element {
                                                 let nav = navigator();
                                                 rsx! {
                                                     div { key: "{post_id}",
-                                                        PostCard {
+                                                        MessageCard {
                                                             message: post.clone(),
+                                                            variant: MessageCardVariant::Card,
+                                                            self_member_id: self_member_id,
                                                             expanded: false,
                                                             show_replies: false,
                                                             on_click: move |_| {
@@ -220,7 +224,7 @@ pub fn PostsView() -> Element {
 /// Single post view - displays a single post by ID with replies
 #[component]
 pub fn SinglePostView(post_id: String) -> Element {
-    // Find the post by ID
+    // Find the post and self_member_id
     let post_data = use_memo(move || {
         let current_room = CURRENT_ROOM.read();
         if let Some(key) = current_room.owner_key {
@@ -233,9 +237,10 @@ pub fn SinglePostView(post_id: String) -> Element {
                     self_member_id,
                     &room_data.secrets,
                 );
-                return all_messages
+                let post = all_messages
                     .into_iter()
                     .find(|m| m.id_string() == post_id);
+                return post.map(|p| (p, self_member_id));
             }
         }
         None
@@ -256,11 +261,13 @@ pub fn SinglePostView(post_id: String) -> Element {
             div { class: "flex-1 overflow-y-auto",
                 {
                     match post_data.read().as_ref() {
-                        Some(post) => {
+                        Some((post, self_member_id)) => {
                             rsx! {
                                 div { class: "max-w-4xl mx-auto px-4 py-6",
-                                    PostCard {
+                                    MessageCard {
                                         message: post.clone(),
+                                        variant: MessageCardVariant::Card,
+                                        self_member_id: *self_member_id,
                                         expanded: true,
                                         show_replies: true,
                                     }
