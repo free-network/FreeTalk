@@ -3,6 +3,7 @@
 pub mod avatar;
 pub mod ecies;
 pub mod markdown;
+pub mod message_actions;
 pub mod messaging;
 
 use ed25519_dalek::VerifyingKey;

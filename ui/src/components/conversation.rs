@@ -1,10 +1,10 @@
 use crate::components::app::receive_times::get_delay_secs;
-use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, NEEDS_SYNC, ROOMS};
+use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::markdown::text_to_html;
 use crate::util::messaging::{send_message, ReplyContext};
-use crate::util::{format_utc_as_full_datetime, format_utc_as_local_time, get_current_system_time};
+use crate::util::{format_utc_as_full_datetime, format_utc_as_local_time};
 pub mod emoji_picker;
 mod message_actions;
 pub mod message_input;
@@ -15,13 +15,9 @@ use crate::components::conversation::message_input::PostInput;
 use crate::room_data::SendMessageError;
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
-use freenet_scaffold::ComposableState;
 use river_core::room_state::member::MemberId;
 use river_core::room_state::member_info::MemberInfoV1;
-use river_core::room_state::message::{
-    AuthorizedMessageV1, MessageId, MessageV1, MessagesV1, RoomMessageBody,
-};
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1Delta};
+use river_core::room_state::message::{MessageId, MessagesV1, RoomMessageBody};
 use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
 
@@ -384,303 +380,29 @@ pub fn Conversation(
     });
 
     // Handler for toggling a reaction
-    let handle_toggle_reaction = {
-        let current_room_data = current_room_data.clone();
-        move |target_message_id: MessageId, emoji: String| {
-            if let (Some(current_room), Some(current_room_data)) =
-                (CURRENT_ROOM.read().owner_key, current_room_data.clone())
-            {
-                let room_key = current_room_data.room_key();
-                let self_sk = current_room_data.self_sk.clone();
-                let room_state_clone = current_room_data.room_state.clone();
-                let is_private = current_room_data.is_private();
-                let secret_opt = current_room_data
-                    .get_secret()
-                    .map(|(secret, version)| (*secret, version));
-
-                let self_member_id = MemberId::from(&self_sk.verifying_key());
-                let existing_reaction: Option<String> = current_room_data
-                    .room_state
-                    .recent_messages
-                    .reactions(&target_message_id)
-                    .and_then(|reactions| {
-                        reactions.iter().find_map(|(e, reactors)| {
-                            if reactors.contains(&self_member_id) {
-                                Some(e.clone())
-                            } else {
-                                None
-                            }
-                        })
-                    });
-
-                let clicked_same = existing_reaction.as_ref() == Some(&emoji);
-
-                spawn_local(async move {
-                    use crate::util::ecies::encrypt_with_symmetric_key;
-                    use river_core::room_state::content::ActionContentV1;
-
-                    let mut messages_to_send = Vec::new();
-
-                    if clicked_same {
-                        let content = if is_private {
-                            if let Some((secret, version)) = &secret_opt {
-                                let action = ActionContentV1::remove_reaction(
-                                    target_message_id.clone(),
-                                    emoji.clone(),
-                                );
-                                let action_bytes = action.encode();
-                                let (ciphertext, nonce) =
-                                    encrypt_with_symmetric_key(secret, &action_bytes);
-                                RoomMessageBody::private_action(ciphertext, nonce, *version)
-                            } else {
-                                return;
-                            }
-                        } else {
-                            RoomMessageBody::remove_reaction(target_message_id.clone(), emoji.clone())
-                        };
-                        messages_to_send.push(content);
-                    } else {
-                        if let Some(old_emoji) = existing_reaction {
-                            let content = if is_private {
-                                if let Some((secret, version)) = &secret_opt {
-                                    let action = ActionContentV1::remove_reaction(
-                                        target_message_id.clone(),
-                                        old_emoji,
-                                    );
-                                    let action_bytes = action.encode();
-                                    let (ciphertext, nonce) =
-                                        encrypt_with_symmetric_key(secret, &action_bytes);
-                                    RoomMessageBody::private_action(ciphertext, nonce, *version)
-                                } else {
-                                    return;
-                                }
-                            } else {
-                                RoomMessageBody::remove_reaction(target_message_id.clone(), old_emoji)
-                            };
-                            messages_to_send.push(content);
-                        }
-
-                        let content = if is_private {
-                            if let Some((secret, version)) = &secret_opt {
-                                let action =
-                                    ActionContentV1::reaction(target_message_id.clone(), emoji.clone());
-                                let action_bytes = action.encode();
-                                let (ciphertext, nonce) =
-                                    encrypt_with_symmetric_key(secret, &action_bytes);
-                                RoomMessageBody::private_action(ciphertext, nonce, *version)
-                            } else {
-                                return;
-                            }
-                        } else {
-                            RoomMessageBody::reaction(target_message_id.clone(), emoji.clone())
-                        };
-                        messages_to_send.push(content);
-                    }
-
-                    let mut auth_messages = Vec::new();
-                    for content in messages_to_send {
-                        let message = MessageV1 {
-                            room_owner: MemberId::from(current_room),
-                            author: MemberId::from(&self_sk.verifying_key()),
-                            content,
-                            time: get_current_system_time(),
-                        };
-
-                        let mut message_bytes = Vec::new();
-                        if ciborium::ser::into_writer(&message, &mut message_bytes).is_err() {
-                            return;
-                        }
-
-                        let signature = crate::signing::sign_message_with_fallback(
-                            room_key,
-                            message_bytes,
-                            &self_sk,
-                        )
-                        .await;
-
-                        auth_messages.push(AuthorizedMessageV1::with_signature(message, signature));
-                    }
-
-                    if !auth_messages.is_empty() {
-                        let delta = ChatRoomStateV1Delta {
-                            recent_messages: Some(auth_messages),
-                            ..Default::default()
-                        };
-                        ROOMS.with_mut(|rooms| {
-                            if let Some(room_data) = rooms.map.get_mut(&current_room) {
-                                if room_data
-                                    .room_state
-                                    .apply_delta(
-                                        &room_state_clone,
-                                        &ChatRoomParametersV1 { owner: current_room },
-                                        &Some(delta),
-                                    )
-                                    .is_ok()
-                                {
-                                    NEEDS_SYNC.write().insert(current_room);
-                                }
-                            }
-                        });
-                    }
-                });
-            }
+    let handle_toggle_reaction = move |target_message_id: MessageId, emoji: String| {
+        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_room() {
+            spawn_local(async move {
+                crate::util::message_actions::toggle_reaction(ctx, target_message_id, emoji).await;
+            });
         }
     };
 
     // Handler for deleting a message
-    let handle_delete_message = {
-        let current_room_data = current_room_data.clone();
-        move |target_message_id: MessageId| {
-            if let (Some(current_room), Some(current_room_data)) =
-                (CURRENT_ROOM.read().owner_key, current_room_data.clone())
-            {
-                let room_key = current_room_data.room_key();
-                let self_sk = current_room_data.self_sk.clone();
-                let room_state_clone = current_room_data.room_state.clone();
-                let is_private = current_room_data.is_private();
-                let secret_opt = current_room_data
-                    .get_secret()
-                    .map(|(secret, version)| (*secret, version));
-
-                spawn_local(async move {
-                    use crate::util::ecies::encrypt_with_symmetric_key;
-                    use river_core::room_state::content::ActionContentV1;
-
-                    let content = if is_private {
-                        if let Some((secret, version)) = secret_opt {
-                            let action = ActionContentV1::delete(target_message_id.clone());
-                            let action_bytes = action.encode();
-                            let (ciphertext, nonce) =
-                                encrypt_with_symmetric_key(&secret, &action_bytes);
-                            RoomMessageBody::private_action(ciphertext, nonce, version)
-                        } else {
-                            return;
-                        }
-                    } else {
-                        RoomMessageBody::delete(target_message_id)
-                    };
-
-                    let message = MessageV1 {
-                        room_owner: MemberId::from(current_room),
-                        author: MemberId::from(&self_sk.verifying_key()),
-                        content,
-                        time: get_current_system_time(),
-                    };
-
-                    let mut message_bytes = Vec::new();
-                    if ciborium::ser::into_writer(&message, &mut message_bytes).is_err() {
-                        return;
-                    }
-
-                    let signature = crate::signing::sign_message_with_fallback(
-                        room_key,
-                        message_bytes,
-                        &self_sk,
-                    )
-                    .await;
-
-                    let auth_message = AuthorizedMessageV1::with_signature(message, signature);
-                    let delta = ChatRoomStateV1Delta {
-                        recent_messages: Some(vec![auth_message]),
-                        ..Default::default()
-                    };
-                    ROOMS.with_mut(|rooms| {
-                        if let Some(room_data) = rooms.map.get_mut(&current_room) {
-                            if room_data
-                                .room_state
-                                .apply_delta(
-                                    &room_state_clone,
-                                    &ChatRoomParametersV1 { owner: current_room },
-                                    &Some(delta),
-                                )
-                                .is_ok()
-                            {
-                                NEEDS_SYNC.write().insert(current_room);
-                            }
-                        }
-                    });
-                });
-            }
+    let handle_delete_message = move |target_message_id: MessageId| {
+        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_room() {
+            spawn_local(async move {
+                crate::util::message_actions::delete_message(ctx, target_message_id).await;
+            });
         }
     };
 
     // Handler for editing a message
-    let handle_edit_message = {
-        let current_room_data = current_room_data.clone();
-        move |target_message_id: MessageId, new_text: String| {
-            if new_text.is_empty() {
-                return;
-            }
-            if let (Some(current_room), Some(current_room_data)) =
-                (CURRENT_ROOM.read().owner_key, current_room_data.clone())
-            {
-                let room_key = current_room_data.room_key();
-                let self_sk = current_room_data.self_sk.clone();
-                let room_state_clone = current_room_data.room_state.clone();
-                let is_private = current_room_data.is_private();
-                let secret_opt = current_room_data
-                    .get_secret()
-                    .map(|(secret, version)| (*secret, version));
-
-                spawn_local(async move {
-                    use crate::util::ecies::encrypt_with_symmetric_key;
-                    use river_core::room_state::content::ActionContentV1;
-
-                    let content = if is_private {
-                        if let Some((secret, version)) = secret_opt {
-                            let action = ActionContentV1::edit(target_message_id.clone(), new_text);
-                            let action_bytes = action.encode();
-                            let (ciphertext, nonce) =
-                                encrypt_with_symmetric_key(&secret, &action_bytes);
-                            RoomMessageBody::private_action(ciphertext, nonce, version)
-                        } else {
-                            return;
-                        }
-                    } else {
-                        RoomMessageBody::edit(target_message_id, new_text)
-                    };
-
-                    let message = MessageV1 {
-                        room_owner: MemberId::from(current_room),
-                        author: MemberId::from(&self_sk.verifying_key()),
-                        content,
-                        time: get_current_system_time(),
-                    };
-
-                    let mut message_bytes = Vec::new();
-                    if ciborium::ser::into_writer(&message, &mut message_bytes).is_err() {
-                        return;
-                    }
-
-                    let signature = crate::signing::sign_message_with_fallback(
-                        room_key,
-                        message_bytes,
-                        &self_sk,
-                    )
-                    .await;
-
-                    let auth_message = AuthorizedMessageV1::with_signature(message, signature);
-                    let delta = ChatRoomStateV1Delta {
-                        recent_messages: Some(vec![auth_message]),
-                        ..Default::default()
-                    };
-                    ROOMS.with_mut(|rooms| {
-                        if let Some(room_data) = rooms.map.get_mut(&current_room) {
-                            if room_data
-                                .room_state
-                                .apply_delta(
-                                    &room_state_clone,
-                                    &ChatRoomParametersV1 { owner: current_room },
-                                    &Some(delta),
-                                )
-                                .is_ok()
-                            {
-                                NEEDS_SYNC.write().insert(current_room);
-                            }
-                        }
-                    });
-                });
-            }
+    let handle_edit_message = move |target_message_id: MessageId, new_text: String| {
+        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_room() {
+            spawn_local(async move {
+                crate::util::message_actions::edit_message(ctx, target_message_id, new_text).await;
+            });
         }
     };
 

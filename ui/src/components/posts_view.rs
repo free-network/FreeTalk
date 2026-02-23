@@ -4,14 +4,18 @@ use crate::components::conversation::{get_all_messages, get_top_level_posts, Mes
 use crate::room_data::SendMessageError;
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
+use crate::util::message_actions::{self, ActionContext};
 use crate::util::messaging::{send_message, ReplyContext};
 use dioxus::prelude::*;
 use river_core::room_state::member::MemberId;
+use river_core::room_state::message::MessageId;
 use river_core::room_state::privacy::PrivacyMode;
+use wasm_bindgen_futures::spawn_local;
 
 #[component]
 pub fn PostsView() -> Element {
-    let replying_to = use_signal(|| None::<ReplyContext>);
+    let mut replying_to = use_signal(|| None::<ReplyContext>);
+    let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
     let current_room_data = {
         let current_room = CURRENT_ROOM.read();
@@ -108,6 +112,33 @@ pub fn PostsView() -> Element {
             }
         };
 
+    // Handler for toggling reactions
+    let handle_toggle_reaction = move |target_message_id: MessageId, emoji: String| {
+        if let Some(ctx) = ActionContext::from_current_room() {
+            spawn_local(async move {
+                message_actions::toggle_reaction(ctx, target_message_id, emoji).await;
+            });
+        }
+    };
+
+    // Handler for deleting messages
+    let handle_delete_message = move |target_message_id: MessageId| {
+        if let Some(ctx) = ActionContext::from_current_room() {
+            spawn_local(async move {
+                message_actions::delete_message(ctx, target_message_id).await;
+            });
+        }
+    };
+
+    // Handler for editing messages
+    let handle_edit_message = move |target_message_id: MessageId, new_text: String| {
+        if let Some(ctx) = ActionContext::from_current_room() {
+            spawn_local(async move {
+                message_actions::edit_message(ctx, target_message_id, new_text).await;
+            });
+        }
+    };
+
     rsx! {
         div { class: "flex-1 flex flex-col min-w-0 bg-bg",
             // Show no-board-selected message or header with user info
@@ -183,20 +214,38 @@ pub fn PostsView() -> Element {
                                 (Some(posts), Some(self_member_id)) if !posts.is_empty() => {
                                     rsx! {
                                         div { class: "space-y-8",
-                                            {posts.iter().map(|post| {
-                                                let post_id = post.id_string();
-                                                let nav = navigator();
-                                                rsx! {
-                                                    div { key: "{post_id}",
-                                                        MessageCard {
-                                                            message: post.clone(),
-                                                            variant: MessageCardVariant::Card,
-                                                            self_member_id: self_member_id,
-                                                            expanded: false,
-                                                            show_replies: false,
-                                                            on_click: move |_| {
-                                                                nav.push(Route::Post { id: post_id.clone() });
-                                                            },
+                                            {posts.iter().map({
+                                                let handle_toggle_reaction = handle_toggle_reaction.clone();
+                                                let handle_edit_message = handle_edit_message.clone();
+                                                move |post| {
+                                                    let post_id = post.id_string();
+                                                    let nav = navigator();
+                                                    let handle_toggle_reaction = handle_toggle_reaction.clone();
+                                                    let handle_edit_message = handle_edit_message.clone();
+                                                    rsx! {
+                                                        div { key: "{post_id}",
+                                                            MessageCard {
+                                                                message: post.clone(),
+                                                                variant: MessageCardVariant::Card,
+                                                                self_member_id: self_member_id,
+                                                                expanded: false,
+                                                                show_replies: false,
+                                                                on_click: move |_| {
+                                                                    nav.push(Route::Post { id: post_id.clone() });
+                                                                },
+                                                                on_react: move |(msg_id, emoji)| {
+                                                                    handle_toggle_reaction(msg_id, emoji);
+                                                                },
+                                                                on_request_delete: move |msg_id| {
+                                                                    pending_delete.set(Some(msg_id));
+                                                                },
+                                                                on_edit: move |(msg_id, new_text)| {
+                                                                    handle_edit_message(msg_id, new_text);
+                                                                },
+                                                                on_reply: move |ctx: ReplyContext| {
+                                                                    replying_to.set(Some(ctx));
+                                                                },
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -216,6 +265,42 @@ pub fn PostsView() -> Element {
                         }
                     }
                 }
+
+                // Delete confirmation modal
+                if pending_delete.read().is_some() {
+                    div {
+                        class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50",
+                        onclick: move |_| pending_delete.set(None),
+                        div {
+                            class: "bg-panel rounded-lg shadow-xl p-6 max-w-sm mx-4",
+                            onclick: move |e| e.stop_propagation(),
+                            h3 { class: "text-lg font-semibold text-text mb-2",
+                                "Delete Post?"
+                            }
+                            p { class: "text-text-muted text-sm mb-4",
+                                "This action cannot be undone."
+                            }
+                            div { class: "flex gap-3 justify-end",
+                                button {
+                                    class: "px-4 py-2 rounded-lg bg-surface hover:bg-surface/80 text-text transition-colors",
+                                    onclick: move |_| pending_delete.set(None),
+                                    "Cancel"
+                                }
+                                button {
+                                    class: "px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors",
+                                    onclick: move |_| {
+                                        let msg_id_opt = pending_delete.read().clone();
+                                        if let Some(msg_id) = msg_id_opt {
+                                            handle_delete_message(msg_id);
+                                        }
+                                        pending_delete.set(None);
+                                    },
+                                    "Delete"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -224,6 +309,8 @@ pub fn PostsView() -> Element {
 /// Single post view - displays a single post by ID with replies
 #[component]
 pub fn SinglePostView(post_id: String) -> Element {
+    let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
+
     // Find the post and self_member_id
     let post_data = use_memo(move || {
         let current_room = CURRENT_ROOM.read();
@@ -245,6 +332,33 @@ pub fn SinglePostView(post_id: String) -> Element {
         }
         None
     });
+
+    // Handler for toggling reactions
+    let handle_toggle_reaction = move |target_message_id: MessageId, emoji: String| {
+        if let Some(ctx) = ActionContext::from_current_room() {
+            spawn_local(async move {
+                message_actions::toggle_reaction(ctx, target_message_id, emoji).await;
+            });
+        }
+    };
+
+    // Handler for deleting messages
+    let handle_delete_message = move |target_message_id: MessageId| {
+        if let Some(ctx) = ActionContext::from_current_room() {
+            spawn_local(async move {
+                message_actions::delete_message(ctx, target_message_id).await;
+            });
+        }
+    };
+
+    // Handler for editing messages
+    let handle_edit_message = move |target_message_id: MessageId, new_text: String| {
+        if let Some(ctx) = ActionContext::from_current_room() {
+            spawn_local(async move {
+                message_actions::edit_message(ctx, target_message_id, new_text).await;
+            });
+        }
+    };
 
     rsx! {
         div { class: "flex-1 flex flex-col min-w-0 bg-bg",
@@ -270,6 +384,15 @@ pub fn SinglePostView(post_id: String) -> Element {
                                         self_member_id: *self_member_id,
                                         expanded: true,
                                         show_replies: true,
+                                        on_react: move |(msg_id, emoji)| {
+                                            handle_toggle_reaction(msg_id, emoji);
+                                        },
+                                        on_request_delete: move |msg_id| {
+                                            pending_delete.set(Some(msg_id));
+                                        },
+                                        on_edit: move |(msg_id, new_text)| {
+                                            handle_edit_message(msg_id, new_text);
+                                        },
                                     }
                                 }
                             }
@@ -284,6 +407,42 @@ pub fn SinglePostView(post_id: String) -> Element {
                                         "← Back to posts"
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Delete confirmation modal
+            if pending_delete.read().is_some() {
+                div {
+                    class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50",
+                    onclick: move |_| pending_delete.set(None),
+                    div {
+                        class: "bg-panel rounded-lg shadow-xl p-6 max-w-sm mx-4",
+                        onclick: move |e| e.stop_propagation(),
+                        h3 { class: "text-lg font-semibold text-text mb-2",
+                            "Delete Post?"
+                        }
+                        p { class: "text-text-muted text-sm mb-4",
+                            "This action cannot be undone."
+                        }
+                        div { class: "flex gap-3 justify-end",
+                            button {
+                                class: "px-4 py-2 rounded-lg bg-surface hover:bg-surface/80 text-text transition-colors",
+                                onclick: move |_| pending_delete.set(None),
+                                "Cancel"
+                            }
+                            button {
+                                class: "px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors",
+                                onclick: move |_| {
+                                    let msg_id_opt = pending_delete.read().clone();
+                                    if let Some(msg_id) = msg_id_opt {
+                                        handle_delete_message(msg_id);
+                                    }
+                                    pending_delete.set(None);
+                                },
+                                "Delete"
                             }
                         }
                     }
