@@ -13,6 +13,7 @@ use river_core::room_state::member_info::MemberInfoV1;
 use river_core::room_state::message::{MessagesV1, RoomMessageBody};
 use river_core::room_state::privacy::PrivacyMode;
 use std::collections::HashMap;
+use crate::room_data::SendMessageError;
 
 /// A single post for display (text messages only, no replies)
 #[derive(Clone, PartialEq)]
@@ -264,14 +265,32 @@ pub fn PostsView() -> Element {
                                     }
                                 }
                                 div {
-                                    // Post input (compose button and modal)
-                                    PostInput {
-                                        handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
-                                            handle_send_message(msg)
+                                    match room_data.can_participate() {
+                                        Ok(()) => rsx! {
+                                            PostInput {
+                                                handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
+                                                    handle_send_message(msg)
+                                                },
+                                                replying_to: replying_to,
+                                                on_request_edit_last: move |_| {},
+                                            }
                                         },
-                                        replying_to: replying_to,
-                                        on_request_edit_last: move |_| {},
+                                        Err(SendMessageError::UserNotMember) => {
+                                            let user_vk = room_data.self_sk.verifying_key();
+                                            rsx! {
+                                                /*NotMemberNotification {
+                                                    user_verifying_key: user_vk
+                                                }*/
+                                            }
+                                        },
+                                        Err(SendMessageError::UserBanned) => rsx! {
+                                            div { class: "px-4 py-3 mx-4 mb-4 bg-error-bg text-red-700 dark:text-red-400 rounded-lg text-sm",
+                                                "You have been banned from sending messages in this room."
+                                            }
+                                        },
                                     }
+
+                                    // Post input (compose button and modal)
                                 }
                             }
                         }
