@@ -1,10 +1,10 @@
-use crate::components::app::notifications::request_permission_on_first_message;
 use crate::components::app::receive_times::{format_delay, get_delay_secs};
 use crate::components::app::{CURRENT_ROOM, EDIT_ROOM_MODAL, MEMBER_INFO_MODAL, NEEDS_SYNC, ROOMS};
 use crate::room_data::SendMessageError;
 use crate::util::avatar::get_avatar;
-use crate::util::ecies::{encrypt_with_symmetric_key, unseal_bytes_with_secrets};
+use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::markdown::text_to_html;
+use crate::util::messaging::{send_message, ReplyContext};
 use crate::util::{format_utc_as_full_datetime, format_utc_as_local_time, get_current_system_time};
 mod emoji_picker;
 mod message_actions;
@@ -31,14 +31,6 @@ use std::time::Duration;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys;
-
-/// Context for a reply-in-progress (held in a signal)
-#[derive(Clone, PartialEq, Debug)]
-struct ReplyContext {
-    message_id: MessageId,
-    author_name: String,
-    content_preview: String,
-}
 
 /// A group of consecutive messages from the same sender within a time window
 #[derive(Clone, PartialEq)]
@@ -811,224 +803,30 @@ pub fn Conversation() -> Element {
             // Always scroll to bottom when user sends their own message
             is_at_bottom.set(true);
 
-            if message_text.is_empty() {
-                warn!("Message is empty");
-                return;
-            }
             if let (Some(current_room), Some(current_room_data)) =
                 (CURRENT_ROOM.read().owner_key, current_room_data.clone())
             {
-                // Clone what we need for the async block
                 let room_key = current_room_data.room_key();
                 let self_sk = current_room_data.self_sk.clone();
                 let room_state_clone = current_room_data.room_state.clone();
                 let is_private = current_room_data.is_private();
-                // Copy the secret data (get_secret returns Option<(&[u8; 32], u32)>)
                 let secret_opt: Option<([u8; 32], u32)> = current_room_data
                     .get_secret()
                     .map(|(secret, version)| (*secret, version));
 
                 spawn_local(async move {
-                    use river_core::room_state::content::{
-                        ReplyContentV1, TextContentV1, CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
-                        REPLY_CONTENT_VERSION, TEXT_CONTENT_VERSION,
-                    };
-
-                    // Build content based on whether this is a reply or regular message
-                    let content = if let Some(reply) = reply_ctx {
-                        // Reply message
-                        if is_private {
-                            if let Some((secret, version)) = secret_opt {
-                                let reply_content = ReplyContentV1::new(
-                                    title_text.clone(),
-                                    message_text.clone(),
-                                    reply.message_id,
-                                    reply.author_name,
-                                    reply.content_preview,
-                                );
-                                let content_bytes = reply_content.encode();
-                                let (ciphertext, nonce) =
-                                    encrypt_with_symmetric_key(&secret, &content_bytes);
-                                RoomMessageBody::private(
-                                    CONTENT_TYPE_REPLY,
-                                    REPLY_CONTENT_VERSION,
-                                    ciphertext,
-                                    nonce,
-                                    version,
-                                )
-                            } else {
-                                warn!("Room is private but no secret available, sending reply as public");
-                                RoomMessageBody::reply(
-                                    title_text.clone(),
-                                    message_text.clone(),
-                                    reply.message_id,
-                                    reply.author_name,
-                                    reply.content_preview,
-                                )
-                            }
-                        } else {
-                            RoomMessageBody::reply(
-                                title_text.clone(),
-                                message_text.clone(),
-                                reply.message_id,
-                                reply.author_name,
-                                reply.content_preview,
-                            )
-                        }
-                    } else {
-                        // Regular text message
-                        if is_private {
-                            if let Some((secret, version)) = secret_opt {
-                                let text_content = TextContentV1::new(title_text.clone(), message_text.clone());
-                                let content_bytes = text_content.encode();
-                                let (ciphertext, nonce) =
-                                    encrypt_with_symmetric_key(&secret, &content_bytes);
-                                RoomMessageBody::private(
-                                    CONTENT_TYPE_TEXT,
-                                    TEXT_CONTENT_VERSION,
-                                    ciphertext,
-                                    nonce,
-                                    version,
-                                )
-                            } else {
-                                warn!("Room is private but no secret available, sending as public");
-                                RoomMessageBody::public(title_text.clone(), message_text.clone())
-                            }
-                        } else {
-                            RoomMessageBody::public(title_text.clone(), message_text.clone())
-                        }
-                    };
-
-                    let message = MessageV1 {
-                        room_owner: MemberId::from(current_room),
-                        author: MemberId::from(&self_sk.verifying_key()),
-                        content,
-                        time: get_current_system_time(),
-                    };
-
-                    // Serialize message to CBOR for signing
-                    let mut message_bytes = Vec::new();
-                    if let Err(e) = ciborium::ser::into_writer(&message, &mut message_bytes) {
-                        error!("Failed to serialize message for signing: {:?}", e);
-                        return;
-                    }
-
-                    // Sign using delegate with fallback to local signing
-                    let signature = crate::signing::sign_message_with_fallback(
+                    send_message(
+                        current_room,
                         room_key,
-                        message_bytes,
-                        &self_sk,
+                        self_sk,
+                        room_state_clone,
+                        is_private,
+                        secret_opt,
+                        title_text,
+                        message_text,
+                        reply_ctx,
                     )
                     .await;
-
-                    let auth_message = AuthorizedMessageV1::with_signature(message, signature);
-
-                    // Check if we need to re-add ourselves (pruned for inactivity)
-                    let (members_delta, member_info_delta) = {
-                        let rooms_read = ROOMS.read();
-                        if let Some(room_data) = rooms_read.map.get(&current_room) {
-                            let self_vk = room_data.self_sk.verifying_key();
-                            let is_in_members = self_vk == current_room
-                                || room_data
-                                    .room_state
-                                    .members
-                                    .members
-                                    .iter()
-                                    .any(|m| m.member.member_vk == self_vk);
-
-                            if !is_in_members {
-                                if let Some(ref authorized_member) =
-                                    room_data.self_authorized_member
-                                {
-                                    let current_member_ids: std::collections::HashSet<_> =
-                                        room_data
-                                            .room_state
-                                            .members
-                                            .members
-                                            .iter()
-                                            .map(|m| m.member.id())
-                                            .collect();
-                                    let mut members_to_add = vec![authorized_member.clone()];
-                                    for chain_member in &room_data.invite_chain {
-                                        if !current_member_ids.contains(&chain_member.member.id()) {
-                                            members_to_add.push(chain_member.clone());
-                                        }
-                                    }
-
-                                    // Use stored member_info to preserve nickname, or fall back to "Member"
-                                    use river_core::room_state::member_info::{
-                                        AuthorizedMemberInfo, MemberInfo,
-                                    };
-                                    let authorized_info =
-                                        if let Some(ref stored_info) = room_data.self_member_info {
-                                            stored_info.clone()
-                                        } else {
-                                            use river_core::room_state::privacy::SealedBytes;
-                                            let member_id = MemberId::from(&self_vk);
-                                            let existing_version = room_data
-                                                .room_state
-                                                .member_info
-                                                .member_info
-                                                .iter()
-                                                .find(|i| i.member_info.member_id == member_id)
-                                                .map(|i| i.member_info.version)
-                                                .unwrap_or(0);
-                                            let member_info = MemberInfo {
-                                                member_id,
-                                                version: existing_version,
-                                                preferred_nickname: SealedBytes::public(
-                                                    "Member".to_string().into_bytes(),
-                                                ),
-                                            };
-                                            AuthorizedMemberInfo::new_with_member_key(
-                                                member_info,
-                                                &room_data.self_sk,
-                                            )
-                                        };
-
-                                    (
-                                        Some(river_core::room_state::member::MembersDelta::new(
-                                            members_to_add,
-                                        )),
-                                        Some(vec![authorized_info]),
-                                    )
-                                } else {
-                                    (None, None)
-                                }
-                            } else {
-                                (None, None)
-                            }
-                        } else {
-                            (None, None)
-                        }
-                    };
-
-                    let delta = ChatRoomStateV1Delta {
-                        recent_messages: Some(vec![auth_message.clone()]),
-                        members: members_delta,
-                        member_info: member_info_delta,
-                        ..Default::default()
-                    };
-                    info!("Sending message: {:?}", auth_message);
-                    ROOMS.with_mut(|rooms| {
-                        if let Some(room_data) = rooms.map.get_mut(&current_room) {
-                            if let Err(e) = room_data.room_state.apply_delta(
-                                &room_state_clone,
-                                &ChatRoomParametersV1 {
-                                    owner: current_room,
-                                },
-                                &Some(delta),
-                            ) {
-                                error!("Failed to apply message delta: {:?}", e);
-                            } else {
-                                // Mark room as needing sync after message added
-                                NEEDS_SYNC.write().insert(current_room);
-
-                                // Request notification permission on first message
-                                request_permission_on_first_message();
-                            }
-                        }
-                    });
                 });
             }
         }
