@@ -38,6 +38,7 @@
             # Build dependencies
             pkg-config
             openssl
+            nodejs
 
             # For WASM
             wasm-pack
