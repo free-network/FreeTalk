@@ -1,8 +1,6 @@
 use crate::components::app::{Route, CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
 use crate::components::conversation::message_input::PostInput;
-use crate::components::conversation::{
-    get_all_messages, get_top_level_posts, MessageData, PostCard,
-};
+use crate::components::conversation::{get_all_messages, get_top_level_posts, PostCard};
 use crate::room_data::SendMessageError;
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;

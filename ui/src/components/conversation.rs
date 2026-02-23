@@ -325,6 +325,8 @@ fn extract_reply_context(
 #[component]
 pub fn Conversation(
     #[props(default)] parent_message_id: Option<MessageId>,
+    /// Default reply context - when set, new messages will be replies to this
+    #[props(default)] default_reply_to: Option<ReplyContext>,
 ) -> Element {
     let current_room_data = {
         let current_room = CURRENT_ROOM.read();
@@ -336,7 +338,7 @@ pub fn Conversation(
         }
     };
 
-    let mut replying_to: Signal<Option<ReplyContext>> = use_signal(|| None);
+    let mut replying_to: Signal<Option<ReplyContext>> = use_signal(move || default_reply_to.clone());
     let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
     // Build message tree for the given parent
@@ -1173,9 +1175,21 @@ pub fn PostCard(
     let author_id = message.author_id;
     let author_name = message.author_name.clone();
     let title = message.title_text.clone();
+    let content_text = message.content_text.clone();
     let content_html = message.content_html.clone();
     let time_clamped = message.time_clamped;
     let message_id = message.message_id.clone();
+
+    // Create reply context for when show_replies is enabled
+    let reply_context = if show_replies {
+        Some(ReplyContext {
+            message_id: message_id.clone(),
+            author_name: author_name.clone(),
+            content_preview: content_text.chars().take(100).collect(),
+        })
+    } else {
+        None
+    };
 
     let timestamp_ms = message.time.timestamp_millis();
     let time_str = format_utc_as_local_time(timestamp_ms);
@@ -1283,6 +1297,7 @@ pub fn PostCard(
                 }
                 Conversation {
                     parent_message_id: Some(message_id),
+                    default_reply_to: reply_context,
                 }
             }
         }
