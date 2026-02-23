@@ -242,9 +242,6 @@ pub fn PostsView() -> Element {
                                                                 on_edit: move |(msg_id, new_text)| {
                                                                     handle_edit_message(msg_id, new_text);
                                                                 },
-                                                                on_reply: move |ctx: ReplyContext| {
-                                                                    replying_to.set(Some(ctx));
-                                                                },
                                                             }
                                                         }
                                                     }
