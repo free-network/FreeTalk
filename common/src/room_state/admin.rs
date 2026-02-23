@@ -32,13 +32,13 @@ impl ComposableState for AdminsV1 {
             return Ok(());
         }
 
-        /* if self.admins.len() > parent_state.configuration.configuration.max_admins {
+        if self.admins.len() > parent_state.configuration.configuration.max_admins {
             return Err(format!(
                 "Too many admins: {} > {}",
                 self.admins.len(),
                 parent_state.configuration.configuration.max_admins
             ));
-        } */
+        }
 
         let owner_id = parameters.owner_id();
 
@@ -84,7 +84,7 @@ impl ComposableState for AdminsV1 {
         parameters: &Self::Parameters,
         delta: &Option<Self::Delta>,
     ) -> Result<(), String> {
-        // let max_admins = parent_state.configuration.configuration.max_admins;
+        let max_admins = parent_state.configuration.configuration.max_admins;
 
         if let Some(delta) = delta {
             // Build a combined lookup map that includes both existing admins
@@ -99,9 +99,13 @@ impl ComposableState for AdminsV1 {
                     .or_insert(admin);
             }
 
-            /* if (combined_admins_by_id.len() > max_admins) {
-
-            } */
+            if combined_admins_by_id.len() > max_admins {
+                return Err(format!(
+                    "Too many admins after delta: {} > {}",
+                    combined_admins_by_id.len(),
+                    max_admins
+                ));
+            }
 
             // Verify that all new admins have valid signatures
             for admin in &delta.added {

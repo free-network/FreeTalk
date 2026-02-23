@@ -1153,7 +1153,19 @@ pub fn Conversation() -> Element {
         div { class: "flex-1 flex flex-col min-w-0 bg-bg",
             // Room header
             {
-                current_room_data.as_ref().map(|_room_data| {
+                current_room_data.as_ref().map(|room_data| {
+                    let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
+                    let self_nickname = room_data.room_state.member_info.member_info
+                        .iter()
+                        .find(|ami| ami.member_info.member_id == self_member_id)
+                        .map(|ami| {
+                            match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, &room_data.secrets) {
+                                Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+                                Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
+                            }
+                        })
+                        .unwrap_or_else(|| "You".to_string());
+                    let self_avatar = get_avatar(&self_member_id);
                     rsx! {
                         div { class: "flex-shrink-0 px-6 py-3 border-b border-border bg-panel",
                             div { class: "flex items-center justify-between max-w-4xl mx-auto",
@@ -1173,6 +1185,24 @@ pub fn Conversation() -> Element {
                                     span {
                                         class: "text-text-muted",
                                         Icon { icon: FaCircleInfo, width: 16, height: 16 }
+                                    }
+                                }
+                                // User avatar and nickname link
+                                button {
+                                    class: "flex items-center gap-2 px-3 py-1.5 rounded-lg bg-transparent hover:bg-surface transition-colors cursor-pointer",
+                                    title: "Your profile",
+                                    onclick: move |_| {
+                                        MEMBER_INFO_MODAL.with_mut(|signal| {
+                                            signal.member = Some(self_member_id);
+                                        });
+                                    },
+                                    span { class: "text-sm text-text-muted",
+                                        "{self_nickname}"
+                                    }
+                                    img {
+                                        src: "{self_avatar}",
+                                        alt: "Your avatar",
+                                        class: "w-8 h-8 rounded-full"
                                     }
                                 }
                             }

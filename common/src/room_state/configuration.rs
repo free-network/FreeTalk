@@ -83,6 +83,7 @@ impl ComposableState for AuthorizedConfigurationV1 {
                 || delta.configuration.max_message_size == 0
                 || delta.configuration.max_nickname_size == 0
                 || delta.configuration.max_members == 0
+                || delta.configuration.max_admins == 0
                 || delta.configuration.max_room_name == 0
                 || delta.configuration.max_room_description == 0
             {
@@ -181,6 +182,7 @@ impl Default for Configuration {
             max_message_size: 1000,
             max_nickname_size: 50,
             max_members: 200,
+            max_admins: 40,
             max_room_name: 100,
             max_room_description: 500,
         }
@@ -210,6 +212,7 @@ pub struct Configuration {
     pub max_message_size: usize,
     pub max_nickname_size: usize,
     pub max_members: usize,
+    pub max_admins: usize,
     pub max_room_name: usize,
     pub max_room_description: usize,
 }
