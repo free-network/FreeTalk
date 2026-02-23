@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod ban;
 pub mod configuration;
 pub mod content;
@@ -9,6 +10,7 @@ pub mod secret;
 pub mod upgrade;
 pub mod version;
 
+use crate::room_state::admin::AdminsV1;
 use crate::room_state::ban::BansV1;
 use crate::room_state::configuration::AuthorizedConfigurationV1;
 use crate::room_state::member::{MemberId, MembersV1};
@@ -32,6 +34,10 @@ pub struct ChatRoomStateV1 {
     // the `apply_delta` function. DO NOT reorder fields without fully understanding the implications.
     /// Configures things like maximum message length, can be updated by the owner.
     pub configuration: AuthorizedConfigurationV1,
+
+    /// A list of all administrators
+    /// Administrator can ban, remove content
+    pub admin: AdminsV1,
 
     /// A list of recently banned members, a banned member can't be present in the
     /// members list and will be removed from it ifc necessary.
