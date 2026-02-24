@@ -1,14 +1,20 @@
-//! Top bar component showing user profile and admin controls.
+//! Top bar component showing user profile, admin controls, and post input.
 
 use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
+use crate::components::conversation::message_input::PostInput;
+use crate::room_data::SendMessageError;
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
+use crate::util::messaging::{send_message, ReplyContext};
 use dioxus::prelude::*;
 use river_core::room_state::member::MemberId;
+use river_core::room_state::privacy::PrivacyMode;
 
-/// Top bar component displaying the current user's profile and admin controls.
+/// Top bar component displaying the current user's profile, admin controls, and post input.
 #[component]
 pub fn TopBar() -> Element {
+    let replying_to = use_signal(|| None::<ReplyContext>);
+
     // Get current room data
     let current_room_data = use_memo(move || {
         CURRENT_ROOM
@@ -16,6 +22,70 @@ pub fn TopBar() -> Element {
             .owner_key
             .and_then(|key| ROOMS.read().map.get(&key).cloned())
     });
+
+    // Message sending handler
+    let handle_send_message =
+        move |(title_text, message_text, reply_ctx): (String, String, Option<ReplyContext>)| {
+            if message_text.is_empty() {
+                return;
+            }
+
+            // Get room data for sending
+            let room_info = {
+                let current_room = CURRENT_ROOM.read();
+                if let Some(key) = current_room.owner_key {
+                    let rooms = ROOMS.read();
+                    if let Some(room_data) = rooms.map.get(&key) {
+                        let is_private = room_data
+                            .room_state
+                            .configuration
+                            .configuration
+                            .privacy_mode
+                            == PrivacyMode::Private;
+                        let secret_opt = if is_private {
+                            room_data
+                                .secrets
+                                .iter()
+                                .max_by_key(|(v, _)| *v)
+                                .map(|(v, s)| (*s, *v))
+                        } else {
+                            None
+                        };
+                        Some((
+                            key,
+                            room_data.room_key(),
+                            room_data.self_sk.clone(),
+                            room_data.room_state.clone(),
+                            is_private,
+                            secret_opt,
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            if let Some((current_room, room_key, self_sk, room_state_clone, is_private, secret_opt)) =
+                room_info
+            {
+                spawn(async move {
+                    send_message(
+                        current_room,
+                        room_key,
+                        self_sk,
+                        room_state_clone,
+                        is_private,
+                        secret_opt,
+                        title_text,
+                        message_text,
+                        reply_ctx,
+                    )
+                    .await;
+                });
+            }
+        };
 
     // Don't render if no room is selected
     let Some(room_data) = current_room_data.read().clone() else {
@@ -25,6 +95,7 @@ pub fn TopBar() -> Element {
     let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
     let owner_id = MemberId::from(&room_data.owner_vk);
     let is_owner = self_member_id == owner_id;
+    let can_participate = room_data.can_participate();
 
     let self_nickname = room_data
         .room_state
@@ -67,14 +138,36 @@ pub fn TopBar() -> Element {
                 }
             }
 
-            // Admin button for owners
-            if is_owner {
-                a {
-                    href: "#/room/{room_id}/admin",
-                    class: "flex items-center gap-2 px-4 py-2 mr-4 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
-                    title: "Manage Admins",
-                    span { "⚙" }
-                    span { "Admin" }
+            // Right side: admin button and post input
+            div { class: "flex items-center gap-3 pr-4",
+                // Admin button for owners
+                if is_owner {
+                    a {
+                        href: "#/room/{room_id}/admin",
+                        class: "flex items-center gap-2 px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
+                        title: "Manage Admins",
+                        span { "⚙" }
+                        span { "Admin" }
+                    }
+                }
+
+                // Post input
+                match can_participate {
+                    Ok(()) => rsx! {
+                        PostInput {
+                            handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
+                                handle_send_message(msg)
+                            },
+                            replying_to: replying_to,
+                            on_request_edit_last: move |_| {},
+                        }
+                    },
+                    Err(SendMessageError::UserNotMember) => rsx! {},
+                    Err(SendMessageError::UserBanned) => rsx! {
+                        div { class: "px-4 py-2 bg-error-bg text-red-700 dark:text-red-400 rounded-lg text-sm",
+                            "You have been banned from this board."
+                        }
+                    },
                 }
             }
         }

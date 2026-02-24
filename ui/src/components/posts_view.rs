@@ -1,18 +1,13 @@
 use crate::components::app::{Route, CURRENT_ROOM, ROOMS};
-use crate::components::conversation::message_input::PostInput;
 use crate::components::conversation::{get_all_messages, get_top_level_posts, MessageCard, MessageCardVariant};
-use crate::room_data::SendMessageError;
 use crate::util::message_actions::{self, ActionContext};
-use crate::util::messaging::{send_message, ReplyContext};
 use dioxus::prelude::*;
 use river_core::room_state::member::MemberId;
 use river_core::room_state::message::MessageId;
-use river_core::room_state::privacy::PrivacyMode;
 use wasm_bindgen_futures::spawn_local;
 
 #[component]
 pub fn PostsView() -> Element {
-    let mut replying_to = use_signal(|| None::<ReplyContext>);
     let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
     let current_room_data = {
@@ -45,70 +40,6 @@ pub fn PostsView() -> Element {
         }
         None
     });
-
-    // Message sending handler
-    let handle_send_message =
-        move |(title_text, message_text, reply_ctx): (String, String, Option<ReplyContext>)| {
-            if message_text.is_empty() {
-                return;
-            }
-
-            // Get room data for sending
-            let room_info = {
-                let current_room = CURRENT_ROOM.read();
-                if let Some(key) = current_room.owner_key {
-                    let rooms = ROOMS.read();
-                    if let Some(room_data) = rooms.map.get(&key) {
-                        let is_private = room_data
-                            .room_state
-                            .configuration
-                            .configuration
-                            .privacy_mode
-                            == PrivacyMode::Private;
-                        let secret_opt = if is_private {
-                            room_data
-                                .secrets
-                                .iter()
-                                .max_by_key(|(v, _)| *v)
-                                .map(|(v, s)| (*s, *v))
-                        } else {
-                            None
-                        };
-                        Some((
-                            key,
-                            room_data.room_key(),
-                            room_data.self_sk.clone(),
-                            room_data.room_state.clone(),
-                            is_private,
-                            secret_opt,
-                        ))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            };
-
-            if let Some((current_room, room_key, self_sk, room_state_clone, is_private, secret_opt)) =
-                room_info
-            {
-                spawn(async move {
-                    send_message(
-                        current_room,
-                        room_key,
-                        self_sk,
-                        room_state_clone,
-                        is_private,
-                        secret_opt,
-                        title_text,
-                        message_text,
-                        reply_ctx,
-                    )
-                    .await;
-                });
-            }
-        };
 
     // Handler for toggling reactions
     let handle_toggle_reaction = move |target_message_id: MessageId, emoji: String| {
@@ -146,33 +77,6 @@ pub fn PostsView() -> Element {
                     p { class: "text-sm mt-2", "Posts will appear here" }
                 }
             } else {
-                // Post input area
-                {
-                    current_room_data.as_ref().map(|room_data| {
-                        rsx! {
-                            div { class: "flex justify-end px-4 py-2 border-b border-border",
-                                match room_data.can_participate() {
-                                    Ok(()) => rsx! {
-                                        PostInput {
-                                            handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
-                                                handle_send_message(msg)
-                                            },
-                                            replying_to: replying_to,
-                                            on_request_edit_last: move |_| {},
-                                        }
-                                    },
-                                    Err(SendMessageError::UserNotMember) => rsx! {},
-                                    Err(SendMessageError::UserBanned) => rsx! {
-                                        div { class: "px-4 py-3 bg-error-bg text-red-700 dark:text-red-400 rounded-lg text-sm",
-                                            "You have been banned from sending messages in this room."
-                                        }
-                                    },
-                                }
-                            }
-                        }
-                    })
-                }
-
                 // Posts list
                 div { class: "flex-1 overflow-y-auto",
                     div { class: "max-w-4xl mx-auto px-4 py-6",
