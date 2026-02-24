@@ -1,9 +1,7 @@
-use crate::components::app::{Route, CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
+use crate::components::app::{Route, CURRENT_ROOM, ROOMS};
 use crate::components::conversation::message_input::PostInput;
 use crate::components::conversation::{get_all_messages, get_top_level_posts, MessageCard, MessageCardVariant};
 use crate::room_data::SendMessageError;
-use crate::util::avatar::get_avatar;
-use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::message_actions::{self, ActionContext};
 use crate::util::messaging::{send_message, ReplyContext};
 use dioxus::prelude::*;
@@ -148,73 +146,27 @@ pub fn PostsView() -> Element {
                     p { class: "text-sm mt-2", "Posts will appear here" }
                 }
             } else {
+                // Post input area
                 {
                     current_room_data.as_ref().map(|room_data| {
-                        let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
-                        let owner_id = MemberId::from(&room_data.owner_vk);
-                        let is_owner = self_member_id == owner_id;
-                        let self_nickname = room_data.room_state.member_info.member_info
-                            .iter()
-                            .find(|ami| ami.member_info.member_id == self_member_id)
-                            .map(|ami| {
-                                match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, &room_data.secrets) {
-                                    Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-                                    Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
-                                }
-                            })
-                            .unwrap_or_else(|| "You".to_string());
-                        let self_avatar = get_avatar(&self_member_id);
-                        let room_id = bs58::encode(room_data.owner_vk.as_bytes()).into_string();
                         rsx! {
-                            div { class: "flex justify-between",
-                                // User profile header
-                                div {
-                                    class: "flex items-center gap-3 px-6 py-4 cursor-pointer hover:bg-surface/50 transition-colors",
-                                    onclick: move |_| {
-                                        MEMBER_INFO_MODAL.with_mut(|signal| {
-                                            signal.member = Some(self_member_id);
-                                        });
-                                    },
-                                    img {
-                                        src: "{self_avatar}",
-                                        alt: "Your avatar",
-                                        class: "w-16 h-16 rounded-full"
-                                    }
-                                    span { class: "text-3xl font-medium text-text",
-                                        "{self_nickname}"
-                                    }
-                                    if is_owner {
-                                        span { class: "text-2xl", title: "Board Owner", "👑" }
-                                    }
-                                }
-                                div { class: "flex items-center gap-3 px-6 py-4 cursor-pointer hover:bg-surface/50 transition-colors",
-                                    // Admin button for owners
-                                    if is_owner {
-                                        a {
-                                            href: "#/room/{room_id}/admin",
-                                            class: "flex items-center gap-2 px-4 py-2 mr-4 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors self-center",
-                                            title: "Manage Admins",
-                                            span { "⚙" }
-                                            span { "Admin" }
+                            div { class: "flex justify-end px-4 py-2 border-b border-border",
+                                match room_data.can_participate() {
+                                    Ok(()) => rsx! {
+                                        PostInput {
+                                            handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
+                                                handle_send_message(msg)
+                                            },
+                                            replying_to: replying_to,
+                                            on_request_edit_last: move |_| {},
                                         }
-                                    }
-                                    match room_data.can_participate() {
-                                        Ok(()) => rsx! {
-                                            PostInput {
-                                                handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
-                                                    handle_send_message(msg)
-                                                },
-                                                replying_to: replying_to,
-                                                on_request_edit_last: move |_| {},
-                                            }
-                                        },
-                                        Err(SendMessageError::UserNotMember) => rsx! {},
-                                        Err(SendMessageError::UserBanned) => rsx! {
-                                            div { class: "px-4 py-3 mx-4 mb-4 bg-error-bg text-red-700 dark:text-red-400 rounded-lg text-sm",
-                                                "You have been banned from sending messages in this room."
-                                            }
-                                        },
-                                    }
+                                    },
+                                    Err(SendMessageError::UserNotMember) => rsx! {},
+                                    Err(SendMessageError::UserBanned) => rsx! {
+                                        div { class: "px-4 py-3 bg-error-bg text-red-700 dark:text-red-400 rounded-lg text-sm",
+                                            "You have been banned from sending messages in this room."
+                                        }
+                                    },
                                 }
                             }
                         }

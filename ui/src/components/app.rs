@@ -5,7 +5,7 @@ pub mod notifications;
 pub mod receive_times;
 pub mod sync_info;
 
-use super::{admin_view::AdminView, conversation::Conversation, members::MemberList, room_list::RoomList};
+use super::{admin_view::AdminView, conversation::Conversation, members::MemberList, room_list::RoomList, top_bar::TopBar};
 use crate::components::app::document_title::DocumentTitleUpdater;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatus;
@@ -198,6 +198,7 @@ pub fn App() -> Element {
 
         // Main layout with router
         RoomList {}
+        TopBar {}
         Router::<Route> {}
         MemberList {}
         EditRoomModal {}
