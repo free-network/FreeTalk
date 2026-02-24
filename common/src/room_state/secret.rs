@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
-/// Room secrets state managing encrypted secret distribution
+/// Board secrets state managing encrypted secret distribution
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct RoomSecretsV1 {
     pub current_version: SecretVersion,

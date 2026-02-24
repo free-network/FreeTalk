@@ -18,7 +18,7 @@ pub enum SynchronizerError {
     #[error("API not initialized")]
     ApiNotInitialized,
 
-    #[error("Room data not found for key: {0}")]
+    #[error("Board data not found for key: {0}")]
     RoomNotFound(String),
 
     #[error("Contract info not found for key: {0}")]

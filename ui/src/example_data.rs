@@ -26,16 +26,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub fn create_example_rooms() -> Rooms {
     let mut map = HashMap::new();
 
-    // Room where you're just an observer (not a member)
-    let room1 = create_room(&"Public Discussion Room".to_string(), SelfIs::Observer);
+    // Board where you're just an observer (not a member)
+    let room1 = create_room(&"Public Discussion Board".to_string(), SelfIs::Observer);
     map.insert(room1.owner_vk, room1.room_data);
 
-    // Room where you're a member
-    let room2 = create_room(&"Team Chat Room".to_string(), SelfIs::Member);
+    // Board where you're a member
+    let room2 = create_room(&"Team Chat Board".to_string(), SelfIs::Member);
     map.insert(room2.owner_vk, room2.room_data);
 
-    // Room where you're the owner
-    let room3 = create_room(&"Your Private Room".to_string(), SelfIs::Owner);
+    // Board where you're the owner
+    let room3 = create_room(&"Your Private Board".to_string(), SelfIs::Owner);
     map.insert(room3.owner_vk, room3.room_data);
 
     Rooms {
@@ -313,7 +313,7 @@ fn add_example_messages(
 
     // Add reactions to messages from OTHER members (not owner)
     // Rule: One reaction per user per message
-    // In "Your Private Room" the owner IS self, so this shows self reacting to others
+    // In "Your Private Board" the owner IS self, so this shows self reacting to others
     let non_owner_messages: Vec<_> = messages
         .messages
         .iter()
@@ -377,7 +377,7 @@ mod tests {
             );
             assert!(
                 verification_result.is_ok(),
-                "Room state failed to verify: {:?}",
+                "Board state failed to verify: {:?}",
                 verification_result.err()
             );
 

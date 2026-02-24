@@ -47,8 +47,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Room management commands
-    Room {
+    /// Board management commands
+    Board {
         #[command(subcommand)]
         command: room::RoomCommands,
     },
@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Commands::Room { command } => room::execute(command, api_client, cli.format).await?,
+        Commands::Board { command } => room::execute(command, api_client, cli.format).await?,
         Commands::Message { command } => message::execute(command, api_client, cli.format).await?,
         Commands::Member { command } => member::execute(command, api_client, cli.format).await?,
         Commands::Invite { command } => invite::execute(command, api_client, cli.format).await?,

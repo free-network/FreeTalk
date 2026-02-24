@@ -115,11 +115,11 @@ pub fn update_document_title() {
     *TOTAL_UNREAD_COUNT.write() = unread_count;
 
     let title = match (room_name, is_visible, unread_count) {
-        // Room selected, tab visible (or no unread) - just show room name
+        // Board selected, tab visible (or no unread) - just show room name
         (Some(name), true, _) => name,
         (Some(name), false, 0) => name,
 
-        // Room selected, tab hidden with unread messages - show count
+        // Board selected, tab hidden with unread messages - show count
         (Some(name), false, count) => format!("({}) {}", count, name),
 
         // No room selected, tab visible (or no unread) - show app name

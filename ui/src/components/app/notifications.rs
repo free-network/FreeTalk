@@ -3,7 +3,7 @@
 //! Sends desktop notifications when:
 //! - Document is not visible (tab hidden or window not focused)
 //! - Message is from another user (not self)
-//! - Room is not currently active
+//! - Board is not currently active
 //! - Permission has been granted
 
 use crate::components::app::{CURRENT_ROOM, ROOMS};
@@ -324,7 +324,7 @@ pub fn notify_new_messages(
         if let Some(current_key) = CURRENT_ROOM.read().owner_key {
             if current_key == *room_key {
                 info!(
-                    "Room {:?} is currently active and visible, skipping notification",
+                    "Board {:?} is currently active and visible, skipping notification",
                     MemberId::from(*room_key)
                 );
                 return;
@@ -377,7 +377,7 @@ pub fn notify_new_messages(
                 Err(_) => sealed_name.to_string_lossy(),
             }
         })
-        .unwrap_or_else(|| "Room".to_string());
+        .unwrap_or_else(|| "Board".to_string());
 
     // For multiple messages, show a summary
     if external_messages.len() > 1 {

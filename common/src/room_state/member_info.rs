@@ -709,7 +709,7 @@ mod tests {
         let result = member_info_v1.verify(&parent_state, &parameters);
         assert!(
             result.is_ok(),
-            "Room owner should be allowed to have member info: {:?}",
+            "Board owner should be allowed to have member info: {:?}",
             result
         );
     }

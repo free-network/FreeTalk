@@ -1217,7 +1217,7 @@ async fn setup_room_and_exchange_messages(
                 "room",
                 "create",
                 "--name",
-                &format!("River Room {}", room.id + 1),
+                &format!("River Board {}", room.id + 1),
                 "--nickname",
                 &owner.label,
             ],
@@ -1630,7 +1630,7 @@ async fn run_late_joiner_test() -> Result<()> {
             "room",
             "create",
             "--name",
-            "Late Joiner Test Room",
+            "Late Joiner Test Board",
             "--nickname",
             "owner",
         ],
@@ -1644,7 +1644,7 @@ async fn run_late_joiner_test() -> Result<()> {
         .context("Failed to reconstruct contract key from owner key")?;
     let owner_key = create_output.owner_key.clone();
 
-    println!("Room created: contract_key={}", contract_key);
+    println!("Board created: contract_key={}", contract_key);
 
     // Peer 1 joins immediately
     println!("Step 2: Early joiner (peer 1) joins via invite");

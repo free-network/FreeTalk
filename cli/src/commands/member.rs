@@ -8,19 +8,19 @@ use colored::Colorize;
 pub enum MemberCommands {
     /// List members of a room
     List {
-        /// Room ID (owner key in base58)
+        /// Board ID (owner key in base58)
         room_id: String,
     },
     /// Set your nickname in a room
     SetNickname {
-        /// Room ID (owner key in base58)
+        /// Board ID (owner key in base58)
         room_id: String,
         /// Your new nickname
         nickname: String,
     },
     /// Ban a member from a room
     Ban {
-        /// Room ID (owner key in base58)
+        /// Board ID (owner key in base58)
         room_id: String,
         /// Member ID to ban (8-character short ID from member list)
         member_id: String,

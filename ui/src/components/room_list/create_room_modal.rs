@@ -13,10 +13,10 @@ pub fn CreateRoomModal() -> Element {
 
         let name = room_name.read().clone();
         if name.is_empty() {
-            info!("🔴 Room name is empty, returning");
+            info!("🔴 Board name is empty, returning");
             return;
         }
-        info!("🔵 Room name: {}", name);
+        info!("🔵 Board name: {}", name);
 
         // Generate key outside the borrow
         info!("🔵 Generating signing key...");
@@ -33,7 +33,7 @@ pub fn CreateRoomModal() -> Element {
         info!("🔵 About to call create_new_room_with_name...");
         let new_room_key =
             ROOMS.with_mut(|rooms| rooms.create_new_room_with_name(self_sk, name, nick, private));
-        info!("🔵 Room created with key: {:?}", new_room_key);
+        info!("🔵 Board created with key: {:?}", new_room_key);
 
         // Navigate to room URL using hash (modal is outside Router context)
         info!("🔵 Navigating to new room...");
@@ -46,7 +46,7 @@ pub fn CreateRoomModal() -> Element {
         // Mark room as needing sync (this will trigger use_effect in app.rs)
         info!("🔵 Marking room for synchronization...");
         NEEDS_SYNC.write().insert(new_room_key);
-        info!("🔵 Room marked for sync");
+        info!("🔵 Board marked for sync");
 
         // Reset and close modal
         info!("🔵 Resetting form fields...");
@@ -85,13 +85,13 @@ pub fn CreateRoomModal() -> Element {
 
                 // Header
                 div { class: "px-6 py-4 border-b border-border",
-                    h2 { class: "text-lg font-semibold text-text", "Create New Room" }
+                    h2 { class: "text-lg font-semibold text-text", "Create New Board" }
                 }
 
                 // Body
                 div { class: "px-6 py-4 space-y-4",
                     div {
-                        label { class: "block text-sm font-medium text-text mb-1", "Room Name" }
+                        label { class: "block text-sm font-medium text-text mb-1", "Board Name" }
                         input {
                             class: "w-full px-3 py-2 bg-surface border border-border rounded-lg text-text placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent",
                             value: "{room_name}",
@@ -137,7 +137,7 @@ pub fn CreateRoomModal() -> Element {
                     button {
                         class: "px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors",
                         onclick: create_room,
-                        "Create Room"
+                        "Create Board"
                     }
                 }
             }

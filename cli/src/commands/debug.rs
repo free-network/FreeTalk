@@ -9,29 +9,29 @@ use serde::Serialize;
 pub enum DebugCommands {
     /// Perform a raw contract GET operation
     ContractGet {
-        /// Room owner key (base58 encoded)
+        /// Board owner key (base58 encoded)
         room_owner_key: String,
     },
     /// Test WebSocket connection
     Websocket,
     /// Show contract key for a room
     ContractKey {
-        /// Room owner key (base58 encoded)
+        /// Board owner key (base58 encoded)
         room_owner_key: String,
     },
     /// Show room state summary including bans, members, and configuration
     RoomState {
-        /// Room owner key (base58 encoded)
+        /// Board owner key (base58 encoded)
         room_owner_key: String,
     },
     /// Show current ban list for a room
     Bans {
-        /// Room owner key (base58 encoded)
+        /// Board owner key (base58 encoded)
         room_owner_key: String,
     },
     /// Show room configuration
     Config {
-        /// Room owner key (base58 encoded)
+        /// Board owner key (base58 encoded)
         room_owner_key: String,
     },
 }
@@ -109,7 +109,7 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                                 room_state.configuration.configuration.configuration_version
                             );
                             println!(
-                                "Room name: {}",
+                                "Board name: {}",
                                 room_state
                                     .configuration
                                     .configuration
@@ -191,7 +191,7 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
 
             match format {
                 OutputFormat::Human => {
-                    println!("Room owner key: {}", room_owner_key);
+                    println!("Board owner key: {}", room_owner_key);
                     println!("Contract key: {}", contract_key.id());
                 }
                 OutputFormat::Json => {
@@ -222,9 +222,9 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
 
             match format {
                 OutputFormat::Human => {
-                    println!("Room State Summary");
+                    println!("Board State Summary");
                     println!("==================");
-                    println!("Room name: {}", summary.room_name);
+                    println!("Board name: {}", summary.room_name);
                     println!("Privacy mode: {}", summary.privacy_mode);
                     println!("Config version: {}", summary.configuration_version);
                     println!();
@@ -305,9 +305,9 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
 
             match format {
                 OutputFormat::Human => {
-                    println!("Room Configuration");
+                    println!("Board Configuration");
                     println!("==================");
-                    println!("Room name: {}", room_config.room_name);
+                    println!("Board name: {}", room_config.room_name);
                     println!("Privacy mode: {}", room_config.privacy_mode);
                     println!("Config version: {}", room_config.configuration_version);
                     println!();

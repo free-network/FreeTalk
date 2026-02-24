@@ -67,7 +67,7 @@ pub async fn send_message(
                     version,
                 )
             } else {
-                warn!("Room is private but no secret available, sending reply as public");
+                warn!("Board is private but no secret available, sending reply as public");
                 RoomMessageBody::reply(
                     title_text.clone(),
                     message_text.clone(),
@@ -100,7 +100,7 @@ pub async fn send_message(
                     version,
                 )
             } else {
-                warn!("Room is private but no secret available, sending as public");
+                warn!("Board is private but no secret available, sending as public");
                 RoomMessageBody::public(title_text.clone(), message_text.clone())
             }
         } else {

@@ -127,7 +127,7 @@ pub fn RoomList() -> Element {
                     // Dropdown menu
                     div { class: "flex justify-center absolute left-0 top-full overflow-hidden z-20", style: "width: 100vw",
                         div { class: "bg-panel", style: "min-width: 60vw",
-                            // Room list
+                            // Board list
                             ul { class: "max-h-64 overflow-y-auto py-1",
                                 {room_items.read().iter().map(|(room_key, room_name, is_current)| {
                                     let room_key = *room_key;

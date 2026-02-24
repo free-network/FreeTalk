@@ -141,7 +141,7 @@
                         <span class="icon is-small">
                             <i class="fas fa-plus"></i>
                         </span>
-                    <span>Add Room</span>
+                    <span>Add Board</span>
                 </button>
             </div>
         </div>
@@ -175,7 +175,7 @@
     <aside class="user-list has-background-light">
         <div class="menu p-4" style="height: 100%; display: flex; flex-direction: column;">
             <p class="menu-label">
-                Users in Room
+                Users in Board
             </p>
             <ul class="menu-list" style="flex-grow: 1; overflow-y: auto;">
                 <li>
@@ -258,7 +258,7 @@
                     `;
                 break;
             case 'room':
-                title.textContent = `Room: ${name}`;
+                title.textContent = `Board: ${name}`;
                 content.innerHTML = `
                         <div class="field">
                             <label class="label">Name</label>
@@ -275,10 +275,10 @@
                     `;
                 break;
             case 'new-room':
-                title.textContent = 'Create New Room';
+                title.textContent = 'Create New Board';
                 content.innerHTML = `
                         <div class="field">
-                            <label class="label">Room Name</label>
+                            <label class="label">Board Name</label>
                             <div class="control">
                                 <input class="input" type="text" placeholder="Enter room name">
                             </div>

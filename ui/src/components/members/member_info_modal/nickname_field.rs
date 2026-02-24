@@ -164,7 +164,7 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
                                 NEEDS_SYNC.write().insert(owner_key);
                             }
                         } else {
-                            warn!("Room state not found for current room");
+                            warn!("Board state not found for current room");
                         }
                     });
                 }

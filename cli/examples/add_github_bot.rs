@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_tungstenite::connect_async;
 
-// Room contract WASM bytes (bundled)
+// Board contract WASM bytes (bundled)
 const ROOM_CONTRACT_WASM: &[u8] = include_bytes!("../contracts/room_contract.wasm");
 
 #[tokio::main]
@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     // Configuration
     let node_url = "ws://127.0.0.1:7509/v1/contract/command?encodingProtocol=native";
 
-    // Room owner verifying key
+    // Board owner verifying key
     let room_owner_vk_bytes: [u8; 32] =
         bs58::decode("69Ht4YjZsT884MndR2uWhQYe1wb9b2x77HRq7Dgq7wYE")
             .into_vec()?
@@ -110,7 +110,7 @@ async fn main() -> Result<()> {
     room_state.recent_messages.rebuild_actions_state();
 
     println!(
-        "Room name: {}",
+        "Board name: {}",
         room_state
             .configuration
             .configuration

@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn test_symmetric_encryption_decryption() {
         let key = generate_room_secret();
-        let plaintext = b"Room secret message";
+        let plaintext = b"Board secret message";
 
         let (ciphertext, nonce) = encrypt_with_symmetric_key(&key, plaintext);
         let decrypted = decrypt_with_symmetric_key(&key, &ciphertext, &nonce)
@@ -365,7 +365,7 @@ mod tests {
     fn test_symmetric_decryption_wrong_key() {
         let key1 = generate_room_secret();
         let key2 = generate_room_secret();
-        let plaintext = b"Room secret message";
+        let plaintext = b"Board secret message";
 
         let (ciphertext, nonce) = encrypt_with_symmetric_key(&key1, plaintext);
         let result = decrypt_with_symmetric_key(&key2, &ciphertext, &nonce);

@@ -104,7 +104,7 @@ fn test_private_room_creation_and_encryption() {
     let config = Configuration {
         privacy_mode: PrivacyMode::Private,
         display: RoomDisplayMetadata {
-            name: SealedBytes::public("Test Private Room".to_string().into_bytes()),
+            name: SealedBytes::public("Test Private Board".to_string().into_bytes()),
             description: None,
         },
         owner_member_id: owner_id,
@@ -122,7 +122,7 @@ fn test_private_room_creation_and_encryption() {
     // Verify the room state
     room_state
         .verify(&room_state, &parameters)
-        .expect("Room state should verify");
+        .expect("Board state should verify");
 
     // Verify it's a private room
     assert_eq!(
@@ -149,7 +149,7 @@ fn test_private_room_member_addition_with_secrets() {
             Configuration {
                 privacy_mode: PrivacyMode::Private,
                 display: RoomDisplayMetadata {
-                    name: SealedBytes::public("Private Room".to_string().into_bytes()),
+                    name: SealedBytes::public("Private Board".to_string().into_bytes()),
                     description: None,
                 },
                 owner_member_id: owner_id,
@@ -262,7 +262,7 @@ fn test_secret_rotation() {
             Configuration {
                 privacy_mode: PrivacyMode::Private,
                 display: RoomDisplayMetadata {
-                    name: SealedBytes::public("Private Room".to_string().into_bytes()),
+                    name: SealedBytes::public("Private Board".to_string().into_bytes()),
                     description: None,
                 },
                 owner_member_id: owner_id,
@@ -424,7 +424,7 @@ fn test_ban_member_excludes_from_new_secrets() {
             Configuration {
                 privacy_mode: PrivacyMode::Private,
                 display: RoomDisplayMetadata {
-                    name: SealedBytes::public("Private Room".to_string().into_bytes()),
+                    name: SealedBytes::public("Private Board".to_string().into_bytes()),
                     description: None,
                 },
                 owner_member_id: owner_id,
@@ -612,7 +612,7 @@ fn test_encrypted_messages_in_private_room() {
             Configuration {
                 privacy_mode: PrivacyMode::Private,
                 display: RoomDisplayMetadata {
-                    name: SealedBytes::public("Private Room".to_string().into_bytes()),
+                    name: SealedBytes::public("Private Board".to_string().into_bytes()),
                     description: None,
                 },
                 owner_member_id: owner_id,
