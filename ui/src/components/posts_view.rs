@@ -151,6 +151,8 @@ pub fn PostsView() -> Element {
                 {
                     current_room_data.as_ref().map(|room_data| {
                         let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
+                        let owner_id = MemberId::from(&room_data.owner_vk);
+                        let is_owner = self_member_id == owner_id;
                         let self_nickname = room_data.room_state.member_info.member_info
                             .iter()
                             .find(|ami| ami.member_info.member_id == self_member_id)
@@ -162,6 +164,7 @@ pub fn PostsView() -> Element {
                             })
                             .unwrap_or_else(|| "You".to_string());
                         let self_avatar = get_avatar(&self_member_id);
+                        let room_id = bs58::encode(room_data.owner_vk.as_bytes()).into_string();
                         rsx! {
                             div { class: "flex justify-between",
                                 // User profile header
@@ -179,6 +182,19 @@ pub fn PostsView() -> Element {
                                     }
                                     span { class: "text-3xl font-medium text-text",
                                         "{self_nickname}"
+                                    }
+                                    if is_owner {
+                                        span { class: "text-2xl", title: "Board Owner", "👑" }
+                                    }
+                                }
+                                // Admin button for owners
+                                if is_owner {
+                                    a {
+                                        href: "#/room/{room_id}/admin",
+                                        class: "flex items-center gap-2 px-4 py-2 mr-4 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors self-center",
+                                        title: "Manage Admins",
+                                        span { "⚙" }
+                                        span { "Admin" }
                                     }
                                 }
                                 div {
