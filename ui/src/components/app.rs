@@ -34,13 +34,15 @@ use web_sys::window;
 #[rustfmt::skip]
 pub enum Route {
     #[route("/")]
-    Posts,
-    #[route("/post/:id")]
-    Post { id: String },
-    #[route("/conversation")]
-    ConversationView,
-    #[route("/admin")]
-    Admin,
+    Home,
+    #[route("/room/:room_id")]
+    Posts { room_id: String },
+    #[route("/room/:room_id/post/:post_id")]
+    Post { room_id: String, post_id: String },
+    #[route("/room/:room_id/conversation")]
+    ConversationView { room_id: String },
+    #[route("/room/:room_id/admin")]
+    Admin { room_id: String },
 }
 
 pub static ROOMS: GlobalSignal<Rooms> = Global::new(initial_rooms);
@@ -206,28 +208,60 @@ pub fn App() -> Element {
     }
 }
 
+/// Route component when no room is selected
+#[component]
+fn Home() -> Element {
+    rsx! {
+        div { class: "flex-1 flex flex-col items-center justify-center h-64 text-text-muted",
+            p { class: "text-xl", "Select a board from the sidebar above or create one" }
+            p { class: "text-sm mt-2", "Posts will appear here" }
+        }
+    }
+}
+
 /// Route component for posts list view
 #[component]
-fn Posts() -> Element {
+fn Posts(room_id: String) -> Element {
+    sync_room_from_url(&room_id);
     rsx! { PostsView {} }
 }
 
 /// Route component for single post view
 #[component]
-fn Post(id: String) -> Element {
-    rsx! { SinglePostView { post_id: id } }
+fn Post(room_id: String, post_id: String) -> Element {
+    sync_room_from_url(&room_id);
+    rsx! { SinglePostView { post_id: post_id } }
 }
 
 /// Route component for conversation view
 #[component]
-fn ConversationView() -> Element {
+fn ConversationView(room_id: String) -> Element {
+    sync_room_from_url(&room_id);
     rsx! { Conversation {} }
 }
 
 /// Route component for admin management view
 #[component]
-fn Admin() -> Element {
+fn Admin(room_id: String) -> Element {
+    sync_room_from_url(&room_id);
     rsx! { AdminView {} }
+}
+
+/// Sync CURRENT_ROOM from URL room_id parameter
+fn sync_room_from_url(room_id: &str) {
+    // Parse room_id (base58-encoded VerifyingKey)
+    if let Ok(bytes) = bs58::decode(room_id).into_vec() {
+        if bytes.len() == 32 {
+            if let Ok(vk) = VerifyingKey::from_bytes(&bytes.try_into().unwrap()) {
+                // Only update if different to avoid infinite loops
+                let current = CURRENT_ROOM.read().owner_key;
+                if current != Some(vk) {
+                    debug!("Syncing CURRENT_ROOM from URL: {}", room_id);
+                    *CURRENT_ROOM.write() = CurrentRoom { owner_key: Some(vk) };
+                }
+            }
+        }
+    }
 }
 
 #[cfg(not(feature = "example-data"))]

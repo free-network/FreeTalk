@@ -1,6 +1,7 @@
-use crate::components::app::{CREATE_ROOM_MODAL, CURRENT_ROOM, NEEDS_SYNC, ROOMS};
+use crate::components::app::{CREATE_ROOM_MODAL, NEEDS_SYNC, ROOMS};
 use dioxus::prelude::*;
 use ed25519_dalek::SigningKey;
+use web_sys::window;
 
 #[component]
 pub fn CreateRoomModal() -> Element {
@@ -34,12 +35,13 @@ pub fn CreateRoomModal() -> Element {
             ROOMS.with_mut(|rooms| rooms.create_new_room_with_name(self_sk, name, nick, private));
         info!("🔵 Room created with key: {:?}", new_room_key);
 
-        // Update current room
-        info!("🔵 Updating CURRENT_ROOM...");
-        CURRENT_ROOM.with_mut(|current_room| {
-            current_room.owner_key = Some(new_room_key);
-        });
-        info!("🔵 CURRENT_ROOM updated");
+        // Navigate to room URL using hash (modal is outside Router context)
+        info!("🔵 Navigating to new room...");
+        let room_id = bs58::encode(new_room_key.as_bytes()).into_string();
+        if let Some(win) = window() {
+            let _ = win.location().set_hash(&format!("/room/{}", room_id));
+        }
+        info!("🔵 Navigation triggered");
 
         // Mark room as needing sync (this will trigger use_effect in app.rs)
         info!("🔵 Marking room for synchronization...");

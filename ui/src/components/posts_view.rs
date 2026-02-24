@@ -232,7 +232,11 @@ pub fn PostsView() -> Element {
                                                                 expanded: false,
                                                                 show_replies: false,
                                                                 on_click: move |_| {
-                                                                    nav.push(Route::Post { id: post_id.clone() });
+                                                                    // Get current room_id for navigation
+                                                                    if let Some(key) = CURRENT_ROOM.read().owner_key {
+                                                                        let room_id = bs58::encode(key.as_bytes()).into_string();
+                                                                        nav.push(Route::Post { room_id, post_id: post_id.clone() });
+                                                                    }
                                                                 },
                                                                 on_react: move |(msg_id, emoji)| {
                                                                     handle_toggle_reaction(msg_id, emoji);
@@ -309,6 +313,15 @@ pub fn PostsView() -> Element {
 pub fn SinglePostView(post_id: String) -> Element {
     let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
+    // Get current room_id for navigation
+    let current_room_id = use_memo(move || {
+        CURRENT_ROOM
+            .read()
+            .owner_key
+            .map(|key| bs58::encode(key.as_bytes()).into_string())
+            .unwrap_or_default()
+    });
+
     // Find the post and self_member_id
     let post_data = use_memo(move || {
         let current_room = CURRENT_ROOM.read();
@@ -363,7 +376,7 @@ pub fn SinglePostView(post_id: String) -> Element {
             // Back button header
             div { class: "flex items-center gap-4 px-6 py-4 border-b border-border",
                 Link {
-                    to: Route::Posts,
+                    to: Route::Posts { room_id: current_room_id.read().clone() },
                     class: "text-accent hover:text-accent/80 transition-colors text-lg",
                     "← Back to posts"
                 }
@@ -400,7 +413,7 @@ pub fn SinglePostView(post_id: String) -> Element {
                                 div { class: "flex-1 flex flex-col items-center justify-center h-64 text-text-muted",
                                     p { class: "text-xl", "Post not found." }
                                     Link {
-                                        to: Route::Posts,
+                                        to: Route::Posts { room_id: current_room_id.read().clone() },
                                         class: "mt-4 text-accent hover:text-accent/80 transition-colors",
                                         "← Back to posts"
                                     }

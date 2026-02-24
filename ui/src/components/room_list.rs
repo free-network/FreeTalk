@@ -6,7 +6,6 @@ pub(crate) mod room_name_field;
 use crate::components::app::chat_delegate::save_rooms_to_delegate;
 use crate::components::app::document_title::mark_current_room_as_read;
 use crate::components::app::{CREATE_ROOM_MODAL, CURRENT_ROOM, ROOMS};
-use crate::room_data::CurrentRoom;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::logger::tracing::error;
 use dioxus::prelude::*;
@@ -14,6 +13,7 @@ use dioxus_free_icons::{
     icons::fa_solid_icons::{FaChevronDown, FaComments, FaPlus},
     Icon,
 };
+use web_sys::window;
 
 // Access the build timestamp (ISO 8601 format) environment variable set by build.rs
 const BUILD_TIMESTAMP_ISO: &str = env!("BUILD_TIMESTAMP_ISO", "Build timestamp not set");
@@ -145,7 +145,11 @@ pub fn RoomList() -> Element {
                                                     }
                                                 ),
                                                 onclick: move |_| {
-                                                    *CURRENT_ROOM.write() = CurrentRoom { owner_key: Some(room_key) };
+                                                    // Navigate to room URL using hash (component is outside Router context)
+                                                    let room_id = bs58::encode(room_key.as_bytes()).into_string();
+                                                    if let Some(win) = window() {
+                                                        let _ = win.location().set_hash(&format!("/room/{}", room_id));
+                                                    }
                                                     mark_current_room_as_read();
                                                     is_open.set(false);
                                                     spawn(async move {
