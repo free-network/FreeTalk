@@ -22,7 +22,7 @@ asset_dir = "assets"
 #base_path = "v1/contract/web/raAqMhMG7KUpXBU2SxgCQ3Vh4PYjttxdSWd9ftV7RLv"
 
 # HTML title tag content
-title = "River"
+title = "FreeTalk"
 
 [web.watcher]
 
