@@ -43,6 +43,8 @@ pub enum Route {
     ConversationView { room_id: String },
     #[route("/room/:room_id/admin")]
     Admin { room_id: String },
+    #[route("/:..route")]
+    NotFound { route: Vec<String> },
 }
 
 pub static ROOMS: GlobalSignal<Rooms> = Global::new(initial_rooms);
@@ -245,6 +247,24 @@ fn ConversationView(room_id: String) -> Element {
 fn Admin(room_id: String) -> Element {
     sync_room_from_url(&room_id);
     rsx! { AdminView {} }
+}
+
+/// Route component for 404 not found
+#[component]
+fn NotFound(route: Vec<String>) -> Element {
+    let path = format!("/{}", route.join("/"));
+    rsx! {
+        div { class: "flex-1 flex flex-col items-center justify-center p-8 text-center",
+            h1 { class: "text-6xl font-bold text-text-muted mb-4", "404" }
+            p { class: "text-xl text-text mb-2", "Page not found" }
+            p { class: "text-text-muted mb-6", "The path \"{path}\" does not exist." }
+            a {
+                href: "#/",
+                class: "px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors inline-block",
+                "Go to Home"
+            }
+        }
+    }
 }
 
 /// Sync CURRENT_ROOM from URL room_id parameter
