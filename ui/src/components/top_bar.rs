@@ -116,7 +116,7 @@ pub fn TopBar() -> Element {
     let room_id = bs58::encode(room_data.owner_vk.as_bytes()).into_string();
 
     rsx! {
-        div { class: "flex justify-between items-center bg-panel border-b border-border",
+        div { class: "flex justify-between",
             // User profile header
             div {
                 class: "flex items-center gap-3 px-6 py-4 cursor-pointer hover:bg-surface/50 transition-colors",
@@ -128,9 +128,9 @@ pub fn TopBar() -> Element {
                 img {
                     src: "{self_avatar}",
                     alt: "Your avatar",
-                    class: "w-12 h-12 rounded-full"
+                    class: "w-16 h-16 rounded-full"
                 }
-                span { class: "text-xl font-medium text-text",
+                span { class: "text-3xl font-medium text-text",
                     "{self_nickname}"
                 }
                 if is_owner {
