@@ -1119,12 +1119,10 @@ pub fn MessageCard(
     match variant {
         MessageCardVariant::Reply => {
             // Indent based on depth (max 4 levels visually)
-            let indent_class = match depth.min(4) {
+            let indent_class = match depth.min(2) {
                 0 => "",
                 1 => "ml-8",
-                2 => "ml-16",
-                3 => "ml-24",
-                _ => "ml-32",
+                _ => "ml-16",
             };
 
             rsx! {
