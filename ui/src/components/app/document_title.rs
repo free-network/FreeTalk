@@ -1,8 +1,8 @@
-//! Document title management for River chat application.
+//! Document title management for FreeTalk chat application.
 //!
 //! Handles:
 //! - Setting document.title to room name when a room is selected
-//! - Setting document.title to "River" when no room is selected
+//! - Setting document.title to "FreeTalk" when no room is selected
 //! - Showing unread message count in title when tab is hidden
 //! - Tracking document visibility state
 //! - Marking messages as read when tab becomes visible
@@ -17,7 +17,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::VisibilityState;
 
-const APP_NAME: &str = "River";
+const APP_NAME: &str = "FreeTalk";
 
 /// Global signal tracking whether the document is currently visible
 pub static DOCUMENT_VISIBLE: GlobalSignal<bool> = Global::new(|| true);

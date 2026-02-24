@@ -75,7 +75,7 @@ const GIT_COMMIT: &str = env!("GIT_COMMIT_HASH");
 #[component]
 pub fn App() -> Element {
     info!(
-        "River UI loaded - Built: {} | Commit: {}",
+        "FreeTalk UI loaded - Built: {} | Commit: {}",
         BUILD_TIMESTAMP, GIT_COMMIT
     );
 
