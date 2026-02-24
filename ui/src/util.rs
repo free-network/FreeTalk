@@ -8,6 +8,7 @@ pub mod messaging;
 
 use ed25519_dalek::VerifyingKey;
 use freenet_stdlib::prelude::{ContractCode, ContractKey, Parameters};
+use river_core::room_state::member::MemberId;
 use std::time::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -145,4 +146,15 @@ pub fn owner_vk_to_contract_key(owner_vk: &VerifyingKey) -> ContractKey {
     let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
     // Use the full ContractKey constructor that includes the code hash
     ContractKey::from_params_and_code(parameters, &contract_code)
+}
+
+/// Generate a consistent HSL color string from a MemberId.
+/// Uses the hash value to determine hue, with fixed saturation and lightness
+/// for good visibility on dark backgrounds.
+pub fn member_id_to_color(member_id: &MemberId) -> String {
+    // Use the hash value to generate a hue (0-360)
+    let hash = member_id.0 .0;
+    let hue = ((hash.abs() as u64) % 360) as u16;
+    // Use moderate saturation and lightness for visibility
+    format!("hsl({}, 65%, 55%)", hue)
 }

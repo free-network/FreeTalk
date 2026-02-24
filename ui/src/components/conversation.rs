@@ -3,6 +3,7 @@ use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::markdown::text_to_html;
+use crate::util::member_id_to_color;
 use crate::util::messaging::{send_message, ReplyContext};
 use crate::util::{format_utc_as_full_datetime, format_utc_as_local_time};
 pub mod emoji_picker;
@@ -1132,7 +1133,7 @@ pub fn MessageCard(
                     // Message card
                     div {
                         class: "relative border-l-2 pl-4 py-2 hover:bg-surface/30 transition-colors",
-                        style: if is_self { "border-color: var(--accent);" } else { "border-color: var(--border);" },
+                        style: "border-color: {member_id_to_color(&author_id)};",
                         onmouseenter: move |_| is_hovered.set(true),
                         onmouseleave: move |_| is_hovered.set(false),
 
