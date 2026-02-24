@@ -147,6 +147,17 @@ pub async fn sign_upgrade(room_key: RoomKey, upgrade_bytes: Vec<u8>) -> Result<S
     extract_signature(send_delegate_request(request).await)
 }
 
+/// Sign an admin authorization (Admin).
+pub async fn sign_admin(room_key: RoomKey, admin_bytes: Vec<u8>) -> Result<Signature, String> {
+    let request = ChatDelegateRequestMsg::SignAdmin {
+        room_key,
+        request_id: generate_request_id(),
+        admin_bytes,
+    };
+
+    extract_signature(send_delegate_request(request).await)
+}
+
 /// Extract a signature from a delegate response.
 fn extract_signature(
     response: Result<ChatDelegateResponseMsg, String>,
@@ -354,6 +365,21 @@ pub async fn sign_upgrade_with_fallback(
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);
             fallback_key.sign(&upgrade_bytes)
+        }
+    }
+}
+
+/// Sign admin bytes with delegate, falling back to local signing if delegate fails.
+pub async fn sign_admin_with_fallback(
+    room_key: RoomKey,
+    admin_bytes: Vec<u8>,
+    fallback_key: &SigningKey,
+) -> Signature {
+    match sign_admin(room_key, admin_bytes.clone()).await {
+        Ok(sig) => sig,
+        Err(e) => {
+            warn!("Delegate signing failed, using fallback: {}", e);
+            fallback_key.sign(&admin_bytes)
         }
     }
 }

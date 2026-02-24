@@ -5,7 +5,7 @@ pub mod notifications;
 pub mod receive_times;
 pub mod sync_info;
 
-use super::{conversation::Conversation, members::MemberList, room_list::RoomList};
+use super::{admin_view::AdminView, conversation::Conversation, members::MemberList, room_list::RoomList};
 use crate::components::app::document_title::DocumentTitleUpdater;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatus;
@@ -39,6 +39,8 @@ pub enum Route {
     Post { id: String },
     #[route("/conversation")]
     ConversationView,
+    #[route("/admin")]
+    Admin,
 }
 
 pub static ROOMS: GlobalSignal<Rooms> = Global::new(initial_rooms);
@@ -220,6 +222,12 @@ fn Post(id: String) -> Element {
 #[component]
 fn ConversationView() -> Element {
     rsx! { Conversation {} }
+}
+
+/// Route component for admin management view
+#[component]
+fn Admin() -> Element {
+    rsx! { AdminView {} }
 }
 
 #[cfg(not(feature = "example-data"))]

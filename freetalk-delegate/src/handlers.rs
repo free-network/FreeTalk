@@ -147,6 +147,14 @@ pub(crate) fn handle_application_message(
                 app_msg.app,
             )
         }
+        ChatDelegateRequestMsg::SignAdmin {
+            room_key,
+            request_id,
+            admin_bytes,
+        } => {
+            logging::info(format!("Delegate received SignAdmin for room: {room_key:?}").as_str());
+            handle_sign_request(ctx, origin, room_key, request_id, admin_bytes, app_msg.app)
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+pub mod admin_view;
 pub mod app;
 pub mod conversation;
 pub mod members;

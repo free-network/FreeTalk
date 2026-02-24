@@ -83,6 +83,12 @@ pub enum ChatDelegateRequestMsg {
         request_id: RequestId,
         upgrade_bytes: Vec<u8>,
     },
+    /// Sign an admin authorization (Admin serialized)
+    SignAdmin {
+        room_key: RoomKey,
+        request_id: RequestId,
+        admin_bytes: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]

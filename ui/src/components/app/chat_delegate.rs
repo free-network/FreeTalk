@@ -351,6 +351,11 @@ fn get_request_key(request: &ChatDelegateRequestMsg) -> Vec<u8> {
             room_key,
             request_id,
             ..
+        }
+        | ChatDelegateRequestMsg::SignAdmin {
+            room_key,
+            request_id,
+            ..
         } => {
             let mut key = SIGN_PREFIX.to_vec();
             key.extend_from_slice(room_key);
