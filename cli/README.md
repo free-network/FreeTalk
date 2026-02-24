@@ -63,7 +63,7 @@ The CLI uses core components from the River ecosystem:
 
 ## Commands
 
-- `riverctl room` - Room management (create, list, info)
+- `riverctl room` - Board management (create, list, info)
 - `riverctl invite` - Invitation handling (create, accept)
 - `riverctl debug` - Debugging tools for contract operations
 - `riverctl message` - Messaging (coming soon)

@@ -20,7 +20,7 @@ fn test_invitation_acceptance_initializes_room_state_correctly() -> Result<()> {
     // Set up proper configuration
     let config = Configuration {
         display: RoomDisplayMetadata {
-            name: SealedBytes::public("Test Room".to_string().into_bytes()),
+            name: SealedBytes::public("Test Board".to_string().into_bytes()),
             description: None,
         },
         owner_member_id: owner_vk.into(),
@@ -101,7 +101,7 @@ fn test_invitation_acceptance_initializes_room_state_correctly() -> Result<()> {
     // Verify the room state is valid
     room_state
         .verify(&room_state, &parameters)
-        .map_err(|e| anyhow!("Room state verification failed: {}", e))?;
+        .map_err(|e| anyhow!("Board state verification failed: {}", e))?;
 
     Ok(())
 }
@@ -123,7 +123,7 @@ fn test_message_validation_after_invitation_acceptance() -> Result<()> {
     // Configure room
     let config = Configuration {
         display: RoomDisplayMetadata {
-            name: SealedBytes::public("Test Room".to_string().into_bytes()),
+            name: SealedBytes::public("Test Board".to_string().into_bytes()),
             description: None,
         },
         owner_member_id: owner_vk.into(),
@@ -174,7 +174,7 @@ fn test_message_validation_after_invitation_acceptance() -> Result<()> {
     // Verify the entire state is valid
     room_state
         .verify(&room_state, &parameters)
-        .map_err(|e| anyhow!("Room state verification failed: {}", e))?;
+        .map_err(|e| anyhow!("Board state verification failed: {}", e))?;
 
     Ok(())
 }
@@ -196,7 +196,7 @@ fn test_uninvited_user_messages_are_filtered() -> Result<()> {
     // Configure room
     let config = Configuration {
         display: RoomDisplayMetadata {
-            name: SealedBytes::public("Test Room".to_string().into_bytes()),
+            name: SealedBytes::public("Test Board".to_string().into_bytes()),
             description: None,
         },
         owner_member_id: owner_vk.into(),

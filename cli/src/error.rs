@@ -15,7 +15,7 @@ pub enum CliError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
-    #[error("Room not found: {0}")]
+    #[error("Board not found: {0}")]
     RoomNotFound(String),
 
     #[error("Not a member of room: {0}")]

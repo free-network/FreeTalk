@@ -64,7 +64,7 @@ pub fn EditRoomModal() -> Element {
                     class: "relative z-10 w-full max-w-md mx-4 bg-panel rounded-xl shadow-xl border border-border",
                     div {
                         class: "p-6",
-                        h1 { class: "text-xl font-semibold text-text mb-4", "Room Details" }
+                        h1 { class: "text-xl font-semibold text-text mb-4", "Board Details" }
 
                         RoomNameField {
                             config: config.clone(),
@@ -91,13 +91,13 @@ pub fn EditRoomModal() -> Element {
 
                         // Read-only room info
                         if let Some(room_data) = editing_room.read().as_ref() {
-                            // Room Public Key
+                            // Board Public Key
                             div {
                                 class: "mt-4",
                                 label {
                                     class: "block text-sm font-medium text-text-muted mb-1",
                                     title: "Ed25519 public key (Curve25519 elliptic curve)",
-                                    "Room Public Key"
+                                    "Board Public Key"
                                 }
                                 input {
                                     r#type: "text",
@@ -196,7 +196,7 @@ pub fn EditRoomModal() -> Element {
                             }
                         }
 
-                        // Leave Room Section
+                        // Leave Board Section
                         if *show_leave_confirmation.read() {
                             div {
                                 class: "bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 mt-4",
@@ -229,7 +229,7 @@ pub fn EditRoomModal() -> Element {
                                                 EDIT_ROOM_MODAL.write().room = None;
 
                                                 // Save updated rooms to delegate storage
-                                                info!("Room removed, saving to delegate");
+                                                info!("Board removed, saving to delegate");
                                                 spawn(async move {
                                                     if let Err(e) = save_rooms_to_delegate().await {
                                                         error!("Failed to save rooms after removal: {}", e);
@@ -255,7 +255,7 @@ pub fn EditRoomModal() -> Element {
                                 button {
                                     class: "px-4 py-2 border border-red-500 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors",
                                     onclick: move |_| show_leave_confirmation.set(true),
-                                    "Leave Room"
+                                    "Leave Board"
                                 }
                             }
                         }
@@ -366,7 +366,7 @@ fn MaxMembersField(
             }
             if is_full {
                 p { class: "text-xs text-red-400 mb-1",
-                    "Room is full — new members will be rejected."
+                    "Board is full — new members will be rejected."
                 }
             }
             if is_owner {

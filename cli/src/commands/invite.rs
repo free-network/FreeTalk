@@ -9,7 +9,7 @@ use ed25519_dalek::VerifyingKey;
 pub enum InviteCommands {
     /// Create an invitation for a room
     Create {
-        /// Room owner key (base58 encoded)
+        /// Board owner key (base58 encoded)
         room_owner_key: String,
     },
     /// Accept an invitation
@@ -103,7 +103,7 @@ pub async fn execute(command: InviteCommands, api: ApiClient, format: OutputForm
                     match format {
                         OutputFormat::Human => {
                             println!("{}", "Invitation accepted successfully!".green());
-                            println!("Room owner key: {}", owner_key_str);
+                            println!("Board owner key: {}", owner_key_str);
                             println!("Contract key: {}", contract_key.id());
                             println!("\nYou can now:");
                             println!(

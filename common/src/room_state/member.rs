@@ -1352,7 +1352,7 @@ mod tests {
         let result = members.verify(&parent_state, &parameters);
         assert!(
             result.is_err(),
-            "Room owner should not be allowed in the members list"
+            "Board owner should not be allowed in the members list"
         );
         assert!(result
             .unwrap_err()

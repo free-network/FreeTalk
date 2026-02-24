@@ -158,7 +158,7 @@ impl Storage {
             self.save_rooms(&storage)?;
             Ok(())
         } else {
-            Err(anyhow!("Room not found"))
+            Err(anyhow!("Board not found"))
         }
     }
 
@@ -176,7 +176,7 @@ impl Storage {
             self.save_rooms(&storage)?;
             Ok(())
         } else {
-            Err(anyhow!("Room not found"))
+            Err(anyhow!("Board not found"))
         }
     }
 
@@ -302,7 +302,7 @@ mod tests {
         // Attempt to update non-existent room
         let result = storage.update_contract_key(&owner_vk, &new_key);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Room not found"));
+        assert!(result.unwrap_err().to_string().contains("Board not found"));
     }
 
     #[test]

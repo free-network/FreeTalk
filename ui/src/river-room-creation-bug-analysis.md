@@ -1,4 +1,4 @@
-# River Room Creation Bug Analysis
+# River Board Creation Bug Analysis
 
 ## Problem
 When creating a room in River, no PUT request is sent to Freenet, preventing the room from being stored in the network.
@@ -6,15 +6,15 @@ When creating a room in River, no PUT request is sent to Freenet, preventing the
 ## Root Cause
 The room creation flow in River has a missing step - it doesn't trigger the synchronization process after creating a room locally.
 
-## How Room Creation Works
+## How Board Creation Works
 
-1. **User clicks "Create Room"** in the UI
+1. **User clicks "Create Board"** in the UI
 2. **CreateRoomModal component** (`create_room_modal.rs`):
    - Calls `ROOMS.with_mut(|rooms| rooms.create_new_room_with_name(...))`
    - This creates the room data locally in memory
    - Updates `CURRENT_ROOM` to the new room
 
-3. **Room synchronization** should happen via:
+3. **Board synchronization** should happen via:
    - `App` component has a `use_effect` that watches `ROOMS` for changes
    - When ROOMS changes, it sends `ProcessRooms` message to the synchronizer
    - The synchronizer's `process_rooms()` method checks for rooms needing sync

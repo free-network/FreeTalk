@@ -89,7 +89,7 @@ fn format_member_display(member: &MemberDisplay) -> String {
     let mut tags: Vec<(&str, &str)> = Vec::new();
 
     if member.is_owner {
-        tags.push(("👑", "Room Owner"));
+        tags.push(("👑", "Board Owner"));
     }
     if member.is_self {
         tags.push(("⭐", "You"));

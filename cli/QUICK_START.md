@@ -13,9 +13,9 @@ cargo install riverctl
 riverctl debug websocket
 ```
 
-### 2. Create a Room
+### 2. Create a Board
 ```bash
-riverctl room create --name "My Room" --nickname "YourName"
+riverctl room create --name "My Board" --nickname "YourName"
 ```
 
 This will output a room owner key (save this for later commands).

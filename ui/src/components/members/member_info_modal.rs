@@ -44,12 +44,12 @@ pub fn MemberInfoModal() -> Element {
         }
     };
 
-    // Room state - create a longer-lived binding
+    // Board state - create a longer-lived binding
     let current_room_data = current_room_data_signal.read();
     let room_state = match current_room_data.as_ref() {
         Some(state) => state,
         None => {
-            return rsx! { div { "Room state not available" } };
+            return rsx! { div { "Board state not available" } };
         }
     };
 
@@ -122,7 +122,7 @@ pub fn MemberInfoModal() -> Element {
 
         // Get the inviter's nickname and ID
         let (invited_by, inviter_id) = match (member, is_owner) {
-            (_, true) => ("N/A (Room Owner)".to_string(), None),
+            (_, true) => ("N/A (Board Owner)".to_string(), None),
             (Some(m), false) => {
                 let inviter_id = m.member.invited_by;
                 let nickname = member_info_list
@@ -177,7 +177,7 @@ pub fn MemberInfoModal() -> Element {
                             if is_owner {
                                 span {
                                     class: "inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-blue-500/20 text-blue-400",
-                                    "👑 Room Owner"
+                                    "👑 Board Owner"
                                 }
                             }
                             if member_id == self_member_id.unwrap() {

@@ -8,7 +8,7 @@ use colored::Colorize;
 pub enum RoomCommands {
     /// Create a new room
     Create {
-        /// Room name
+        /// Board name
         #[arg(short, long)]
         name: String,
 
@@ -20,12 +20,12 @@ pub enum RoomCommands {
     List,
     /// Join a room
     Join {
-        /// Room ID
+        /// Board ID
         room_id: String,
     },
     /// Leave a room
     Leave {
-        /// Room ID
+        /// Board ID
         room_id: String,
     },
     /// Republish a room to the network
@@ -34,12 +34,12 @@ pub enum RoomCommands {
     /// seed it again. Use when the room exists locally but isn't being
     /// served on the network.
     Republish {
-        /// Room owner key (base58)
+        /// Board owner key (base58)
         room_id: String,
     },
     /// Update room configuration (owner only)
     Config {
-        /// Room owner key (base58)
+        /// Board owner key (base58)
         room_id: String,
 
         /// Set maximum number of user bans remembered
@@ -88,7 +88,7 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
 
                     match format {
                         OutputFormat::Human => {
-                            println!("{}", "Room created successfully!".green());
+                            println!("{}", "Board created successfully!".green());
                             println!("Owner key: {}", result.owner_key);
                             println!("Contract key: {}", result.contract_key);
                             println!("\nTo invite others, use:");
@@ -127,7 +127,7 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                             OutputFormat::Human => {
                                 println!("\n{} room(s) found:\n", rooms.len());
                                 for (owner_key, name, contract_key) in rooms {
-                                    println!("Room: {}", name.green());
+                                    println!("Board: {}", name.green());
                                     println!("  Owner key: {}", owner_key);
                                     println!("  Contract key: {}", contract_key);
                                     println!();
@@ -280,7 +280,7 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                 Ok(()) => {
                     match format {
                         OutputFormat::Human => {
-                            println!("{}", "Room republished successfully!".green());
+                            println!("{}", "Board republished successfully!".green());
                             println!("The room contract is now being seeded on the network.");
                         }
                         OutputFormat::Json => {

@@ -12,7 +12,7 @@ use serde_json::json;
 pub enum MessageCommands {
     /// Send a message to a room
     Send {
-        /// Room ID (base58-encoded room owner verifying key)
+        /// Board ID (base58-encoded room owner verifying key)
         room_id: String,
         /// Message content
         message: String,
@@ -24,7 +24,7 @@ pub enum MessageCommands {
     },
     /// List recent messages in a room
     List {
-        /// Room ID
+        /// Board ID
         room_id: String,
         /// Number of messages to show
         #[arg(short, long, default_value = "20")]
@@ -35,7 +35,7 @@ pub enum MessageCommands {
     },
     /// Stream messages from a room in real-time
     Stream {
-        /// Room ID
+        /// Board ID
         room_id: String,
         /// Polling interval in milliseconds (only used without --subscribe)
         #[arg(short, long, default_value = "1000")]
@@ -55,7 +55,7 @@ pub enum MessageCommands {
     },
     /// Edit a message you sent
     Edit {
-        /// Room ID
+        /// Board ID
         room_id: String,
         /// Message ID (from 'message list --json', use the signature field)
         message_id: String,
@@ -67,14 +67,14 @@ pub enum MessageCommands {
     },
     /// Delete a message you sent
     Delete {
-        /// Room ID
+        /// Board ID
         room_id: String,
         /// Message ID (from 'message list --json', use the signature field)
         message_id: String,
     },
     /// Add a reaction to a message
     React {
-        /// Room ID
+        /// Board ID
         room_id: String,
         /// Message ID (from 'message list --json', use the signature field)
         message_id: String,
@@ -83,7 +83,7 @@ pub enum MessageCommands {
     },
     /// Remove a reaction from a message
     Unreact {
-        /// Room ID
+        /// Board ID
         room_id: String,
         /// Message ID (from 'message list --json', use the signature field)
         message_id: String,
@@ -92,7 +92,7 @@ pub enum MessageCommands {
     },
     /// Reply to a message
     Reply {
-        /// Room ID
+        /// Board ID
         room_id: String,
         /// Message ID of the message to reply to
         message_id: String,

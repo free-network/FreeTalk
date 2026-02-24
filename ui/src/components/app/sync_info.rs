@@ -75,7 +75,7 @@ impl SyncInfo {
             );
         } else {
             debug!(
-                "Room with owner key {:?} already registered",
+                "Board with owner key {:?} already registered",
                 MemberId::from(owner_key)
             );
         }
@@ -221,7 +221,7 @@ impl SyncInfo {
             let states_match = sync_info.last_synced_state.as_ref() == Some(&room_data.room_state);
 
             debug!(
-                "Room {:?} - sync status: {:?}, has last synced: {}, states match: {}",
+                "Board {:?} - sync status: {:?}, has last synced: {}, states match: {}",
                 MemberId::from(key),
                 sync_status,
                 has_last_synced,
@@ -230,7 +230,7 @@ impl SyncInfo {
 
             if let Some(last_state) = &sync_info.last_synced_state {
                 debug!(
-                    "Room {:?} - last synced: {} members/{} member_info, current: {} members/{} member_info",
+                    "Board {:?} - last synced: {} members/{} member_info, current: {} members/{} member_info",
                     MemberId::from(key),
                     last_state.members.members.len(),
                     last_state.member_info.member_info.len(),
@@ -243,20 +243,20 @@ impl SyncInfo {
             if *sync_status == RoomSyncStatus::Subscribed {
                 if !states_match {
                     info!(
-                        "Room {:?} needs update - state has changed",
+                        "Board {:?} needs update - state has changed",
                         MemberId::from(key)
                     );
                     rooms_needing_update.insert(*key, room_data.room_state.clone());
                     // Don't update the last synced state here - it will be updated after successful network send
                 } else {
                     debug!(
-                        "Room {:?} doesn't need update - state unchanged",
+                        "Board {:?} doesn't need update - state unchanged",
                         MemberId::from(key)
                     );
                 }
             } else {
                 debug!(
-                    "Room {:?} doesn't need update - not subscribed (status: {:?})",
+                    "Board {:?} doesn't need update - not subscribed (status: {:?})",
                     MemberId::from(key),
                     sync_status
                 );

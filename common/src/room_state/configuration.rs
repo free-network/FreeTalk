@@ -93,7 +93,7 @@ impl ComposableState for AuthorizedConfigurationV1 {
             // Validate display metadata declared lengths
             if delta.configuration.display.name.declared_len() > delta.configuration.max_room_name {
                 return Err(format!(
-                    "Room name declared length {} exceeds max_room_name {}",
+                    "Board name declared length {} exceeds max_room_name {}",
                     delta.configuration.display.name.declared_len(),
                     delta.configuration.max_room_name
                 ));
@@ -102,7 +102,7 @@ impl ComposableState for AuthorizedConfigurationV1 {
             if let Some(desc) = &delta.configuration.display.description {
                 if desc.declared_len() > delta.configuration.max_room_description {
                     return Err(format!(
-                        "Room description declared length {} exceeds max_room_description {}",
+                        "Board description declared length {} exceeds max_room_description {}",
                         desc.declared_len(),
                         delta.configuration.max_room_description
                     ));

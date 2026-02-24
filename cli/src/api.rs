@@ -179,7 +179,7 @@ impl ApiClient {
             HostResponse::ContractResponse(contract_response) => {
                 match contract_response {
                     ContractResponse::PutResponse { key } => {
-                        info!("Room created successfully with contract key: {}", key.id());
+                        info!("Board created successfully with contract key: {}", key.id());
 
                         // Verify the key matches what we expected
                         if key != contract_key {
@@ -204,7 +204,7 @@ impl ApiClient {
                         // When subscribing on PUT, we may receive an UpdateNotification first
                         // This indicates the PUT succeeded and we're now subscribed
                         info!(
-                            "Room created (received subscription update) with contract key: {}",
+                            "Board created (received subscription update) with contract key: {}",
                             key.id()
                         );
 
@@ -236,7 +236,7 @@ impl ApiClient {
             HostResponse::Ok => {
                 // Some versions might return Ok for successful operations
                 info!(
-                    "Room created (Ok response) with contract key: {}",
+                    "Board created (Ok response) with contract key: {}",
                     contract_key.id()
                 );
 
@@ -262,7 +262,7 @@ impl ApiClient {
 
         // Get the room state from local storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found in local storage. Cannot republish without local state.")
+            anyhow!("Board not found in local storage. Cannot republish without local state.")
         })?;
         let (_signing_key, room_state, _contract_key_str) = room_data;
 
@@ -324,7 +324,7 @@ impl ApiClient {
         match response {
             HostResponse::ContractResponse(ContractResponse::PutResponse { key }) => {
                 info!(
-                    "Room republished successfully with contract key: {}",
+                    "Board republished successfully with contract key: {}",
                     key.id()
                 );
                 if key != contract_key {
@@ -337,7 +337,7 @@ impl ApiClient {
                 Ok(())
             }
             HostResponse::Ok => {
-                info!("Room republished successfully (Ok response)");
+                info!("Board republished successfully (Ok response)");
                 Ok(())
             }
             _ => Err(anyhow!("Unexpected response type: {:?}", response)),
@@ -478,7 +478,7 @@ impl ApiClient {
 
         // Get the room info from persistent storage
         let room_data = self.storage.get_room(room_owner_key)?
-            .ok_or_else(|| anyhow!("Room not found in local storage. You must be the room owner to create invitations."))?;
+            .ok_or_else(|| anyhow!("Board not found in local storage. You must be the room owner to create invitations."))?;
         let (signing_key, _state, _contract_key) = room_data;
 
         // Generate a new signing key for the invitee
@@ -572,7 +572,7 @@ impl ApiClient {
                             .map_err(|e| anyhow!("Failed to deserialize room state: {}", e))?;
 
                         info!(
-                            "Room state retrieved: name={}, members={}, messages={}",
+                            "Board state retrieved: name={}, members={}, messages={}",
                             room_state
                                 .configuration
                                 .configuration
@@ -589,7 +589,7 @@ impl ApiClient {
                                 freenet_scaffold::util::FastHash(0),
                             )
                         {
-                            return Err(anyhow!("Room state has invalid owner_member_id"));
+                            return Err(anyhow!("Board state has invalid owner_member_id"));
                         }
 
                         // Compute invite chain before storing (walks up from invitee
@@ -670,7 +670,7 @@ impl ApiClient {
         let room_data = match self.storage.get_room(room_owner_key)? {
             Some(data) => data,
             None => {
-                // Room not in local storage, no migration needed
+                // Board not in local storage, no migration needed
                 return Ok(expected_key);
             }
         };
@@ -685,7 +685,7 @@ impl ApiClient {
         }
 
         info!(
-            "Room contract version changed, migrating: {} -> {}",
+            "Board contract version changed, migrating: {} -> {}",
             &stored_contract_key_str[..12],
             &expected_key_str[..12]
         );
@@ -800,13 +800,13 @@ impl ApiClient {
 
         match response {
             HostResponse::ContractResponse(ContractResponse::PutResponse { key }) => {
-                info!("Room migrated successfully to: {}", key.id());
+                info!("Board migrated successfully to: {}", key.id());
                 // Update local storage with new contract key
                 self.storage.update_contract_key(room_owner_key, &key)?;
                 Ok(key)
             }
             HostResponse::Ok => {
-                info!("Room migrated successfully (Ok response)");
+                info!("Board migrated successfully (Ok response)");
                 self.storage
                     .update_contract_key(room_owner_key, &new_contract_key)?;
                 Ok(new_contract_key)
@@ -1029,7 +1029,7 @@ impl ApiClient {
 
         // Get the room info from storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found. You must be a member of the room to send messages.")
+            anyhow!("Board not found. You must be a member of the room to send messages.")
         })?;
         let (signing_key, mut room_state, _contract_key_str) = room_data;
 
@@ -1129,7 +1129,7 @@ impl ApiClient {
 
         // Get the room info from storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found. You must be a member of the room to edit messages.")
+            anyhow!("Board not found. You must be a member of the room to edit messages.")
         })?;
         let (signing_key, mut room_state, _contract_key_str) = room_data;
 
@@ -1189,7 +1189,7 @@ impl ApiClient {
 
         // Get the room info from storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found. You must be a member of the room to delete messages.")
+            anyhow!("Board not found. You must be a member of the room to delete messages.")
         })?;
         let (signing_key, mut room_state, _contract_key_str) = room_data;
 
@@ -1247,7 +1247,7 @@ impl ApiClient {
 
         // Get the room info from storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found. You must be a member of the room to add reactions.")
+            anyhow!("Board not found. You must be a member of the room to add reactions.")
         })?;
         let (signing_key, mut room_state, _contract_key_str) = room_data;
 
@@ -1308,7 +1308,7 @@ impl ApiClient {
 
         // Get the room info from storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found. You must be a member of the room to remove reactions.")
+            anyhow!("Board not found. You must be a member of the room to remove reactions.")
         })?;
         let (signing_key, mut room_state, _contract_key_str) = room_data;
 
@@ -1368,7 +1368,7 @@ impl ApiClient {
 
         // Get the room info from storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found. You must be a member of the room to send replies.")
+            anyhow!("Board not found. You must be a member of the room to send replies.")
         })?;
         let (signing_key, mut room_state, _contract_key_str) = room_data;
 
@@ -1504,7 +1504,7 @@ impl ApiClient {
     ) -> Result<()> {
         // Get the contract key for the room
         let room = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found in local storage. You may need to create or join it first.")
+            anyhow!("Board not found in local storage. You may need to create or join it first.")
         })?;
 
         let (_signing_key, _room_state, contract_key_str) = room;
@@ -1715,7 +1715,7 @@ impl ApiClient {
 
         // Get the room info from storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found. You must be a member of the room to change your nickname.")
+            anyhow!("Board not found. You must be a member of the room to change your nickname.")
         })?;
         let (signing_key, mut room_state, _contract_key_str) = room_data;
 
@@ -1832,7 +1832,7 @@ impl ApiClient {
 
         // Get the signing key from storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found. You must be a member of the room to ban members.")
+            anyhow!("Board not found. You must be a member of the room to ban members.")
         })?;
         let (signing_key, _stored_state, _contract_key_str) = room_data;
 
@@ -1987,7 +1987,7 @@ impl ApiClient {
     ) -> Result<()> {
         // Get the signing key from storage
         let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found. You must be the room owner to update configuration.")
+            anyhow!("Board not found. You must be the room owner to update configuration.")
         })?;
         let (signing_key, _stored_state, _contract_key_str) = room_data;
 
@@ -2074,7 +2074,7 @@ impl ApiClient {
     ) -> Result<()> {
         // Get the contract key for the room
         let room = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Room not found in local storage. You may need to create or join it first.")
+            anyhow!("Board not found in local storage. You may need to create or join it first.")
         })?;
 
         let (_signing_key, _room_state, contract_key_str) = room;

@@ -49,7 +49,7 @@ pub fn RoomNameField(config: Configuration, is_owner: bool) -> Element {
                         room_data.get_secret().map(|(s, v)| (*s, v)),
                     ))
                 } else {
-                    error!("Room state not found for current room");
+                    error!("Board state not found for current room");
                     None
                 }
             });
@@ -112,13 +112,13 @@ pub fn RoomNameField(config: Configuration, is_owner: bool) -> Element {
                 });
             });
         } else {
-            error!("Room name is empty");
+            error!("Board name is empty");
         }
     };
 
     rsx! {
         div { class: "mb-4",
-            label { class: "block text-sm font-medium text-text-muted mb-2", "Room Name" }
+            label { class: "block text-sm font-medium text-text-muted mb-2", "Board Name" }
             input {
                 class: "w-full px-3 py-2 bg-surface border border-border rounded-lg text-text placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed",
                 value: "{room_name}",

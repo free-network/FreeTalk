@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Room key identifier (owner's verifying key bytes)
+/// Board key identifier (owner's verifying key bytes)
 pub type RoomKey = [u8; 32];
 
 /// Unique identifier for a signing request (for request/response correlation)

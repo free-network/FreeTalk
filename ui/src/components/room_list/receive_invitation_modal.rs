@@ -181,7 +181,7 @@ fn render_invitation_content(inv: Invitation, invitation: Signal<Option<Invitati
         Some(PendingRoomStatus::Subscribing) => render_subscribing_state(),
         Some(PendingRoomStatus::Error(e)) => render_error_state(e, &inv.room, invitation),
         Some(PendingRoomStatus::Subscribed) => {
-            // Room subscribed and retrieved successfully, close modal
+            // Board subscribed and retrieved successfully, close modal
             render_subscribed_state(&inv.room, invitation)
         }
         None => render_invitation_options(inv, invitation),

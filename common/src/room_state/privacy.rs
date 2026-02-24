@@ -7,10 +7,10 @@ pub type SecretVersion = u32;
 /// Privacy mode for a chat room
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub enum PrivacyMode {
-    /// Room content is visible to all network participants
+    /// Board content is visible to all network participants
     #[default]
     Public,
-    /// Room content is encrypted and only visible to members
+    /// Board content is encrypted and only visible to members
     Private,
 }
 
@@ -167,7 +167,7 @@ impl RoomDisplayMetadata {
 
 impl Default for RoomDisplayMetadata {
     fn default() -> Self {
-        Self::public("Default Room Name".to_string(), None)
+        Self::public("Default Board Name".to_string(), None)
     }
 }
 

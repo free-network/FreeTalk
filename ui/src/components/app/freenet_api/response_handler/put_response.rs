@@ -101,7 +101,7 @@ pub async fn handle_put_response(
 
             // Log room information
             for (member_id, contract_id) in room_info {
-                info!("Room in map: {:?}, contract ID: {}", member_id, contract_id);
+                info!("Board in map: {:?}, contract ID: {}", member_id, contract_id);
             }
         }
         None => {

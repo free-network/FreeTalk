@@ -49,16 +49,16 @@ DEBUG: Testing WebSocket connection...
 ✓ WebSocket connection successful
 ```
 
-### Step 2: Create a Room (PUT Operation)
+### Step 2: Create a Board (PUT Operation)
 Attempt to create a new chat room:
 
 ```bash
-river room create --name "Test Room" --nickname "Alice"
+river room create --name "Test Board" --nickname "Alice"
 ```
 
 Expected output (demonstrating the bug):
 ```
-Creating room 'Test Room' with nickname 'Alice'...
+Creating room 'Test Board' with nickname 'Alice'...
 Error: Timeout waiting for PUT response after 30 seconds
 ```
 
@@ -68,7 +68,7 @@ The CLI sends a PUT request to store the room contract, but Freenet never respon
 Run with debug logging to see more details:
 
 ```bash
-RUST_LOG=debug river -d room create --name "Test Room" --nickname "Alice" 2>&1 | tee debug.log
+RUST_LOG=debug river -d room create --name "Test Board" --nickname "Alice" 2>&1 | tee debug.log
 ```
 
 You'll see the PUT request being sent but no response received.

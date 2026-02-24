@@ -314,7 +314,7 @@ async fn test_invitation_message_propagation() -> TestResult {
 
             if !river_states_equal(alice_final_state, bob_final_state) {
                 println!("State inconsistency between Alice and Bob!");
-                return Err("Room state inconsistency detected".into());
+                return Err("Board state inconsistency detected".into());
             }
 
             println!("SUCCESS: Both Alice and Bob see all {} messages consistently!",
