@@ -93,50 +93,56 @@ pub fn App() -> Element {
         synchronizer.start().await;
     });
 
-    // Check URL for invitation parameter, then fall back to localStorage
-    let mut found_invitation = false;
-    if let Some(window) = window() {
-        if let Ok(search) = window.location().search() {
-            if let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search) {
-                if let Some(invitation_code) = params.get("invitation") {
-                    if let Ok(invitation) = Invitation::from_encoded_string(&invitation_code) {
-                        info!("Received invitation from URL: {:?}", invitation);
-                        save_invitation_to_storage(&invitation);
-                        receive_invitation.set(Some(invitation));
-                        found_invitation = true;
+    // Check URL for invitation parameter on mount (use_effect ensures this runs after initial render)
+    // This is necessary because signal updates during render may not be visible to child components
+    use_effect(move || {
+        // Check URL for invitation parameter, then fall back to localStorage
+        let mut found_invitation = false;
+        if let Some(window) = window() {
+            if let Ok(search) = window.location().search() {
+                if let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search) {
+                    if let Some(invitation_code) = params.get("invitation") {
+                        if let Ok(invitation) = Invitation::from_encoded_string(&invitation_code) {
+                            info!("Received invitation from URL: {:?}", invitation);
+                            save_invitation_to_storage(&invitation);
+                            receive_invitation.set(Some(invitation));
+                            found_invitation = true;
 
-                        // Remove invitation parameter from URL to prevent re-processing on refresh
-                        params.delete("invitation");
-                        let new_search = params.to_string().as_string().unwrap_or_default();
-                        let new_url = if new_search.is_empty() {
-                            window.location().pathname().unwrap_or_default()
+                            // Remove invitation parameter from URL to prevent re-processing on refresh
+                            params.delete("invitation");
+                            let new_search = params.to_string().as_string().unwrap_or_default();
+                            let new_url = if new_search.is_empty() {
+                                window.location().pathname().unwrap_or_default()
+                            } else {
+                                format!(
+                                    "{}?{}",
+                                    window.location().pathname().unwrap_or_default(),
+                                    new_search
+                                )
+                            };
+                            if let Ok(history) = window.history() {
+                                let _ = history.replace_state_with_url(
+                                    &wasm_bindgen::JsValue::NULL,
+                                    "",
+                                    Some(&new_url),
+                                );
+                            }
                         } else {
-                            format!(
-                                "{}?{}",
-                                window.location().pathname().unwrap_or_default(),
-                                new_search
-                            )
-                        };
-                        if let Ok(history) = window.history() {
-                            let _ = history.replace_state_with_url(
-                                &wasm_bindgen::JsValue::NULL,
-                                "",
-                                Some(&new_url),
-                            );
+                            info!("Failed to parse invitation from URL parameter");
                         }
                     }
                 }
             }
         }
-    }
 
-    // Recover invitation from localStorage if not found in URL (e.g. after page reload)
-    if !found_invitation {
-        if let Some(invitation) = load_invitation_from_storage() {
-            info!("Recovered pending invitation from localStorage");
-            receive_invitation.set(Some(invitation));
+        // Recover invitation from localStorage if not found in URL (e.g. after page reload)
+        if !found_invitation {
+            if let Some(invitation) = load_invitation_from_storage() {
+                info!("Recovered pending invitation from localStorage");
+                receive_invitation.set(Some(invitation));
+            }
         }
-    }
+    });
 
     #[cfg(not(feature = "no-sync"))]
     {
