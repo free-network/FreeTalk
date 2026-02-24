@@ -15,9 +15,7 @@ use crate::components::members::Invitation;
 use crate::components::posts_view::{PostsView, SinglePostView};
 use crate::components::room_list::create_room_modal::CreateRoomModal;
 use crate::components::room_list::edit_room_modal::EditRoomModal;
-use crate::components::room_list::receive_invitation_modal::{
-    load_invitation_from_storage, save_invitation_to_storage, ReceiveInvitationModal,
-};
+use crate::components::room_list::receive_invitation_modal::ReceiveInvitationModal;
 use crate::invites::PendingInvites;
 use crate::room_data::{CurrentRoom, Rooms};
 use dioxus::document::{Link, Stylesheet};
@@ -35,6 +33,8 @@ use web_sys::window;
 pub enum Route {
     #[route("/")]
     Home,
+    #[route("/invite/:invite_code")]
+    Invite { invite_code: String },
     #[route("/room/:room_id")]
     Posts { room_id: String },
     #[route("/room/:room_id/post/:post_id")]
@@ -79,8 +79,6 @@ pub fn App() -> Element {
         BUILD_TIMESTAMP, GIT_COMMIT
     );
 
-    let mut receive_invitation = use_signal(|| None::<Invitation>);
-
     // Get auth token from window global (injected by Freenet gateway)
     // This is synchronous - no network request needed
     get_auth_token_from_window();
@@ -91,57 +89,6 @@ pub fn App() -> Element {
         // Note: The synchronizer will set up the chat delegate after connection is established
         let mut synchronizer = SYNCHRONIZER.write();
         synchronizer.start().await;
-    });
-
-    // Check URL for invitation parameter on mount (use_effect ensures this runs after initial render)
-    // This is necessary because signal updates during render may not be visible to child components
-    use_effect(move || {
-        // Check URL for invitation parameter, then fall back to localStorage
-        let mut found_invitation = false;
-        if let Some(window) = window() {
-            if let Ok(search) = window.location().search() {
-                if let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search) {
-                    if let Some(invitation_code) = params.get("invitation") {
-                        if let Ok(invitation) = Invitation::from_encoded_string(&invitation_code) {
-                            info!("Received invitation from URL: {:?}", invitation);
-                            save_invitation_to_storage(&invitation);
-                            receive_invitation.set(Some(invitation));
-                            found_invitation = true;
-
-                            // Remove invitation parameter from URL to prevent re-processing on refresh
-                            params.delete("invitation");
-                            let new_search = params.to_string().as_string().unwrap_or_default();
-                            let new_url = if new_search.is_empty() {
-                                window.location().pathname().unwrap_or_default()
-                            } else {
-                                format!(
-                                    "{}?{}",
-                                    window.location().pathname().unwrap_or_default(),
-                                    new_search
-                                )
-                            };
-                            if let Ok(history) = window.history() {
-                                let _ = history.replace_state_with_url(
-                                    &wasm_bindgen::JsValue::NULL,
-                                    "",
-                                    Some(&new_url),
-                                );
-                            }
-                        } else {
-                            info!("Failed to parse invitation from URL parameter");
-                        }
-                    }
-                }
-            }
-        }
-
-        // Recover invitation from localStorage if not found in URL (e.g. after page reload)
-        if !found_invitation {
-            if let Some(invitation) = load_invitation_from_storage() {
-                info!("Recovered pending invitation from localStorage");
-                receive_invitation.set(Some(invitation));
-            }
-        }
     });
 
     #[cfg(not(feature = "no-sync"))]
@@ -210,9 +157,6 @@ pub fn App() -> Element {
         EditRoomModal {}
         MemberInfoModal {}
         CreateRoomModal {}
-        ReceiveInvitationModal {
-            invitation: receive_invitation
-        }
         DocumentTitleUpdater {}
     }
 }
@@ -225,6 +169,31 @@ fn Home() -> Element {
             p { class: "text-xl", "Select a board from the sidebar above or create one" }
             p { class: "text-sm mt-2", "Posts will appear here" }
         }
+    }
+}
+
+/// Route component for handling invitations
+#[component]
+fn Invite(invite_code: String) -> Element {
+    let invitation = use_memo(move || {
+        Invitation::from_encoded_string(&invite_code).ok()
+    });
+
+    match invitation() {
+        Some(inv) => rsx! {
+            ReceiveInvitationModal { invitation: inv }
+        },
+        None => rsx! {
+            div { class: "flex-1 flex flex-col items-center justify-center p-8 text-center",
+                h1 { class: "text-2xl font-bold text-text mb-4", "Invalid Invitation" }
+                p { class: "text-text-muted mb-6", "The invitation link appears to be invalid or corrupted." }
+                a {
+                    href: "#/",
+                    class: "px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors inline-block",
+                    "Go to Home"
+                }
+            }
+        },
     }
 }
 

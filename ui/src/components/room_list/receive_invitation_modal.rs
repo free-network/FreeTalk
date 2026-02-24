@@ -1,50 +1,19 @@
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
-use crate::components::app::{NEEDS_SYNC, PENDING_INVITES, ROOMS, SYNCHRONIZER};
+use crate::components::app::{Route, NEEDS_SYNC, PENDING_INVITES, ROOMS, SYNCHRONIZER};
 use crate::components::members::Invitation;
 use crate::invites::{PendingRoomJoin, PendingRoomStatus};
 use crate::room_data::Rooms;
-use dioxus::logger::tracing::{error, info, warn};
+use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use ed25519_dalek::VerifyingKey;
 use river_core::room_state::member::MemberId;
 use wasm_bindgen::JsCast;
 
-const INVITATION_STORAGE_KEY: &str = "river_pending_invitation";
-
-/// Save invitation to localStorage so it survives page reloads
-pub fn save_invitation_to_storage(invitation: &Invitation) {
-    if let Some(window) = web_sys::window() {
-        if let Ok(Some(storage)) = window.local_storage() {
-            let encoded = invitation.to_encoded_string();
-            if let Err(e) = storage.set_item(INVITATION_STORAGE_KEY, &encoded) {
-                warn!("Failed to save invitation to localStorage: {:?}", e);
-            }
-        }
-    }
-}
-
-/// Load invitation from localStorage (for recovery after page reload)
-pub fn load_invitation_from_storage() -> Option<Invitation> {
-    let window = web_sys::window()?;
-    let storage = window.local_storage().ok()??;
-    let encoded = storage.get_item(INVITATION_STORAGE_KEY).ok()??;
-    Invitation::from_encoded_string(&encoded).ok()
-}
-
-/// Clear saved invitation from localStorage
-pub fn clear_invitation_from_storage() {
-    if let Some(window) = web_sys::window() {
-        if let Ok(Some(storage)) = window.local_storage() {
-            let _ = storage.remove_item(INVITATION_STORAGE_KEY);
-        }
-    }
-}
-
 /// Main component for the invitation modal
 #[component]
-pub fn ReceiveInvitationModal(invitation: Signal<Option<Invitation>>) -> Element {
-    // Extract the room key from the invitation if it exists
-    let room_key = invitation.read().as_ref().map(|inv| inv.room);
+pub fn ReceiveInvitationModal(invitation: Invitation) -> Element {
+    let nav = navigator();
+    let room_key = invitation.room;
 
     // Listen for custom events from the FreenetSynchronizer
     use_effect(move || {
@@ -70,15 +39,6 @@ pub fn ReceiveInvitationModal(invitation: Signal<Option<Invitation>>) -> Element
                         array.copy_from_slice(&bytes);
 
                         if let Ok(key) = VerifyingKey::from_bytes(&array) {
-                            // First check if this is the current invitation
-                            let should_close = {
-                                if let Some(inv) = invitation.read().as_ref() {
-                                    inv.room == key
-                                } else {
-                                    false
-                                }
-                            };
-
                             // Use with_mut for atomic update
                             PENDING_INVITES.with_mut(|pending| {
                                 if let Some(join) = pending.map.get_mut(&key) {
@@ -89,13 +49,6 @@ pub fn ReceiveInvitationModal(invitation: Signal<Option<Invitation>>) -> Element
                                     );
                                 }
                             });
-
-                            // If it is, close the modal
-                            if should_close {
-                                clear_invitation_from_storage();
-                                invitation.set(None);
-                                info!("Closed invitation modal for key: {:?}", key);
-                            }
                         }
                     }
                 }
@@ -110,43 +63,20 @@ pub fn ReceiveInvitationModal(invitation: Signal<Option<Invitation>>) -> Element
             )
             .expect("Failed to add event listener");
 
-        // Also check for already subscribed invitations
-        if let Some(key) = room_key {
-            let should_remove = {
-                let pending_invites = PENDING_INVITES.read();
-                pending_invites
-                    .map
-                    .get(&key)
-                    .map(|join| matches!(join.status, PendingRoomStatus::Subscribed))
-                    .unwrap_or(false)
-            };
-
-            if should_remove {
-                // Remove from pending invites
-                PENDING_INVITES.with_mut(|pending_invites| {
-                    pending_invites.map.remove(&key);
-                });
-
-                // Clear the invitation
-                clear_invitation_from_storage();
-                invitation.set(None);
-            }
-        }
-
-        // Return cleanup function to remove event listener
-        {
-            window
-                .remove_event_listener_with_callback(
-                    "river-invitation-accepted",
-                    closure.as_ref().unchecked_ref(),
-                )
-                .expect("Failed to remove event listener");
-        }
+        closure.forget(); // Prevent closure from being dropped
     });
 
-    // Don't render anything if there's no invitation
-    let inv_data = invitation.read().as_ref().cloned();
-    if inv_data.is_none() {
+    // Check if invitation is already subscribed and navigate away
+    let pending_status = PENDING_INVITES
+        .read()
+        .map
+        .get(&room_key)
+        .map(|join| join.status.clone());
+
+    if matches!(pending_status, Some(PendingRoomStatus::Subscribed)) {
+        // Room is ready, navigate to it
+        let room_id = bs58::encode(room_key.as_bytes()).into_string();
+        nav.push(Route::Posts { room_id });
         return rsx! {};
     }
 
@@ -164,7 +94,7 @@ pub fn ReceiveInvitationModal(invitation: Signal<Option<Invitation>>) -> Element
                 div {
                     class: "p-6",
                     h1 { class: "text-xl font-semibold text-text mb-4", "Invitation Received" }
-                    {render_invitation_content(inv_data.unwrap(), invitation)}
+                    {render_invitation_content(invitation.clone())}
                 }
             }
         }
@@ -172,19 +102,19 @@ pub fn ReceiveInvitationModal(invitation: Signal<Option<Invitation>>) -> Element
 }
 
 /// Renders the content of the invitation modal based on the invitation data
-fn render_invitation_content(inv: Invitation, invitation: Signal<Option<Invitation>>) -> Element {
+fn render_invitation_content(inv: Invitation) -> Element {
     let pending_invites = PENDING_INVITES.read();
     let pending_status = pending_invites.map.get(&inv.room).map(|join| &join.status);
 
     match pending_status {
         Some(PendingRoomStatus::PendingSubscription) => render_pending_subscription_state(),
         Some(PendingRoomStatus::Subscribing) => render_subscribing_state(),
-        Some(PendingRoomStatus::Error(e)) => render_error_state(e, &inv.room, invitation),
+        Some(PendingRoomStatus::Error(e)) => render_error_state(e, inv.room),
         Some(PendingRoomStatus::Subscribed) => {
-            // Board subscribed and retrieved successfully, close modal
-            render_subscribed_state(&inv.room, invitation)
+            // Room subscribed and retrieved successfully, navigate to it
+            render_subscribed_state(inv.room)
         }
-        None => render_invitation_options(inv, invitation),
+        None => render_invitation_options(inv),
     }
 }
 
@@ -215,13 +145,7 @@ fn render_subscribing_state() -> Element {
 }
 
 /// Renders the error state when room retrieval fails
-fn render_error_state(
-    error: &str,
-    room_key: &VerifyingKey,
-    mut invitation: Signal<Option<Invitation>>,
-) -> Element {
-    let room_key = *room_key; // Copy type, avoid clone
-
+fn render_error_state(error: &str, room_key: VerifyingKey) -> Element {
     rsx! {
         div {
             class: "bg-red-500/10 border border-red-500/20 rounded-lg p-4",
@@ -251,8 +175,7 @@ fn render_error_state(
                     class: "px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
                     onclick: move |_| {
                         PENDING_INVITES.write().map.remove(&room_key);
-                        clear_invitation_from_storage();
-                        invitation.set(None);
+                        navigator().push(Route::Home);
                     },
                     "Dismiss"
                 }
@@ -262,25 +185,23 @@ fn render_error_state(
 }
 
 /// Renders the state when room is successfully subscribed and retrieved
-fn render_subscribed_state(
-    _room_key: &VerifyingKey,
-    _invitation: Signal<Option<Invitation>>,
-) -> Element {
-    // Just return an empty element - the cleanup is now handled in the main component
-    rsx! { "" }
+fn render_subscribed_state(room_key: VerifyingKey) -> Element {
+    let room_id = bs58::encode(room_key.as_bytes()).into_string();
+    navigator().push(Route::Posts { room_id });
+    rsx! {}
 }
 
 /// Renders the invitation options based on the user's membership status
-fn render_invitation_options(inv: Invitation, invitation: Signal<Option<Invitation>>) -> Element {
+fn render_invitation_options(inv: Invitation) -> Element {
     let (current_key_is_member, invited_member_exists) =
         check_membership_status(&inv, &ROOMS.read());
 
     if current_key_is_member {
-        render_already_member(invitation)
+        render_already_member()
     } else if invited_member_exists {
-        render_restore_access_option(inv, invitation)
+        render_restore_access_option(inv)
     } else {
-        render_new_invitation(inv, invitation)
+        render_new_invitation(inv)
     }
 }
 
@@ -308,7 +229,7 @@ fn check_membership_status(inv: &Invitation, current_rooms: &Rooms) -> (bool, bo
 }
 
 /// Renders the UI when the user is already a member of the room
-fn render_already_member(mut invitation: Signal<Option<Invitation>>) -> Element {
+fn render_already_member() -> Element {
     rsx! {
         p { class: "text-text mb-4", "You are already a member of this room with your current key." }
         button {
@@ -321,8 +242,7 @@ fn render_already_member(mut invitation: Signal<Option<Invitation>>) -> Element 
                 });
             },
             onclick: move |_| {
-                clear_invitation_from_storage();
-                invitation.set(None);
+                navigator().push(Route::Home);
             },
             "Close"
         }
@@ -330,10 +250,11 @@ fn render_already_member(mut invitation: Signal<Option<Invitation>>) -> Element 
 }
 
 /// Renders the UI for restoring access to an existing member
-fn render_restore_access_option(
-    inv: Invitation,
-    mut invitation: Signal<Option<Invitation>>,
-) -> Element {
+fn render_restore_access_option(inv: Invitation) -> Element {
+    let room = inv.room;
+    let member_vk = inv.invitee.member.member_vk;
+    let invitee = inv.invitee.clone();
+
     rsx! {
         p { class: "text-text mb-2", "This invitation is for a member that already exists in the room." }
         p { class: "text-text-muted mb-4", "If you lost access to your previous key, you can use this invitation to restore access with your current key." }
@@ -349,24 +270,18 @@ fn render_restore_access_option(
                     });
                 },
                 onclick: {
-                    let room = inv.room;
-                    let member_vk = inv.invitee.member.member_vk;
-                    let mut invitation = invitation;
-
+                    let invitee = invitee.clone();
                     move |_| {
                         // Use with_mut for atomic update
                         ROOMS.with_mut(|rooms| {
                             if let Some(room_data) = rooms.map.get_mut(&room) {
-                                room_data.restore_member_access(
-                                    member_vk,
-                                    inv.invitee.clone()
-                                );
+                                room_data.restore_member_access(member_vk, invitee.clone());
                             }
                         });
                         // Mark room as needing sync after restoring member access
                         NEEDS_SYNC.write().insert(room);
-                        clear_invitation_from_storage();
-                        invitation.set(None);
+                        let room_id = bs58::encode(room.as_bytes()).into_string();
+                        navigator().push(Route::Posts { room_id });
                     }
                 },
                 "Restore Access"
@@ -374,8 +289,7 @@ fn render_restore_access_option(
             button {
                 class: "px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
                 onclick: move |_| {
-                    clear_invitation_from_storage();
-                    invitation.set(None);
+                    navigator().push(Route::Home);
                 },
                 "Cancel"
             }
@@ -384,8 +298,7 @@ fn render_restore_access_option(
 }
 
 /// Renders the UI for a new invitation
-fn render_new_invitation(inv: Invitation, mut invitation: Signal<Option<Invitation>>) -> Element {
-    // Clone the invitation for the closures
+fn render_new_invitation(inv: Invitation) -> Element {
     let inv_for_accept = inv.clone();
     let inv_for_enter = inv.clone();
 
@@ -432,8 +345,7 @@ fn render_new_invitation(inv: Invitation, mut invitation: Signal<Option<Invitati
             button {
                 class: "px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
                 onclick: move |_| {
-                    clear_invitation_from_storage();
-                    invitation.set(None);
+                    navigator().push(Route::Home);
                 },
                 "Decline"
             }

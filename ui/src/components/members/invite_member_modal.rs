@@ -16,21 +16,16 @@ const FALLBACK_BASE_URL: &str =
 
 /// Get the base URL for invitation links.
 /// Derives from the current window.location so invitations work on any host/port.
+/// Returns the base URL without trailing hash or query, suitable for appending #/invite/{code}
 fn get_invitation_base_url() -> String {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(window) = web_sys::window() {
-            // Get the current URL's origin (protocol + host + port) and pathname
             let location = window.location();
-            let href = location.href().unwrap_or_default();
-            // Remove any query string or fragment, keep the base path
-            if let Some(pos) = href.find('?') {
-                href[..pos].to_string()
-            } else if let Some(pos) = href.find('#') {
-                href[..pos].to_string()
-            } else {
-                href
-            }
+            // Get origin (protocol + host + port) and pathname separately
+            let origin = location.origin().unwrap_or_default();
+            let pathname = location.pathname().unwrap_or_default();
+            format!("{}{}", origin, pathname)
         } else {
             FALLBACK_BASE_URL.to_string()
         }
@@ -147,7 +142,7 @@ pub fn InviteMemberModal(is_active: Signal<bool>) -> Element {
 
                             let invite_code = invitation.to_encoded_string();
                             let base_url = get_invitation_base_url();
-                            let invite_url = format!("{}?invitation={}", base_url, invite_code);
+                            let invite_url = format!("{}#/invite/{}", base_url, invite_code);
 
                             let default_msg = format!(
                                 "You've been invited to join the chat room \"{}\"!\n\n\
