@@ -187,17 +187,17 @@ pub fn PostsView() -> Element {
                                         span { class: "text-2xl", title: "Board Owner", "👑" }
                                     }
                                 }
-                                // Admin button for owners
-                                if is_owner {
-                                    a {
-                                        href: "#/room/{room_id}/admin",
-                                        class: "flex items-center gap-2 px-4 py-2 mr-4 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors self-center",
-                                        title: "Manage Admins",
-                                        span { "⚙" }
-                                        span { "Admin" }
+                                div { class: "flex items-center gap-3 px-6 py-4 cursor-pointer hover:bg-surface/50 transition-colors",
+                                    // Admin button for owners
+                                    if is_owner {
+                                        a {
+                                            href: "#/room/{room_id}/admin",
+                                            class: "flex items-center gap-2 px-4 py-2 mr-4 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors self-center",
+                                            title: "Manage Admins",
+                                            span { "⚙" }
+                                            span { "Admin" }
+                                        }
                                     }
-                                }
-                                div {
                                     match room_data.can_participate() {
                                         Ok(()) => rsx! {
                                             PostInput {
