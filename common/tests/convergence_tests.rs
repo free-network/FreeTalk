@@ -51,7 +51,7 @@ fn create_test_msg(
             board_owner: owner_id,
             author: author_id,
             time: SystemTime::now() + std::time::Duration::from_secs(time_offset_secs),
-            content: BoardMessageBody::public(format!("msg from {:?}", author_id)),
+            content: BoardMessageBody::public(String::new(), format!("msg from {:?}", author_id)),
         },
         author_sk,
     )
@@ -421,7 +421,7 @@ fn test_message_prune_order_convergence() {
             board_owner: owner_id,
             author: owner_id,
             time: same_time,
-            content: BoardMessageBody::public("Message A".to_string()),
+            content: BoardMessageBody::public(String::new(), "Message A".to_string()),
         },
         &owner_signing_key,
     );
@@ -431,7 +431,7 @@ fn test_message_prune_order_convergence() {
             board_owner: owner_id,
             author: owner_id,
             time: same_time,
-            content: BoardMessageBody::public("Message B".to_string()),
+            content: BoardMessageBody::public(String::new(), "Message B".to_string()),
         },
         &owner_signing_key,
     );
@@ -441,7 +441,7 @@ fn test_message_prune_order_convergence() {
             board_owner: owner_id,
             author: owner_id,
             time: same_time,
-            content: BoardMessageBody::public("Message C".to_string()),
+            content: BoardMessageBody::public(String::new(), "Message C".to_string()),
         },
         &owner_signing_key,
     );
@@ -562,7 +562,7 @@ fn test_message_delta_idempotency() {
             board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: BoardMessageBody::public("Test message".to_string()),
+            content: BoardMessageBody::public(String::new(), "Test message".to_string()),
         },
         &owner_signing_key,
     );
@@ -791,7 +791,7 @@ fn test_message_convergence_stress_100_messages() {
                 board_owner: owner_id,
                 author: owner_id,
                 time,
-                content: BoardMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(String::new(), format!("Message {}", i)),
             },
             &owner_signing_key,
         );
@@ -1110,7 +1110,7 @@ fn test_message_varying_limits_convergence() {
                 board_owner: owner_id,
                 author: owner_id,
                 time: base_time + std::time::Duration::from_secs(i as u64),
-                content: BoardMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(String::new(), format!("Message {}", i)),
             },
             &owner_signing_key,
         );
@@ -1295,7 +1295,7 @@ fn test_messages_all_identical_timestamps() {
                 board_owner: owner_id,
                 author: owner_id,
                 time: same_time,
-                content: BoardMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(String::new(), format!("Message {}", i)),
             },
             &owner_signing_key,
         );
@@ -1769,7 +1769,7 @@ fn test_regression_message_pruning_order() {
                 board_owner: owner_id,
                 author: owner_id,
                 time,
-                content: BoardMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(String::new(), format!("Message {}", i)),
             },
             &owner_signing_key,
         );
@@ -1875,7 +1875,7 @@ fn test_full_state_merge_commutativity() {
             board_owner: owner_id,
             author: owner_id,
             time: time_1,
-            content: BoardMessageBody::public("Hello from owner".to_string()),
+            content: BoardMessageBody::public(String::new(), "Hello from owner".to_string()),
         },
         &owner_signing_key,
     );
@@ -1884,7 +1884,7 @@ fn test_full_state_merge_commutativity() {
             board_owner: owner_id,
             author: member_a.id(),
             time: time_2,
-            content: BoardMessageBody::public("Hello from Alice".to_string()),
+            content: BoardMessageBody::public(String::new(), "Hello from Alice".to_string()),
         },
         &member_a_sk,
     );
@@ -1893,7 +1893,7 @@ fn test_full_state_merge_commutativity() {
             board_owner: owner_id,
             author: member_b.id(),
             time: time_3,
-            content: BoardMessageBody::public("Hello from Bob".to_string()),
+            content: BoardMessageBody::public(String::new(), "Hello from Bob".to_string()),
         },
         &member_b_sk,
     );
@@ -2049,7 +2049,7 @@ fn test_regression_combined_scenario() {
                 board_owner: owner_id,
                 author: members[author_idx].0.member.id(),
                 time,
-                content: BoardMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(String::new(), format!("Message {}", i)),
             },
             &members[author_idx].1,
         );

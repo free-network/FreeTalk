@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn test_edit_action_roundtrip() {
-        let action = ActionContentV1::edit(test_message_id(), "New text".to_string());
+        let action = ActionContentV1::edit(test_message_id(), String::new(), "New text".to_string());
         let encoded = action.encode();
         let decoded = ActionContentV1::decode(&encoded).unwrap();
         assert_eq!(action, decoded);

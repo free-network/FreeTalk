@@ -1199,7 +1199,7 @@ mod tests {
             board_owner: owner_id,
             author: author_id,
             time: SystemTime::now() + Duration::from_secs(1),
-            content: BoardMessageBody::edit(original_id.clone(), "Edited content".to_string()),
+            content: BoardMessageBody::edit(original_id.clone(), String::new(), "Edited content".to_string()),
         };
         let auth_edit = AuthorizedMessageV1::new(edit_msg, &signing_key);
 
@@ -1244,7 +1244,7 @@ mod tests {
             board_owner: owner_id,
             author: other_id,
             time: SystemTime::now() + Duration::from_secs(1),
-            content: BoardMessageBody::edit(original_id.clone(), "Hacked content".to_string()),
+            content: BoardMessageBody::edit(original_id.clone(), String::new(), "Hacked content".to_string()),
         };
         let auth_edit = AuthorizedMessageV1::new(edit_msg, &other_sk);
 
@@ -1425,7 +1425,7 @@ mod tests {
             board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now() + Duration::from_secs(2),
-            content: BoardMessageBody::edit(original_id.clone(), "Too late!".to_string()),
+            content: BoardMessageBody::edit(original_id.clone(), String::new(), "Too late!".to_string()),
         };
         let auth_edit = AuthorizedMessageV1::new(edit_msg, &signing_key);
 

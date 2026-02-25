@@ -424,7 +424,7 @@ mod tests {
                 board_owner: owner_id,
                 author: a_id,
                 time: SystemTime::now(),
-                content: BoardMessageBody::public("Hello from A".to_string()),
+                content: BoardMessageBody::public(String::new(), "Hello from A".to_string()),
             },
             &a_sk,
         );
@@ -494,7 +494,7 @@ mod tests {
                 board_owner: owner_id,
                 author: b_id,
                 time: SystemTime::now(),
-                content: BoardMessageBody::public("Hello from B".to_string()),
+                content: BoardMessageBody::public(String::new(), "Hello from B".to_string()),
             },
             &b_sk,
         );
@@ -651,7 +651,7 @@ mod tests {
                 board_owner: owner_id,
                 author: a_id,
                 time: SystemTime::now(),
-                content: BoardMessageBody::public("Hello again!".to_string()),
+                content: BoardMessageBody::public(String::new(), "Hello again!".to_string()),
             },
             &a_sk,
         );

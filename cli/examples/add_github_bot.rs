@@ -11,7 +11,7 @@ use freenet_stdlib::prelude::*;
 use river_core::board_state::member::{AuthorizedMember, Member, MemberId, MembersDelta};
 use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
 use river_core::board_state::privacy::SealedBytes;
-use river_core::board_state::{ChatBboardParametersV1, ChatBboardStateV1, ChatBboardStateV1Delta};
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1, ChatBoardStateV1Delta};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_tungstenite::connect_async;
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     let web_api = Arc::new(Mutex::new(web_api));
 
     // Create contract key from board owner
-    let params = ChatBboardParametersV1 {
+    let params = ChatBoardParametersV1 {
         owner: board_owner_vk,
     };
     let params_bytes = {
@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
         tokio::time::timeout(std::time::Duration::from_secs(30), api.recv()).await??
     };
 
-    let mut board_state: ChatBboardStateV1 = match response {
+    let mut board_state: ChatBoardStateV1 = match response {
         HostResponse::ContractResponse(ContractResponse::GetResponse { state, .. }) => {
             ciborium::de::from_reader(&state[..])?
         }
@@ -165,7 +165,7 @@ async fn main() -> Result<()> {
     let authorized_member_info = AuthorizedMemberInfo::new(member_info, &github_bot_sk);
 
     // Create delta with new member
-    let delta = ChatBboardStateV1Delta {
+    let delta = ChatBoardStateV1Delta {
         members: Some(MembersDelta::new(vec![authorized_member])),
         member_info: Some(vec![authorized_member_info]),
         ..Default::default()
