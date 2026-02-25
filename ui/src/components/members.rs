@@ -1,13 +1,13 @@
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatus;
-use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS, SYNC_STATUS};
+use crate::components::app::{CURRENT_BOARD, MEMBER_INFO_MODAL, BOARDS, SYNC_STATUS};
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::{FaUserPlus, FaUsers};
 use dioxus_free_icons::Icon;
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use river_core::room_state::member::MembersV1;
-use river_core::room_state::member::{AuthorizedMember, MemberId};
-use river_core::room_state::ChatRoomParametersV1;
+use river_core::board_state::member::MembersV1;
+use river_core::board_state::member::{AuthorizedMember, MemberId};
+use river_core::board_state::ChatBoardParametersV1;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -17,7 +17,7 @@ use self::invite_member_modal::InviteMemberModal;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Invitation {
-    pub room: VerifyingKey,
+    pub board: VerifyingKey,
     pub invitee_signing_key: SigningKey,
     pub invitee: AuthorizedMember,
 }
@@ -54,7 +54,7 @@ fn is_member_sponsor(
     member_id: MemberId,
     members: &MembersV1,
     self_id: MemberId,
-    params: &ChatRoomParametersV1,
+    params: &ChatBoardParametersV1,
 ) -> bool {
     // Check if member is in invite chain but not direct inviter
     if let Some(self_member) = members.members.iter().find(|m| m.member.id() == self_id) {
@@ -164,19 +164,19 @@ pub fn MemberList() -> Element {
     let mut invite_modal_active = use_signal(|| false);
 
     let members = use_memo(move || {
-        let room_owner = CURRENT_ROOM.read().owner_key?;
+        let board_owner = CURRENT_BOARD.read().owner_key?;
 
-        let rooms_read = ROOMS.read();
-        let room_data = rooms_read.map.get(&room_owner)?;
-        let room_state = room_data.room_state.clone();
-        let self_member_id: MemberId = room_data.self_sk.verifying_key().into();
-        let owner_id: MemberId = room_owner.into();
+        let boards_read = BOARDS.read();
+        let board_data = boards_read.map.get(&board_owner)?;
+        let board_state = board_data.board_state.clone();
+        let self_member_id: MemberId = board_data.self_sk.verifying_key().into();
+        let owner_id: MemberId = board_owner.into();
 
-        let member_info = &room_state.member_info;
-        let members = &room_state.members;
-        let room_secrets = &room_data.secrets;
+        let member_info = &board_state.member_info;
+        let members = &board_state.members;
+        let board_secrets = &board_data.secrets;
 
-        let params = ChatRoomParametersV1 { owner: room_owner };
+        let params = ChatBoardParametersV1 { owner: board_owner };
 
         let ordered_ids = invite_tree_order(owner_id, members);
 
@@ -192,7 +192,7 @@ pub fn MemberList() -> Element {
                 .map(|mi| {
                     match unseal_bytes_with_secrets(
                         &mi.member_info.preferred_nickname,
-                        room_secrets,
+                        board_secrets,
                     ) {
                         Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                         Err(_) => mi.member_info.preferred_nickname.to_string_lossy(),
@@ -236,9 +236,9 @@ pub fn MemberList() -> Element {
         });
     };
 
-    // Don't show members panel if no room is selected
-    let has_room = CURRENT_ROOM.read().owner_key.is_some();
-    if !has_room {
+    // Don't show members panel if no board is selected
+    let has_board = CURRENT_BOARD.read().owner_key.is_some();
+    if !has_board {
         return rsx! {};
     }
 

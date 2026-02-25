@@ -32,7 +32,7 @@ pub fn get_websocket_url() -> String {
 /// Default timeout for WebSocket connection in milliseconds
 pub const CONNECTION_TIMEOUT_MS: u64 = 5000;
 
-/// Delay after PUT before subscribing to a room in milliseconds
+/// Delay after PUT before subscribing to a board in milliseconds
 pub const POST_PUT_DELAY_MS: u64 = 3000;
 
 /// Retry interval for reconnection attempts in milliseconds

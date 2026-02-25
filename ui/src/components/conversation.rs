@@ -1,5 +1,5 @@
 use crate::components::app::receive_times::get_delay_secs;
-use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
+use crate::components::app::{CURRENT_BOARD, MEMBER_INFO_MODAL, BOARDS};
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::markdown::text_to_html;
@@ -13,12 +13,12 @@ mod not_member_notification;
 use self::emoji_picker::FREQUENT_EMOJIS;
 use self::not_member_notification::NotMemberNotification;
 use crate::components::conversation::message_input::PostInput;
-use crate::room_data::SendMessageError;
+use crate::board_data::SendMessageError;
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
-use river_core::room_state::member::MemberId;
-use river_core::room_state::member_info::MemberInfoV1;
-use river_core::room_state::message::{MessageId, MessagesV1, RoomMessageBody};
+use river_core::board_state::member::MemberId;
+use river_core::board_state::member_info::MemberInfoV1;
+use river_core::board_state::message::{MessageId, MessagesV1, BoardMessageBody};
 use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
 
@@ -161,13 +161,13 @@ pub fn build_reply_tree(
         .collect()
 }
 
-fn decrypt_message_title(content: &RoomMessageBody, secrets: &HashMap<u32, [u8; 32]>) -> String {
-    use river_core::room_state::content::{
+fn decrypt_message_title(content: &BoardMessageBody, secrets: &HashMap<u32, [u8; 32]>) -> String {
+    use river_core::board_state::content::{
         ReplyContentV1, TextContentV1, CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
     };
 
     match content {
-        RoomMessageBody::Public {
+        BoardMessageBody::Public {
             content_type, data, ..
         } => {
             if *content_type == CONTENT_TYPE_TEXT {
@@ -182,7 +182,7 @@ fn decrypt_message_title(content: &RoomMessageBody, secrets: &HashMap<u32, [u8; 
             }
             String::new()
         }
-        RoomMessageBody::Private {
+        BoardMessageBody::Private {
             content_type,
             ciphertext,
             nonce,
@@ -211,13 +211,13 @@ fn decrypt_message_title(content: &RoomMessageBody, secrets: &HashMap<u32, [u8; 
     }
 }
 
-fn decrypt_message_content(content: &RoomMessageBody, secrets: &HashMap<u32, [u8; 32]>) -> String {
-    use river_core::room_state::content::{
+fn decrypt_message_content(content: &BoardMessageBody, secrets: &HashMap<u32, [u8; 32]>) -> String {
+    use river_core::board_state::content::{
         ReplyContentV1, TextContentV1, CONTENT_TYPE_ACTION, CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
     };
 
     match content {
-        RoomMessageBody::Public {
+        BoardMessageBody::Public {
             content_type, data, ..
         } => {
             if *content_type == CONTENT_TYPE_ACTION {
@@ -235,7 +235,7 @@ fn decrypt_message_content(content: &RoomMessageBody, secrets: &HashMap<u32, [u8
             }
             content.to_string_lossy()
         }
-        RoomMessageBody::Private {
+        BoardMessageBody::Private {
             content_type,
             ciphertext,
             nonce,
@@ -272,13 +272,13 @@ fn decrypt_message_content(content: &RoomMessageBody, secrets: &HashMap<u32, [u8
 }
 
 fn extract_reply_context(
-    content: &RoomMessageBody,
+    content: &BoardMessageBody,
     secrets: &HashMap<u32, [u8; 32]>,
 ) -> (Option<String>, Option<String>, Option<MessageId>) {
-    use river_core::room_state::content::{ReplyContentV1, CONTENT_TYPE_REPLY};
+    use river_core::board_state::content::{ReplyContentV1, CONTENT_TYPE_REPLY};
 
     match content {
-        RoomMessageBody::Public {
+        BoardMessageBody::Public {
             content_type, data, ..
         } if *content_type == CONTENT_TYPE_REPLY => {
             if let Ok(reply) = ReplyContentV1::decode(data) {
@@ -289,7 +289,7 @@ fn extract_reply_context(
                 );
             }
         }
-        RoomMessageBody::Private {
+        BoardMessageBody::Private {
             content_type,
             ciphertext,
             nonce,
@@ -325,11 +325,11 @@ pub fn Conversation(
     /// Default reply context - when set, new messages will be replies to this
     #[props(default)] default_reply_to: Option<ReplyContext>,
 ) -> Element {
-    let current_room_data = {
-        let current_room = CURRENT_ROOM.read();
-        if let Some(key) = current_room.owner_key {
-            let rooms = ROOMS.read();
-            rooms.map.get(&key).cloned()
+    let current_board_data = {
+        let current_board = CURRENT_BOARD.read();
+        if let Some(key) = current_board.owner_key {
+            let boards = BOARDS.read();
+            boards.map.get(&key).cloned()
         } else {
             None
         }
@@ -342,28 +342,28 @@ pub fn Conversation(
     let message_tree = use_memo({
         let parent_id = parent_message_id.clone();
         move || {
-            let current_room = CURRENT_ROOM.read();
-            if let Some(key) = current_room.owner_key {
-                let rooms = ROOMS.read();
-                if let Some(room_data) = rooms.map.get(&key) {
-                    let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
+            let current_board = CURRENT_BOARD.read();
+            if let Some(key) = current_board.owner_key {
+                let boards = BOARDS.read();
+                if let Some(board_data) = boards.map.get(&key) {
+                    let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
                     let all_messages = get_all_messages(
-                        &room_data.room_state.recent_messages,
-                        &room_data.room_state.member_info,
+                        &board_data.board_state.recent_messages,
+                        &board_data.board_state.member_info,
                         self_member_id,
-                        &room_data.secrets,
+                        &board_data.secrets,
                     );
 
                     // Build member name lookup
-                    let member_names: HashMap<MemberId, String> = room_data
-                        .room_state
+                    let member_names: HashMap<MemberId, String> = board_data
+                        .board_state
                         .member_info
                         .member_info
                         .iter()
                         .map(|ami| {
                             let name = match unseal_bytes_with_secrets(
                                 &ami.member_info.preferred_nickname,
-                                &room_data.secrets,
+                                &board_data.secrets,
                             ) {
                                 Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                                 Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
@@ -382,7 +382,7 @@ pub fn Conversation(
 
     // Handler for toggling a reaction
     let handle_toggle_reaction = move |target_message_id: MessageId, emoji: String| {
-        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_room() {
+        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_board() {
             spawn_local(async move {
                 crate::util::message_actions::toggle_reaction(ctx, target_message_id, emoji).await;
             });
@@ -391,7 +391,7 @@ pub fn Conversation(
 
     // Handler for deleting a message
     let handle_delete_message = move |target_message_id: MessageId| {
-        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_room() {
+        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_board() {
             spawn_local(async move {
                 crate::util::message_actions::delete_message(ctx, target_message_id).await;
             });
@@ -400,7 +400,7 @@ pub fn Conversation(
 
     // Handler for editing a message
     let handle_edit_message = move |target_message_id: MessageId, new_title: String, new_text: String| {
-        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_room() {
+        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_board() {
             spawn_local(async move {
                 crate::util::message_actions::edit_message(ctx, target_message_id, new_title, new_text).await;
             });
@@ -409,25 +409,25 @@ pub fn Conversation(
 
     // Message sending handler
     let handle_send_message = {
-        let current_room_data = current_room_data.clone();
+        let current_board_data = current_board_data.clone();
         move |(title_text, message_text, reply_ctx): (String, String, Option<ReplyContext>)| {
-            if let (Some(current_room), Some(current_room_data)) =
-                (CURRENT_ROOM.read().owner_key, current_room_data.clone())
+            if let (Some(current_board), Some(current_board_data)) =
+                (CURRENT_BOARD.read().owner_key, current_board_data.clone())
             {
-                let room_key = current_room_data.room_key();
-                let self_sk = current_room_data.self_sk.clone();
-                let room_state_clone = current_room_data.room_state.clone();
-                let is_private = current_room_data.is_private();
-                let secret_opt: Option<([u8; 32], u32)> = current_room_data
+                let board_key = current_board_data.board_key();
+                let self_sk = current_board_data.self_sk.clone();
+                let board_state_clone = current_board_data.board_state.clone();
+                let is_private = current_board_data.is_private();
+                let secret_opt: Option<([u8; 32], u32)> = current_board_data
                     .get_secret()
                     .map(|(secret, version)| (*secret, version));
 
                 spawn_local(async move {
                     send_message(
-                        current_room,
-                        room_key,
+                        current_board,
+                        board_key,
                         self_sk,
-                        room_state_clone,
+                        board_state_clone,
                         is_private,
                         secret_opt,
                         title_text,
@@ -446,7 +446,7 @@ pub fn Conversation(
             div { class: "flex-1 overflow-y-auto",
                 div { class: "max-w-4xl mx-auto px-4 py-4",
                     {
-                        if current_room_data.is_some() {
+                        if current_board_data.is_some() {
                             match message_tree.read().as_ref() {
                                 Some((tree, self_member_id, member_names)) if !tree.is_empty() => {
                                     let tree = tree.clone();
@@ -509,9 +509,9 @@ pub fn Conversation(
 
             // Message input
             {
-                match current_room_data.as_ref() {
-                    Some(room_data) => {
-                        match room_data.can_participate() {
+                match current_board_data.as_ref() {
+                    Some(board_data) => {
+                        match board_data.can_participate() {
                             Ok(()) => rsx! {
                                 div { class: "flex justify-center",
                                     PostInput {
@@ -526,7 +526,7 @@ pub fn Conversation(
                                 }
                             },
                             Err(SendMessageError::UserNotMember) => {
-                                let user_vk = room_data.self_sk.verifying_key();
+                                let user_vk = board_data.self_sk.verifying_key();
                                 rsx! {
                                     NotMemberNotification {
                                         user_verifying_key: user_vk

@@ -10,15 +10,15 @@ pub mod secret;
 pub mod upgrade;
 pub mod version;
 
-use crate::room_state::admin::AdminsV1;
-use crate::room_state::ban::BansV1;
-use crate::room_state::configuration::AuthorizedConfigurationV1;
-use crate::room_state::member::{MemberId, MembersV1};
-use crate::room_state::member_info::MemberInfoV1;
-use crate::room_state::message::MessagesV1;
-use crate::room_state::secret::RoomSecretsV1;
-use crate::room_state::upgrade::OptionalUpgradeV1;
-use crate::room_state::version::StateVersion;
+use crate::board_state::admin::AdminsV1;
+use crate::board_state::ban::BansV1;
+use crate::board_state::configuration::AuthorizedConfigurationV1;
+use crate::board_state::member::{MemberId, MembersV1};
+use crate::board_state::member_info::MemberInfoV1;
+use crate::board_state::message::MessagesV1;
+use crate::board_state::secret::BoardSecretsV1;
+use crate::board_state::upgrade::OptionalUpgradeV1;
+use crate::board_state::version::StateVersion;
 use ed25519_dalek::VerifyingKey;
 use freenet_scaffold_macro::composable;
 use serde::{Deserialize, Serialize};
@@ -26,7 +26,7 @@ use std::collections::HashSet;
 
 #[composable(post_apply_delta = "post_apply_cleanup")]
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
-pub struct ChatRoomStateV1 {
+pub struct ChatBoardStateV1 {
     // WARNING: The order of these fields is important for the purposes of the #[composable] macro.
     // `configuration` must be first, followed by `bans`, `members`, `member_info`, `secrets`,
     // and then `recent_messages`.
@@ -43,17 +43,17 @@ pub struct ChatRoomStateV1 {
     /// members list and will be removed from it ifc necessary.
     pub bans: BansV1,
 
-    /// The members in the chat room along with who invited them
+    /// The members in the chat board along with who invited them
     pub members: MembersV1,
 
     /// Metadata about members like their nickname, can be updated by members themselves.
     pub member_info: MemberInfoV1,
 
-    /// Secret distribution for private rooms. Must come before recent_messages so message
+    /// Secret distribution for private boards. Must come before recent_messages so message
     /// validation can check secret version consistency.
-    pub secrets: RoomSecretsV1,
+    pub secrets: BoardSecretsV1,
 
-    /// The most recent messages in the chat room, the number is limited by the room configuration.
+    /// The most recent messages in the chat board, the number is limited by the board configuration.
     pub recent_messages: MessagesV1,
 
     /// If this contract has been replaced by a new contract this will contain the new contract address.
@@ -66,7 +66,7 @@ pub struct ChatRoomStateV1 {
     pub version: StateVersion,
 }
 
-impl ChatRoomStateV1 {
+impl ChatBoardStateV1 {
     /// Post-apply cleanup: prune members who have no recent messages, clean up
     /// member_info for pruned members, and remove orphaned bans.
     ///
@@ -76,7 +76,7 @@ impl ChatRoomStateV1 {
     ///
     /// Bans are only removed if the banner was themselves BANNED (orphaned ban).
     /// If the banner was merely pruned for inactivity, their bans persist.
-    fn post_apply_cleanup(&mut self, parameters: &ChatRoomParametersV1) -> Result<(), String> {
+    fn post_apply_cleanup(&mut self, parameters: &ChatBoardParametersV1) -> Result<(), String> {
         let owner_id = MemberId::from(&parameters.owner);
 
         // 1. Collect message author IDs
@@ -153,11 +153,11 @@ impl ChatRoomStateV1 {
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
-pub struct ChatRoomParametersV1 {
+pub struct ChatBoardParametersV1 {
     pub owner: VerifyingKey,
 }
 
-impl ChatRoomParametersV1 {
+impl ChatBoardParametersV1 {
     pub fn owner_id(&self) -> MemberId {
         self.owner.into()
     }
@@ -166,18 +166,18 @@ impl ChatRoomParametersV1 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::room_state::ban::{AuthorizedUserBan, UserBan};
-    use crate::room_state::configuration::Configuration;
-    use crate::room_state::member::{AuthorizedMember, Member};
-    use crate::room_state::member_info::{AuthorizedMemberInfo, MemberInfo};
-    use crate::room_state::message::{AuthorizedMessageV1, MessageV1, RoomMessageBody};
+    use crate::board_state::ban::{AuthorizedUserBan, UserBan};
+    use crate::board_state::configuration::Configuration;
+    use crate::board_state::member::{AuthorizedMember, Member};
+    use crate::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
+    use crate::board_state::message::{AuthorizedMessageV1, MessageV1, BoardMessageBody};
     use ed25519_dalek::SigningKey;
     use std::fmt::Debug;
     use std::time::SystemTime;
 
     #[test]
     fn test_state() {
-        let (state, parameters, owner_signing_key) = create_empty_chat_room_state();
+        let (state, parameters, owner_signing_key) = create_empty_chat_board_state();
 
         assert!(
             state.verify(&state, &parameters).is_ok(),
@@ -231,8 +231,8 @@ mod tests {
 
         assert_eq!(new_state, modified_state);
     }
-    fn create_empty_chat_room_state() -> (ChatRoomStateV1, ChatRoomParametersV1, SigningKey) {
-        // Create a test room_state with a single member and two messages, one written by
+    fn create_empty_chat_board_state() -> (ChatBoardStateV1, ChatBoardParametersV1, SigningKey) {
+        // Create a test board_state with a single member and two messages, one written by
         // the owner and one by the member - the member must be invited by the owner
         let rng = &mut rand::thread_rng();
         let owner_signing_key = SigningKey::generate(rng);
@@ -241,17 +241,17 @@ mod tests {
         let config = AuthorizedConfigurationV1::new(Configuration::default(), &owner_signing_key);
 
         (
-            ChatRoomStateV1 {
+            ChatBoardStateV1 {
                 configuration: config,
                 bans: BansV1::default(),
                 members: MembersV1::default(),
                 member_info: MemberInfoV1::default(),
-                secrets: RoomSecretsV1::default(),
+                secrets: BoardSecretsV1::default(),
                 recent_messages: MessagesV1::default(),
                 upgrade: OptionalUpgradeV1(None),
                 ..Default::default()
             },
-            ChatRoomParametersV1 {
+            ChatBoardParametersV1 {
                 owner: owner_verifying_key,
             },
             owner_signing_key,
@@ -270,7 +270,7 @@ mod tests {
         let owner_sk = SigningKey::generate(rng);
         let owner_vk = owner_sk.verifying_key();
         let owner_id = MemberId::from(&owner_vk);
-        let params = ChatRoomParametersV1 { owner: owner_vk };
+        let params = ChatBoardParametersV1 { owner: owner_vk };
 
         // Configuration allowing bans and members
         let config = Configuration {
@@ -310,7 +310,7 @@ mod tests {
         );
 
         // Initial state: A is a member, B already removed (ban took effect)
-        let initial_state = ChatRoomStateV1 {
+        let initial_state = ChatBoardStateV1 {
             configuration: auth_config.clone(),
             bans: BansV1(vec![ban_b_by_a.clone()]),
             members: MembersV1 {
@@ -338,7 +338,7 @@ mod tests {
         );
 
         // Modified state for delta computation: add owner's ban of A
-        let modified_for_delta = ChatRoomStateV1 {
+        let modified_for_delta = ChatBoardStateV1 {
             configuration: auth_config,
             bans: BansV1(vec![ban_b_by_a.clone(), ban_a_by_owner.clone()]),
             members: MembersV1 {
@@ -392,7 +392,7 @@ mod tests {
         let owner_sk = SigningKey::generate(rng);
         let owner_vk = owner_sk.verifying_key();
         let owner_id = MemberId::from(&owner_vk);
-        let params = ChatRoomParametersV1 { owner: owner_vk };
+        let params = ChatBoardParametersV1 { owner: owner_vk };
 
         let a_sk = SigningKey::generate(rng);
         let a_vk = a_sk.verifying_key();
@@ -421,10 +421,10 @@ mod tests {
         // Only A has a message
         let msg_a = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: a_id,
                 time: SystemTime::now(),
-                content: RoomMessageBody::public("Hello from A".to_string()),
+                content: BoardMessageBody::public("Hello from A".to_string()),
             },
             &a_sk,
         );
@@ -436,7 +436,7 @@ mod tests {
         };
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
 
-        let mut state = ChatRoomStateV1 {
+        let mut state = ChatBoardStateV1 {
             configuration: auth_config,
             members: MembersV1 {
                 members: vec![member_a, member_b],
@@ -460,7 +460,7 @@ mod tests {
         let owner_sk = SigningKey::generate(rng);
         let owner_vk = owner_sk.verifying_key();
         let owner_id = MemberId::from(&owner_vk);
-        let params = ChatRoomParametersV1 { owner: owner_vk };
+        let params = ChatBoardParametersV1 { owner: owner_vk };
 
         let a_sk = SigningKey::generate(rng);
         let a_vk = a_sk.verifying_key();
@@ -491,10 +491,10 @@ mod tests {
         // Only B has a message
         let msg_b = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: b_id,
                 time: SystemTime::now(),
-                content: RoomMessageBody::public("Hello from B".to_string()),
+                content: BoardMessageBody::public("Hello from B".to_string()),
             },
             &b_sk,
         );
@@ -506,7 +506,7 @@ mod tests {
         };
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
 
-        let mut state = ChatRoomStateV1 {
+        let mut state = ChatBoardStateV1 {
             configuration: auth_config,
             members: MembersV1 {
                 members: vec![member_a, member_b],
@@ -544,7 +544,7 @@ mod tests {
         let owner_sk = SigningKey::generate(rng);
         let owner_vk = owner_sk.verifying_key();
         let owner_id = MemberId::from(&owner_vk);
-        let params = ChatRoomParametersV1 { owner: owner_vk };
+        let params = ChatBoardParametersV1 { owner: owner_vk };
 
         let a_sk = SigningKey::generate(rng);
         let a_vk = a_sk.verifying_key();
@@ -583,7 +583,7 @@ mod tests {
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
 
         // A has no messages → will be pruned
-        let mut state = ChatRoomStateV1 {
+        let mut state = ChatBoardStateV1 {
             configuration: auth_config,
             members: MembersV1 {
                 members: vec![member_a],
@@ -609,7 +609,7 @@ mod tests {
         let owner_sk = SigningKey::generate(rng);
         let owner_vk = owner_sk.verifying_key();
         let owner_id = MemberId::from(&owner_vk);
-        let params = ChatRoomParametersV1 { owner: owner_vk };
+        let params = ChatBoardParametersV1 { owner: owner_vk };
 
         let a_sk = SigningKey::generate(rng);
         let a_vk = a_sk.verifying_key();
@@ -632,7 +632,7 @@ mod tests {
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
 
         // State with A but no messages
-        let mut state = ChatRoomStateV1 {
+        let mut state = ChatBoardStateV1 {
             configuration: auth_config,
             members: MembersV1 {
                 members: vec![member_a.clone()],
@@ -648,10 +648,10 @@ mod tests {
         state.members.members.push(member_a);
         let msg = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: a_id,
                 time: SystemTime::now(),
-                content: RoomMessageBody::public("Hello again!".to_string()),
+                content: BoardMessageBody::public("Hello again!".to_string()),
             },
             &a_sk,
         );
@@ -669,7 +669,7 @@ mod tests {
         let owner_sk = SigningKey::generate(rng);
         let owner_vk = owner_sk.verifying_key();
         let owner_id = MemberId::from(&owner_vk);
-        let params = ChatRoomParametersV1 { owner: owner_vk };
+        let params = ChatBoardParametersV1 { owner: owner_vk };
 
         let a_sk = SigningKey::generate(rng);
         let a_vk = a_sk.verifying_key();
@@ -700,7 +700,7 @@ mod tests {
         };
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
 
-        let mut state = ChatRoomStateV1 {
+        let mut state = ChatBoardStateV1 {
             configuration: auth_config,
             members: MembersV1 {
                 members: vec![member_a],
@@ -728,9 +728,9 @@ mod tests {
 
     #[test]
     fn test_state_with_none_deltas() {
-        let (state, parameters, owner_signing_key) = create_empty_chat_room_state();
+        let (state, parameters, owner_signing_key) = create_empty_chat_board_state();
 
-        // Create a modified room_state with no changes (all deltas should be None)
+        // Create a modified board_state with no changes (all deltas should be None)
         let modified_state = state.clone();
 
         // Apply the delta

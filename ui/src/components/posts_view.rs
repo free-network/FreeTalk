@@ -1,39 +1,39 @@
-use crate::components::app::{Route, CURRENT_ROOM, ROOMS};
+use crate::components::app::{Route, CURRENT_BOARD, BOARDS};
 use crate::components::conversation::{get_all_messages, get_top_level_posts, MessageCard, MessageCardVariant};
 use crate::util::message_actions::{self, ActionContext};
 use dioxus::prelude::*;
-use river_core::room_state::member::MemberId;
-use river_core::room_state::message::MessageId;
+use river_core::board_state::member::MemberId;
+use river_core::board_state::message::MessageId;
 use wasm_bindgen_futures::spawn_local;
 
 #[component]
 pub fn PostsView() -> Element {
     let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
-    let current_room_data = {
-        let current_room = CURRENT_ROOM.read();
-        if let Some(key) = current_room.owner_key {
-            let rooms = ROOMS.read();
-            rooms.map.get(&key).cloned()
+    let current_board_data = {
+        let current_board = CURRENT_BOARD.read();
+        if let Some(key) = current_board.owner_key {
+            let boards = BOARDS.read();
+            boards.map.get(&key).cloned()
         } else {
             None
         }
     };
 
-    let has_room_selected = current_room_data.is_some();
+    let has_board_selected = current_board_data.is_some();
 
     // Get top-level posts (memoized)
     let posts = use_memo(move || {
-        let current_room = CURRENT_ROOM.read();
-        if let Some(key) = current_room.owner_key {
-            let rooms = ROOMS.read();
-            if let Some(room_data) = rooms.map.get(&key) {
-                let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
+        let current_board = CURRENT_BOARD.read();
+        if let Some(key) = current_board.owner_key {
+            let boards = BOARDS.read();
+            if let Some(board_data) = boards.map.get(&key) {
+                let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
                 let all_messages = get_all_messages(
-                    &room_data.room_state.recent_messages,
-                    &room_data.room_state.member_info,
+                    &board_data.board_state.recent_messages,
+                    &board_data.board_state.member_info,
                     self_member_id,
-                    &room_data.secrets,
+                    &board_data.secrets,
                 );
                 return Some(get_top_level_posts(&all_messages));
             }
@@ -43,7 +43,7 @@ pub fn PostsView() -> Element {
 
     // Handler for toggling reactions
     let handle_toggle_reaction = move |target_message_id: MessageId, emoji: String| {
-        if let Some(ctx) = ActionContext::from_current_room() {
+        if let Some(ctx) = ActionContext::from_current_board() {
             spawn_local(async move {
                 message_actions::toggle_reaction(ctx, target_message_id, emoji).await;
             });
@@ -52,7 +52,7 @@ pub fn PostsView() -> Element {
 
     // Handler for deleting messages
     let handle_delete_message = move |target_message_id: MessageId| {
-        if let Some(ctx) = ActionContext::from_current_room() {
+        if let Some(ctx) = ActionContext::from_current_board() {
             spawn_local(async move {
                 message_actions::delete_message(ctx, target_message_id).await;
             });
@@ -61,7 +61,7 @@ pub fn PostsView() -> Element {
 
     // Handler for editing messages
     let handle_edit_message = move |target_message_id: MessageId, new_title: String, new_text: String| {
-        if let Some(ctx) = ActionContext::from_current_room() {
+        if let Some(ctx) = ActionContext::from_current_board() {
             spawn_local(async move {
                 message_actions::edit_message(ctx, target_message_id, new_title, new_text).await;
             });
@@ -71,7 +71,7 @@ pub fn PostsView() -> Element {
     rsx! {
         div { class: "flex-1 flex flex-col min-w-0 bg-bg",
             // Show no-board-selected message or header with user info
-            if !has_room_selected {
+            if !has_board_selected {
                 div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
                     p { class: "text-xl", "Select a board from the sidebar above or create one" }
                     p { class: "text-sm mt-2", "Posts will appear here" }
@@ -81,7 +81,7 @@ pub fn PostsView() -> Element {
                 div { class: "flex-1 overflow-y-auto",
                     div { class: "max-w-4xl mx-auto px-4 py-6",
                         {
-                            let self_member_id_for_posts = current_room_data.as_ref()
+                            let self_member_id_for_posts = current_board_data.as_ref()
                                 .map(|rd| MemberId::from(&rd.self_sk.verifying_key()));
                             match (posts.read().as_ref(), self_member_id_for_posts) {
                                 (Some(posts), Some(self_member_id)) if !posts.is_empty() => {
@@ -104,10 +104,10 @@ pub fn PostsView() -> Element {
                                                                 expanded: false,
                                                                 show_replies: false,
                                                                 on_click: move |_| {
-                                                                    // Get current room_id for navigation
-                                                                    if let Some(key) = CURRENT_ROOM.read().owner_key {
-                                                                        let room_id = bs58::encode(key.as_bytes()).into_string();
-                                                                        nav.push(Route::Post { room_id, post_id: post_id.clone() });
+                                                                    // Get current board_id for navigation
+                                                                    if let Some(key) = CURRENT_BOARD.read().owner_key {
+                                                                        let board_id = bs58::encode(key.as_bytes()).into_string();
+                                                                        nav.push(Route::Post { board_id, post_id: post_id.clone() });
                                                                     }
                                                                 },
                                                                 on_react: move |(msg_id, emoji)| {
@@ -185,9 +185,9 @@ pub fn PostsView() -> Element {
 pub fn SinglePostView(post_id: String) -> Element {
     let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
-    // Get current room_id for navigation
-    let current_room_id = use_memo(move || {
-        CURRENT_ROOM
+    // Get current board_id for navigation
+    let current_board_id = use_memo(move || {
+        CURRENT_BOARD
             .read()
             .owner_key
             .map(|key| bs58::encode(key.as_bytes()).into_string())
@@ -196,16 +196,16 @@ pub fn SinglePostView(post_id: String) -> Element {
 
     // Find the post and self_member_id
     let post_data = use_memo(move || {
-        let current_room = CURRENT_ROOM.read();
-        if let Some(key) = current_room.owner_key {
-            let rooms = ROOMS.read();
-            if let Some(room_data) = rooms.map.get(&key) {
-                let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
+        let current_board = CURRENT_BOARD.read();
+        if let Some(key) = current_board.owner_key {
+            let boards = BOARDS.read();
+            if let Some(board_data) = boards.map.get(&key) {
+                let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
                 let all_messages = get_all_messages(
-                    &room_data.room_state.recent_messages,
-                    &room_data.room_state.member_info,
+                    &board_data.board_state.recent_messages,
+                    &board_data.board_state.member_info,
                     self_member_id,
-                    &room_data.secrets,
+                    &board_data.secrets,
                 );
                 let post = all_messages
                     .into_iter()
@@ -218,7 +218,7 @@ pub fn SinglePostView(post_id: String) -> Element {
 
     // Handler for toggling reactions
     let handle_toggle_reaction = move |target_message_id: MessageId, emoji: String| {
-        if let Some(ctx) = ActionContext::from_current_room() {
+        if let Some(ctx) = ActionContext::from_current_board() {
             spawn_local(async move {
                 message_actions::toggle_reaction(ctx, target_message_id, emoji).await;
             });
@@ -227,7 +227,7 @@ pub fn SinglePostView(post_id: String) -> Element {
 
     // Handler for deleting messages
     let handle_delete_message = move |target_message_id: MessageId| {
-        if let Some(ctx) = ActionContext::from_current_room() {
+        if let Some(ctx) = ActionContext::from_current_board() {
             spawn_local(async move {
                 message_actions::delete_message(ctx, target_message_id).await;
             });
@@ -236,7 +236,7 @@ pub fn SinglePostView(post_id: String) -> Element {
 
     // Handler for editing messages
     let handle_edit_message = move |target_message_id: MessageId, new_title: String, new_text: String| {
-        if let Some(ctx) = ActionContext::from_current_room() {
+        if let Some(ctx) = ActionContext::from_current_board() {
             spawn_local(async move {
                 message_actions::edit_message(ctx, target_message_id, new_title, new_text).await;
             });
@@ -248,7 +248,7 @@ pub fn SinglePostView(post_id: String) -> Element {
             // Back button header
             div { class: "flex items-center gap-4 px-6 py-4 border-b border-border",
                 Link {
-                    to: Route::Posts { room_id: current_room_id.read().clone() },
+                    to: Route::Posts { board_id: current_board_id.read().clone() },
                     class: "text-accent hover:text-accent/80 transition-colors text-lg",
                     "← Back to posts"
                 }
@@ -285,7 +285,7 @@ pub fn SinglePostView(post_id: String) -> Element {
                                 div { class: "flex-1 flex flex-col items-center justify-center h-64 text-text-muted",
                                     p { class: "text-xl", "Post not found." }
                                     Link {
-                                        to: Route::Posts { room_id: current_room_id.read().clone() },
+                                        to: Route::Posts { board_id: current_board_id.read().clone() },
                                         class: "mt-4 text-accent hover:text-accent/80 transition-colors",
                                         "← Back to posts"
                                     }

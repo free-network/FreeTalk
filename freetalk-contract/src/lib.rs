@@ -3,8 +3,8 @@ use freenet_stdlib::prelude::*;
 
 use freenet_scaffold::ComposableState;
 use freenet_stdlib::prelude::ContractError;
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1Delta, ChatRoomStateV1Summary};
-use river_core::ChatRoomStateV1;
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1Delta, ChatBoardStateV1Summary};
+use river_core::ChatBoardStateV1;
 
 // NOTE: Crypto helper modules intentionally not compiled by default.
 // They are retained under examples/docs to avoid accidental inclusion.
@@ -20,14 +20,14 @@ impl ContractInterface for Contract {
         _related: RelatedContracts<'static>,
     ) -> Result<ValidateResult, freenet_stdlib::prelude::ContractError> {
         let bytes = state.as_ref();
-        // allow empty room_state
+        // allow empty board_state
         if bytes.is_empty() {
             return Ok(ValidateResult::Valid);
         }
-        let chat_state = from_reader::<ChatRoomStateV1, &[u8]>(bytes)
+        let chat_state = from_reader::<ChatBoardStateV1, &[u8]>(bytes)
             .map_err(|e| ContractError::Deser(e.to_string()))?;
 
-        let parameters = from_reader::<ChatRoomParametersV1, &[u8]>(parameters.as_ref())
+        let parameters = from_reader::<ChatBoardParametersV1, &[u8]>(parameters.as_ref())
             .map_err(|e| ContractError::Deser(e.to_string()))?;
 
         chat_state
@@ -43,15 +43,15 @@ impl ContractInterface for Contract {
         state: State<'static>,
         data: Vec<UpdateData<'static>>,
     ) -> Result<UpdateModification<'static>, freenet_stdlib::prelude::ContractError> {
-        let parameters = from_reader::<ChatRoomParametersV1, &[u8]>(parameters.as_ref())
+        let parameters = from_reader::<ChatBoardParametersV1, &[u8]>(parameters.as_ref())
             .map_err(|e| ContractError::Deser(e.to_string()))?;
-        let mut chat_state = from_reader::<ChatRoomStateV1, &[u8]>(state.as_ref())
+        let mut chat_state = from_reader::<ChatBoardStateV1, &[u8]>(state.as_ref())
             .map_err(|e| ContractError::Deser(e.to_string()))?;
 
         for update in data {
             match update {
                 UpdateData::State(new_state) => {
-                    let new_state = from_reader::<ChatRoomStateV1, &[u8]>(new_state.as_ref())
+                    let new_state = from_reader::<ChatBoardStateV1, &[u8]>(new_state.as_ref())
                         .map_err(|e| ContractError::Deser(e.to_string()))?;
                     chat_state
                         .merge(&chat_state.clone(), &parameters, &new_state)
@@ -63,7 +63,7 @@ impl ContractInterface for Contract {
                     if d.as_ref().is_empty() {
                         continue;
                     }
-                    let delta = from_reader::<ChatRoomStateV1Delta, &[u8]>(d.as_ref())
+                    let delta = from_reader::<ChatBoardStateV1Delta, &[u8]>(d.as_ref())
                         .map_err(|e| ContractError::Deser(e.to_string()))?;
                     chat_state
                         .apply_delta(&chat_state.clone(), &parameters, &Some(delta))
@@ -75,7 +75,7 @@ impl ContractInterface for Contract {
                     related_to: _,
                     state: _,
                 } => {
-                    // TODO: related room_state handling not needed for river
+                    // TODO: related board_state handling not needed for river
                 }
                 _ => unreachable!(),
             }
@@ -96,9 +96,9 @@ impl ContractInterface for Contract {
         if state.is_empty() {
             return Ok(StateSummary::from(vec![]));
         }
-        let parameters = from_reader::<ChatRoomParametersV1, &[u8]>(parameters.as_ref())
+        let parameters = from_reader::<ChatBoardParametersV1, &[u8]>(parameters.as_ref())
             .map_err(|e| ContractError::Deser(e.to_string()))?;
-        let state = from_reader::<ChatRoomStateV1, &[u8]>(state)
+        let state = from_reader::<ChatBoardStateV1, &[u8]>(state)
             .map_err(|e| ContractError::Deser(e.to_string()))?;
         let summary = state.summarize(&state, &parameters);
         let mut summary_bytes = vec![];
@@ -112,11 +112,11 @@ impl ContractInterface for Contract {
         state: State<'static>,
         summary: StateSummary<'static>,
     ) -> Result<StateDelta<'static>, freenet_stdlib::prelude::ContractError> {
-        let chat_state = from_reader::<ChatRoomStateV1, &[u8]>(state.as_ref())
+        let chat_state = from_reader::<ChatBoardStateV1, &[u8]>(state.as_ref())
             .map_err(|e| ContractError::Deser(e.to_string()))?;
-        let parameters = from_reader::<ChatRoomParametersV1, &[u8]>(parameters.as_ref())
+        let parameters = from_reader::<ChatBoardParametersV1, &[u8]>(parameters.as_ref())
             .map_err(|e| ContractError::Deser(e.to_string()))?;
-        let summary = from_reader::<ChatRoomStateV1Summary, &[u8]>(summary.as_ref())
+        let summary = from_reader::<ChatBoardStateV1Summary, &[u8]>(summary.as_ref())
             .map_err(|e| ContractError::Deser(e.to_string()))?;
         let delta = chat_state.delta(&chat_state, &parameters, &summary);
         match delta {

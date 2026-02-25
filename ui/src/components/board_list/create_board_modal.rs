@@ -1,17 +1,17 @@
-use crate::components::app::{CREATE_ROOM_MODAL, NEEDS_SYNC, ROOMS};
+use crate::components::app::{CREATE_BOARD_MODAL, NEEDS_SYNC, BOARDS};
 use dioxus::prelude::*;
 use ed25519_dalek::SigningKey;
 use web_sys::window;
 
 #[component]
-pub fn CreateRoomModal() -> Element {
-    let mut room_name = use_signal(String::new);
+pub fn CreateBoardModal() -> Element {
+    let mut board_name = use_signal(String::new);
     let mut nickname = use_signal(String::new);
-    let create_room = move |_| {
+    let create_board = move |_| {
         use dioxus::logger::tracing::info;
-        info!("🔵 Create room button clicked");
+        info!("🔵 Create board button clicked");
 
-        let name = room_name.read().clone();
+        let name = board_name.read().clone();
         if name.is_empty() {
             info!("🔴 Board name is empty, returning");
             return;
@@ -22,45 +22,45 @@ pub fn CreateRoomModal() -> Element {
         info!("🔵 Generating signing key...");
         let self_sk = SigningKey::generate(&mut rand::thread_rng());
         let nick = nickname.read().clone();
-        let private = false; // Private rooms temporarily disabled
+        let private = false; // Private boards temporarily disabled
         info!(
-            "🔵 Creating {} room with nickname: {}",
+            "🔵 Creating {} board with nickname: {}",
             if private { "private" } else { "public" },
             nick
         );
 
-        // Create room and get the key
-        info!("🔵 About to call create_new_room_with_name...");
-        let new_room_key =
-            ROOMS.with_mut(|rooms| rooms.create_new_room_with_name(self_sk, name, nick, private));
-        info!("🔵 Board created with key: {:?}", new_room_key);
+        // Create board and get the key
+        info!("🔵 About to call create_new_board_with_name...");
+        let new_board_key =
+            BOARDS.with_mut(|boards| boards.create_new_board_with_name(self_sk, name, nick, private));
+        info!("🔵 Board created with key: {:?}", new_board_key);
 
-        // Navigate to room URL using hash (modal is outside Router context)
-        info!("🔵 Navigating to new room...");
-        let room_id = bs58::encode(new_room_key.as_bytes()).into_string();
+        // Navigate to board URL using hash (modal is outside Router context)
+        info!("🔵 Navigating to new board...");
+        let board_id = bs58::encode(new_board_key.as_bytes()).into_string();
         if let Some(win) = window() {
-            let _ = win.location().set_hash(&format!("/room/{}", room_id));
+            let _ = win.location().set_hash(&format!("/board/{}", board_id));
         }
         info!("🔵 Navigation triggered");
 
-        // Mark room as needing sync (this will trigger use_effect in app.rs)
-        info!("🔵 Marking room for synchronization...");
-        NEEDS_SYNC.write().insert(new_room_key);
+        // Mark board as needing sync (this will trigger use_effect in app.rs)
+        info!("🔵 Marking board for synchronization...");
+        NEEDS_SYNC.write().insert(new_board_key);
         info!("🔵 Board marked for sync");
 
         // Reset and close modal
         info!("🔵 Resetting form fields...");
-        room_name.set(String::new());
+        board_name.set(String::new());
         nickname.set(String::new());
         info!("🔵 Closing modal...");
-        CREATE_ROOM_MODAL.with_mut(|modal| {
+        CREATE_BOARD_MODAL.with_mut(|modal| {
             modal.show = false;
         });
         info!("🔵 Modal closed");
-        info!("🔵 Create room handler completed successfully");
+        info!("🔵 Create board handler completed successfully");
     };
 
-    let is_open = CREATE_ROOM_MODAL.read().show;
+    let is_open = CREATE_BOARD_MODAL.read().show;
 
     if !is_open {
         return rsx! {};
@@ -71,7 +71,7 @@ pub fn CreateRoomModal() -> Element {
         div {
             class: "fixed inset-0 bg-black/50 z-40",
             onclick: move |_| {
-                CREATE_ROOM_MODAL.with_mut(|modal| {
+                CREATE_BOARD_MODAL.with_mut(|modal| {
                     modal.show = false;
                 });
             }
@@ -94,9 +94,9 @@ pub fn CreateRoomModal() -> Element {
                         label { class: "block text-sm font-medium text-text mb-1", "Board Name" }
                         input {
                             class: "w-full px-3 py-2 bg-surface border border-border rounded-lg text-text placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent",
-                            value: "{room_name}",
-                            placeholder: "Enter room name",
-                            onchange: move |evt| room_name.set(evt.value().to_string())
+                            value: "{board_name}",
+                            placeholder: "Enter board name",
+                            onchange: move |evt| board_name.set(evt.value().to_string())
                         }
                     }
 
@@ -118,7 +118,7 @@ pub fn CreateRoomModal() -> Element {
                             disabled: true,
                         }
                         span { class: "text-sm text-text-muted",
-                            "Private rooms temporarily disabled"
+                            "Private boards temporarily disabled"
                         }
                     }
                 }
@@ -128,7 +128,7 @@ pub fn CreateRoomModal() -> Element {
                     button {
                         class: "px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-surface rounded-lg transition-colors",
                         onclick: move |_| {
-                            CREATE_ROOM_MODAL.with_mut(|modal| {
+                            CREATE_BOARD_MODAL.with_mut(|modal| {
                                 modal.show = false;
                             });
                         },
@@ -136,7 +136,7 @@ pub fn CreateRoomModal() -> Element {
                     }
                     button {
                         class: "px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors",
-                        onclick: create_room,
+                        onclick: create_board,
                         "Create Board"
                     }
                 }

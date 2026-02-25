@@ -4,7 +4,7 @@ use ciborium::de::from_reader;
 use redb::{
     Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TableHandle,
 };
-use river_core::room_state::ChatRoomStateV1;
+use river_core::board_state::ChatBoardStateV1;
 use std::env;
 use std::time::SystemTime;
 
@@ -51,17 +51,17 @@ fn main() -> Result<()> {
         }
 
         let state_bytes = value.value();
-        let room_state: ChatRoomStateV1 =
-            from_reader(state_bytes).context("Failed to deserialize room state")?;
+        let board_state: ChatBoardStateV1 =
+            from_reader(state_bytes).context("Failed to deserialize board state")?;
 
         println!(
             "Contract {} -> {} messages, {} members",
             key_b58,
-            room_state.recent_messages.messages.len(),
-            room_state.members.members.len()
+            board_state.recent_messages.messages.len(),
+            board_state.members.members.len()
         );
 
-        for msg in &room_state.recent_messages.messages {
+        for msg in &board_state.recent_messages.messages {
             let timestamp = msg
                 .message
                 .time
@@ -69,11 +69,11 @@ fn main() -> Result<()> {
                 .map(|d| d.as_secs())
                 .unwrap_or_default();
             match &msg.message.content {
-                river_core::room_state::message::RoomMessageBody::Public { .. } => {
+                river_core::board_state::message::BoardMessageBody::Public { .. } => {
                     let text = msg.message.content.as_public_string().unwrap_or_default();
                     println!("  [{}] {}...", timestamp, truncate(&text, 80));
                 }
-                river_core::room_state::message::RoomMessageBody::Private { .. } => {
+                river_core::board_state::message::BoardMessageBody::Private { .. } => {
                     println!("  [{}] <private message>", timestamp);
                 }
             }

@@ -1,7 +1,7 @@
-use crate::room_state::member::MemberId;
-use crate::room_state::ChatRoomParametersV1;
+use crate::board_state::member::MemberId;
+use crate::board_state::ChatBoardParametersV1;
 use crate::util::{sign_struct, truncated_base64, verify_struct};
-use crate::ChatRoomStateV1;
+use crate::ChatBoardStateV1;
 use blake3::Hash;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use freenet_scaffold::ComposableState;
@@ -18,10 +18,10 @@ pub struct AuthorizedUpgradeV1 {
 }
 
 impl ComposableState for OptionalUpgradeV1 {
-    type ParentState = ChatRoomStateV1;
+    type ParentState = ChatBoardStateV1;
     type Summary = Option<u8>;
     type Delta = AuthorizedUpgradeV1;
-    type Parameters = ChatRoomParametersV1;
+    type Parameters = ChatBoardParametersV1;
 
     fn verify(
         &self,
@@ -53,7 +53,7 @@ impl ComposableState for OptionalUpgradeV1 {
     ) -> Option<Self::Delta> {
         match &self.0 {
             Some(upgrade) => {
-                // If the upgrade has a higher version than the old room_state summary or of the old summary is None
+                // If the upgrade has a higher version than the old board_state summary or of the old summary is None
                 // then return the upgrade as a delta
                 if old_state_summary.is_none_or(|old_version| upgrade.upgrade.version > old_version)
                 {
@@ -122,13 +122,13 @@ impl fmt::Debug for AuthorizedUpgradeV1 {
 pub struct UpgradeV1 {
     pub owner_member_id: MemberId,
     pub version: u8,
-    pub new_chatroom_address: Hash,
+    pub new_chatboard_address: Hash,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::room_state::member::MemberId;
+    use crate::board_state::member::MemberId;
     use ed25519_dalek::SigningKey;
     use freenet_scaffold::util::FastHash;
     use rand::rngs::OsRng;
@@ -137,7 +137,7 @@ mod tests {
         UpgradeV1 {
             owner_member_id: owner_id,
             version: 1,
-            new_chatroom_address: Hash::from([0; 32]),
+            new_chatboard_address: Hash::from([0; 32]),
         }
     }
 
@@ -169,8 +169,8 @@ mod tests {
 
         let optional_upgrade = OptionalUpgradeV1(Some(authorized_upgrade));
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -208,8 +208,8 @@ mod tests {
 
         let optional_upgrade = OptionalUpgradeV1(Some(authorized_upgrade));
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: signing_key.verifying_key(),
         };
 
@@ -231,8 +231,8 @@ mod tests {
 
         let optional_upgrade = OptionalUpgradeV1(Some(authorized_upgrade.clone()));
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: signing_key.verifying_key(),
         };
 
@@ -256,8 +256,8 @@ mod tests {
 
         let mut optional_upgrade = OptionalUpgradeV1(None);
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: signing_key.verifying_key(),
         };
 

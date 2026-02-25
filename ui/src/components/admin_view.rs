@@ -1,24 +1,24 @@
 //! Admin management view for viewing and adding admins.
 
-use crate::components::app::{CURRENT_ROOM, NEEDS_SYNC, ROOMS};
-use crate::room_data::RoomData;
+use crate::components::app::{CURRENT_BOARD, NEEDS_SYNC, BOARDS};
+use crate::board_data::BoardData;
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use freenet_scaffold::util::FastHash;
 use freenet_scaffold::ComposableState;
-use river_core::room_state::admin::{Admin, AdminsDelta, AuthorizedAdmin};
-use river_core::room_state::member::MemberId;
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1Delta};
+use river_core::board_state::admin::{Admin, AdminsDelta, AuthorizedAdmin};
+use river_core::board_state::member::MemberId;
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1Delta};
 use wasm_bindgen_futures::spawn_local;
 
 #[component]
 pub fn AdminView() -> Element {
-    let current_room_data: Memo<Option<RoomData>> = use_memo(move || {
-        CURRENT_ROOM
+    let current_board_data: Memo<Option<BoardData>> = use_memo(move || {
+        CURRENT_BOARD
             .read()
             .owner_key
             .as_ref()
-            .and_then(|key| ROOMS.read().map.get(key).cloned())
+            .and_then(|key| BOARDS.read().map.get(key).cloned())
     });
 
     let mut selected_member = use_signal(|| None::<MemberId>);
@@ -26,34 +26,34 @@ pub fn AdminView() -> Element {
 
     // Check if current user is the owner
     let is_owner = use_memo(move || {
-        current_room_data.read().as_ref().map_or(false, |room_data| {
-            room_data.owner_vk == room_data.self_sk.verifying_key()
+        current_board_data.read().as_ref().map_or(false, |board_data| {
+            board_data.owner_vk == board_data.self_sk.verifying_key()
         })
     });
 
     // Get list of current admins
     let admins = use_memo(move || {
-        current_room_data
+        current_board_data
             .read()
             .as_ref()
-            .map(|room_data| room_data.room_state.admin.admins.clone())
+            .map(|board_data| board_data.board_state.admin.admins.clone())
             .unwrap_or_default()
     });
 
     // Get list of members who can be made admin (not already admin, not owner)
     let available_members = use_memo(move || {
-        current_room_data.read().as_ref().map_or(vec![], |room_data| {
-            let owner_id = MemberId::from(&room_data.owner_vk);
-            let admin_ids: std::collections::HashSet<_> = room_data
-                .room_state
+        current_board_data.read().as_ref().map_or(vec![], |board_data| {
+            let owner_id = MemberId::from(&board_data.owner_vk);
+            let admin_ids: std::collections::HashSet<_> = board_data
+                .board_state
                 .admin
                 .admins
                 .iter()
                 .map(|a| a.admin.member_id)
                 .collect();
 
-            room_data
-                .room_state
+            board_data
+                .board_state
                 .members
                 .members
                 .iter()
@@ -68,12 +68,12 @@ pub fn AdminView() -> Element {
 
     // Helper to get nickname for a member
     let get_nickname = move |member_id: MemberId| -> String {
-        current_room_data
+        current_board_data
             .read()
             .as_ref()
-            .and_then(|room_data| {
-                room_data
-                    .room_state
+            .and_then(|board_data| {
+                board_data
+                    .board_state
                     .member_info
                     .member_info
                     .iter()
@@ -88,14 +88,14 @@ pub fn AdminView() -> Element {
             return;
         };
 
-        let Some(room_data) = current_room_data.read().as_ref().cloned() else {
+        let Some(board_data) = current_board_data.read().as_ref().cloned() else {
             return;
         };
 
-        let current_room = room_data.owner_vk;
-        let room_key = room_data.room_key();
-        let self_sk = room_data.self_sk.clone();
-        let room_state_clone = room_data.room_state.clone();
+        let current_board = board_data.owner_vk;
+        let board_key = board_data.board_key();
+        let self_sk = board_data.self_sk.clone();
+        let board_state_clone = board_data.board_state.clone();
 
         let admin = Admin { member_id };
 
@@ -113,21 +113,21 @@ pub fn AdminView() -> Element {
 
             // Sign using delegate with fallback to local signing
             let signature =
-                crate::signing::sign_admin_with_fallback(room_key, admin_bytes, &self_sk).await;
+                crate::signing::sign_admin_with_fallback(board_key, admin_bytes, &self_sk).await;
 
             let authorized_admin = AuthorizedAdmin::with_signature(admin, signature);
 
-            let delta = ChatRoomStateV1Delta {
+            let delta = ChatBoardStateV1Delta {
                 admin: Some(AdminsDelta::new(vec![authorized_admin])),
                 ..Default::default()
             };
 
-            ROOMS.with_mut(|rooms| {
-                if let Some(room_data_mut) = rooms.map.get_mut(&current_room) {
-                    if let Err(e) = room_data_mut.room_state.apply_delta(
-                        &room_state_clone,
-                        &ChatRoomParametersV1 {
-                            owner: current_room,
+            BOARDS.with_mut(|boards| {
+                if let Some(board_data_mut) = boards.map.get_mut(&current_board) {
+                    if let Err(e) = board_data_mut.board_state.apply_delta(
+                        &board_state_clone,
+                        &ChatBoardParametersV1 {
+                            owner: current_board,
                         },
                         &Some(delta),
                     ) {
@@ -138,16 +138,16 @@ pub fn AdminView() -> Element {
                 }
             });
 
-            NEEDS_SYNC.write().insert(current_room);
-            info!("Marked room for synchronization after adding admin");
+            NEEDS_SYNC.write().insert(current_board);
+            info!("Marked board for synchronization after adding admin");
         });
     };
 
-    // If no room selected, show message
-    if current_room_data.read().is_none() {
+    // If no board selected, show message
+    if current_board_data.read().is_none() {
         return rsx! {
             div { class: "flex-1 flex items-center justify-center p-4",
-                p { class: "text-text-muted", "Select a room to manage admins" }
+                p { class: "text-text-muted", "Select a board to manage admins" }
             }
         };
     }
@@ -177,7 +177,7 @@ pub fn AdminView() -> Element {
 
                 if admins.read().is_empty() {
                     div { class: "bg-surface rounded-lg p-4 text-text-muted",
-                        "No admins have been added yet. The room owner has full admin privileges by default."
+                        "No admins have been added yet. The board owner has full admin privileges by default."
                     }
                 } else {
                     div { class: "space-y-2",
@@ -258,7 +258,7 @@ pub fn AdminView() -> Element {
             } else {
                 div { class: "border-t border-border pt-6",
                     p { class: "text-text-muted text-sm",
-                        "Only the room owner can add admins."
+                        "Only the board owner can add admins."
                     }
                 }
             }

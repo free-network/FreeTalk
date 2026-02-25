@@ -29,7 +29,7 @@ This document explains how to use the River CLI tool to reproduce the PUT/GET ti
 
 ## The Bug
 
-River uses Freenet's decentralized storage to persist chat room state. The bug manifests as:
+River uses Freenet's decentralized storage to persist chat board state. The bug manifests as:
 - PUT operations (storing data) timeout after 30 seconds with no response
 - GET operations (retrieving data) also timeout after 30 seconds with no response
 - This happens even though the WebSocket connection to the local Freenet node works fine
@@ -50,34 +50,34 @@ DEBUG: Testing WebSocket connection...
 ```
 
 ### Step 2: Create a Board (PUT Operation)
-Attempt to create a new chat room:
+Attempt to create a new chat board:
 
 ```bash
-river room create --name "Test Board" --nickname "Alice"
+river board create --name "Test Board" --nickname "Alice"
 ```
 
 Expected output (demonstrating the bug):
 ```
-Creating room 'Test Board' with nickname 'Alice'...
+Creating board 'Test Board' with nickname 'Alice'...
 Error: Timeout waiting for PUT response after 30 seconds
 ```
 
-The CLI sends a PUT request to store the room contract, but Freenet never responds.
+The CLI sends a PUT request to store the board contract, but Freenet never responds.
 
 ### Step 3: Try Again with Debug Logging
 Run with debug logging to see more details:
 
 ```bash
-RUST_LOG=debug river -d room create --name "Test Board" --nickname "Alice" 2>&1 | tee debug.log
+RUST_LOG=debug river -d board create --name "Test Board" --nickname "Alice" 2>&1 | tee debug.log
 ```
 
 You'll see the PUT request being sent but no response received.
 
 ### Step 4: Test GET Operation
-If you somehow have a room created (e.g., from a previous attempt), you can test GET:
+If you somehow have a board created (e.g., from a previous attempt), you can test GET:
 
 ```bash
-# First, get the room owner key from a successful creation
+# First, get the board owner key from a successful creation
 # For this example, let's say it's: 7oQfp6UHFDK4h7gWrPBkajDW2iKfuWPVnLmKBrr1YXwP
 
 river debug contract-get 7oQfp6UHFDK4h7gWrPBkajDW2iKfuWPVnLmKBrr1YXwP
@@ -85,7 +85,7 @@ river debug contract-get 7oQfp6UHFDK4h7gWrPBkajDW2iKfuWPVnLmKBrr1YXwP
 
 Expected output (demonstrating the bug):
 ```
-DEBUG: Performing contract GET for room owned by: 7oQfp6UHFDK4h7gWrPBkajDW2iKfuWPVnLmKBrr1YXwP
+DEBUG: Performing contract GET for board owned by: 7oQfp6UHFDK4h7gWrPBkajDW2iKfuWPVnLmKBrr1YXwP
 Contract key: 9Xx6VzR8HSsG1h...
 Error: Timeout waiting for GET response after 30 seconds
 ```
@@ -94,8 +94,8 @@ Error: Timeout waiting for GET response after 30 seconds
 Create an invitation locally and try to accept it:
 
 ```bash
-# This would only work if you had successfully created a room
-# river invite create <room-owner-key>
+# This would only work if you had successfully created a board
+# river invite create <board-owner-key>
 # river invite accept <invitation-code>
 ```
 
@@ -112,9 +112,9 @@ The accept command performs a GET operation and will also timeout.
 
 ### Useful Commands
 
-Show the contract key for a room (useful for debugging):
+Show the contract key for a board (useful for debugging):
 ```bash
-river debug contract-key <room-owner-key>
+river debug contract-key <board-owner-key>
 ```
 
 Monitor Freenet logs while testing:
@@ -124,7 +124,7 @@ tail -f ~/freenet.log | grep -E "(River|contract|WebSocket)"
 
 Check JSON output for scripting:
 ```bash
-river -f json room create --name "Test" --nickname "User"
+river -f json board create --name "Test" --nickname "User"
 ```
 
 ### Expected Behavior
@@ -144,7 +144,7 @@ When working correctly:
 
 - River uses CBOR serialization for contract state
 - Contracts are WASM modules that validate state changes
-- Each room has a unique contract key derived from the owner's public key
+- Each board has a unique contract key derived from the owner's public key
 - The CLI uses the same freenet-stdlib WebApi as the web UI
 
 ## Next Steps

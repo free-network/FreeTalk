@@ -10,7 +10,7 @@ mod example_data;
 mod invites;
 #[allow(dead_code)]
 mod pending_invites;
-mod room_data;
+mod board_data;
 pub mod signing;
 mod util;
 

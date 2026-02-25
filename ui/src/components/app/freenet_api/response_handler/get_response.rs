@@ -1,26 +1,26 @@
 use crate::components::app::freenet_api::error::SynchronizerError;
-use crate::components::app::freenet_api::room_synchronizer::RoomSynchronizer;
+use crate::components::app::freenet_api::board_synchronizer::BoardSynchronizer;
 use crate::components::app::notifications::mark_initial_sync_complete;
-use crate::components::app::sync_info::{RoomSyncStatus, SYNC_INFO};
-use crate::components::app::{CURRENT_ROOM, PENDING_INVITES, ROOMS};
-use crate::invites::PendingRoomStatus;
-use crate::room_data::RoomData;
+use crate::components::app::sync_info::{BoardSyncStatus, SYNC_INFO};
+use crate::components::app::{CURRENT_BOARD, PENDING_INVITES, BOARDS};
+use crate::invites::PendingBoardStatus;
+use crate::board_data::BoardData;
 use crate::util::ecies::{decrypt_secret_from_member_blob, decrypt_with_symmetric_key};
 use crate::util::{from_cbor_slice, owner_vk_to_contract_key};
 use dioxus::logger::tracing::{error, info, warn};
 use dioxus::prelude::ReadableExt;
 use freenet_scaffold::ComposableState;
 use freenet_stdlib::prelude::ContractKey;
-use river_core::room_state::member::MemberId;
-use river_core::room_state::member_info::{AuthorizedMemberInfo, MemberInfo};
-use river_core::room_state::message::{MessageId, RoomMessageBody};
-use river_core::room_state::privacy::{PrivacyMode, SealedBytes};
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1};
+use river_core::board_state::member::MemberId;
+use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
+use river_core::board_state::message::{MessageId, BoardMessageBody};
+use river_core::board_state::privacy::{PrivacyMode, SealedBytes};
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1};
 use std::collections::HashMap;
 use x25519_dalek::PublicKey as X25519PublicKey;
 
 pub async fn handle_get_response(
-    room_synchronizer: &mut RoomSynchronizer,
+    board_synchronizer: &mut BoardSynchronizer,
     key: ContractKey,
     _contract: Vec<u8>,
     state: Vec<u8>,
@@ -55,13 +55,13 @@ pub async fn handle_get_response(
         }
         drop(pending_invites);
 
-        // If not in pending invites, try ROOMS (for refresh after suspension)
+        // If not in pending invites, try boards (for refresh after suspension)
         if found_owner_vk.is_none() {
-            let rooms = ROOMS.read();
-            for (owner_key, room_data) in rooms.map.iter() {
-                if room_data.contract_key.id() == key.id() {
+            let boards = BOARDS.read();
+            for (owner_key, board_data) in boards.map.iter() {
+                if board_data.contract_key.id() == key.id() {
                     info!(
-                        "Found matching owner key in existing rooms: {:?}",
+                        "Found matching owner key in existing boards: {:?}",
                         MemberId::from(*owner_key)
                     );
                     found_owner_vk = Some(*owner_key);
@@ -75,14 +75,14 @@ pub async fn handle_get_response(
         owner_vk
     };
 
-    // Now check if this is for a pending invitation or an existing room needing refresh
+    // Now check if this is for a pending invitation or an existing board needing refresh
     if let Some(owner_vk) = owner_vk {
         let is_pending_invite = PENDING_INVITES.read().map.contains_key(&owner_vk);
-        let is_existing_room = ROOMS.read().map.contains_key(&owner_vk);
+        let is_existing_board = BOARDS.read().map.contains_key(&owner_vk);
 
         if is_pending_invite {
             info!("This is a subscription for a pending invitation, adding state");
-            let retrieved_state: ChatRoomStateV1 = from_cbor_slice::<ChatRoomStateV1>(&state);
+            let retrieved_state: ChatBoardStateV1 = from_cbor_slice::<ChatBoardStateV1>(&state);
 
             // Get the pending invite data once to avoid multiple reads
             let (self_sk, authorized_member, preferred_nickname) = {
@@ -98,20 +98,20 @@ pub async fn handle_get_response(
             // Prepare the member ID for checking
             let member_id: MemberId = authorized_member.member.member_vk.into();
 
-            // Update the room data
-            ROOMS.with_mut(|rooms| {
-                // Get the entry for this room
-                let entry = rooms.map.entry(owner_vk);
+            // Update the board data
+            BOARDS.with_mut(|boards| {
+                // Get the entry for this board
+                let entry = boards.map.entry(owner_vk);
 
                 // Check if this is a new entry before inserting
                 let is_new_entry = matches!(entry, std::collections::hash_map::Entry::Vacant(_));
 
-                // Insert or get the existing room data
-                let room_data = entry.or_insert_with(|| {
-                    // Create new room data if it doesn't exist
-                    RoomData {
+                // Insert or get the existing board data
+                let board_data = entry.or_insert_with(|| {
+                    // Create new board data if it doesn't exist
+                    BoardData {
                         owner_vk,
-                        room_state: retrieved_state.clone(),
+                        board_state: retrieved_state.clone(),
                         self_sk: self_sk.clone(),
                         contract_key: key,
                         last_read_message_id: None,
@@ -125,36 +125,36 @@ pub async fn handle_get_response(
                     }
                 });
 
-                // If the room already existed, update self_sk and merge state
+                // If the board already existed, update self_sk and merge state
                 if !is_new_entry {
-                    // Only update self_sk if the user is NOT the room owner,
+                    // Only update self_sk if the user is NOT the board owner,
                     // to avoid stripping owner privileges
-                    if room_data.self_sk.verifying_key() != owner_vk {
-                        room_data.self_sk = self_sk.clone();
+                    if board_data.self_sk.verifying_key() != owner_vk {
+                        board_data.self_sk = self_sk.clone();
                         // Reset migration flag so the new key gets migrated
-                        room_data.key_migrated_to_delegate = false;
+                        board_data.key_migrated_to_delegate = false;
                     }
 
                     // Create parameters for merge
-                    let params = ChatRoomParametersV1 { owner: owner_vk };
+                    let params = ChatBoardParametersV1 { owner: owner_vk };
 
                     // Clone current state to avoid borrow issues during merge
-                    let current_state = room_data.room_state.clone();
+                    let current_state = board_data.board_state.clone();
 
                     // Merge the retrieved state into the existing state
-                    room_data
-                        .room_state
+                    board_data
+                        .board_state
                         .merge(&current_state, &params, &retrieved_state)
-                        .expect("Failed to merge room states");
+                        .expect("Failed to merge board states");
                 }
 
-                // Decrypt ALL room secret versions if this is a private room
-                if room_data.room_state.configuration.configuration.privacy_mode == PrivacyMode::Private {
-                    let current_version = room_data.room_state.secrets.current_version;
+                // Decrypt ALL board secret versions if this is a private board
+                if board_data.board_state.configuration.configuration.privacy_mode == PrivacyMode::Private {
+                    let current_version = board_data.board_state.secrets.current_version;
 
                     // Extract encrypted secret data to avoid borrow issues
-                    let member_secrets: Vec<_> = room_data
-                        .room_state
+                    let member_secrets: Vec<_> = board_data
+                        .board_state
                         .secrets
                         .encrypted_secrets
                         .iter()
@@ -181,25 +181,25 @@ pub async fn handle_get_response(
                                 &self_sk,
                             ) {
                                 Ok(decrypted_secret) => {
-                                    info!("Successfully decrypted room secret version {} for member {:?}", version, member_id);
-                                    room_data.set_secret(decrypted_secret, version);
+                                    info!("Successfully decrypted board secret version {} for member {:?}", version, member_id);
+                                    board_data.set_secret(decrypted_secret, version);
                                 }
                                 Err(e) => {
-                                    warn!("Failed to decrypt room secret version {}: {}", version, e);
+                                    warn!("Failed to decrypt board secret version {}: {}", version, e);
                                 }
                             }
                         }
                     }
 
                     // Ensure current_secret_version is set to the actual current version
-                    room_data.current_secret_version = Some(current_version);
+                    board_data.current_secret_version = Some(current_version);
                 }
 
-                // Set the member's nickname in member_info regardless of whether they were already in the room
+                // Set the member's nickname in member_info regardless of whether they were already in the board
                 // This ensures the member has corresponding MemberInfo even if they were already a member
-                let preferred_nickname_sealed = if room_data.room_state.configuration.configuration.privacy_mode == PrivacyMode::Private {
-                    // For private rooms, encrypt the nickname with the room secret
-                    if let Some((secret, version)) = room_data.get_secret() {
+                let preferred_nickname_sealed = if board_data.board_state.configuration.configuration.privacy_mode == PrivacyMode::Private {
+                    // For private boards, encrypt the nickname with the board secret
+                    if let Some((secret, version)) = board_data.get_secret() {
                         use crate::util::ecies::encrypt_with_symmetric_key;
                         let (ciphertext, nonce) = encrypt_with_symmetric_key(secret, preferred_nickname.as_bytes());
                         SealedBytes::Private {
@@ -209,7 +209,7 @@ pub async fn handle_get_response(
                             declared_len_bytes: preferred_nickname.len() as u32,
                         }
                     } else {
-                        warn!("Private room but no secret available for encrypting nickname, using public");
+                        warn!("Private board but no secret available for encrypting nickname, using public");
                         SealedBytes::public(preferred_nickname.clone().into_bytes())
                     }
                 } else {
@@ -226,37 +226,37 @@ pub async fn handle_get_response(
                     AuthorizedMemberInfo::new_with_member_key(member_info.clone(), &self_sk);
 
                 // Store membership credentials for future rejoin.
-                // We do NOT apply the member to room_state here — membership
+                // We do NOT apply the member to board_state here — membership
                 // is published atomically with the first message to avoid
                 // post_apply_cleanup pruning a member with no messages.
-                room_data.self_authorized_member = Some(authorized_member.clone());
-                room_data.self_member_info = Some(authorized_member_info);
+                board_data.self_authorized_member = Some(authorized_member.clone());
+                board_data.self_member_info = Some(authorized_member_info);
                 // Capture invite chain from current state
-                if let Ok(chain) = room_data.room_state.members.get_invite_chain(
+                if let Ok(chain) = board_data.board_state.members.get_invite_chain(
                     &authorized_member,
-                    &ChatRoomParametersV1 { owner: owner_vk },
+                    &ChatBoardParametersV1 { owner: owner_vk },
                 ) {
-                    room_data.invite_chain = chain;
+                    board_data.invite_chain = chain;
                 }
 
                 // Rebuild actions_state from action messages (edit, delete, reaction)
                 // This is needed because actions_state is #[serde(skip)] and not serialized
-                let is_private = room_data.room_state.configuration.configuration.privacy_mode
+                let is_private = board_data.board_state.configuration.configuration.privacy_mode
                     == PrivacyMode::Private;
                 if is_private {
                     // Decrypt all private action messages using version-aware lookup
-                    let decrypted_actions: HashMap<MessageId, Vec<u8>> = room_data
-                        .room_state
+                    let decrypted_actions: HashMap<MessageId, Vec<u8>> = board_data
+                        .board_state
                         .recent_messages
                         .messages
                         .iter()
                         .filter(|msg| msg.message.content.is_action())
                         .filter_map(|msg| {
-                            if let RoomMessageBody::Private { ciphertext, nonce, secret_version, .. } =
+                            if let BoardMessageBody::Private { ciphertext, nonce, secret_version, .. } =
                                 &msg.message.content
                             {
                                 // Look up the secret for this message's version
-                                room_data.get_secret_for_version(*secret_version)
+                                board_data.get_secret_for_version(*secret_version)
                                     .and_then(|secret| {
                                         decrypt_with_symmetric_key(secret, ciphertext, nonce)
                                             .ok()
@@ -268,45 +268,45 @@ pub async fn handle_get_response(
                         })
                         .collect();
 
-                    room_data
-                        .room_state
+                    board_data
+                        .board_state
                         .recent_messages
                         .rebuild_actions_state_with_decrypted(&decrypted_actions);
                 } else {
-                    // Public room - rebuild from public action messages
-                    room_data
-                        .room_state
+                    // Public board - rebuild from public action messages
+                    board_data
+                        .board_state
                         .recent_messages
                         .rebuild_actions_state();
                 }
             });
 
-            // Make sure SYNC_INFO is properly set up for this room
+            // Make sure SYNC_INFO is properly set up for this board
             SYNC_INFO.with_mut(|sync_info| {
-                // Register the room if it wasn't already registered
-                sync_info.register_new_room(owner_vk);
+                // Register the board if it wasn't already registered
+                sync_info.register_new_board(owner_vk);
 
                 // DO NOT update the last_synced_state here
-                // This will ensure the room is marked as needing an update in the next synchronization
+                // This will ensure the board is marked as needing an update in the next synchronization
 
                 // Update the sync status
-                sync_info.update_sync_status(&owner_vk, RoomSyncStatus::Subscribed);
+                sync_info.update_sync_status(&owner_vk, BoardSyncStatus::Subscribed);
             });
 
             // Now subscribe to the contract
-            let subscribe_result = room_synchronizer.subscribe_to_contract(&key).await;
+            let subscribe_result = board_synchronizer.subscribe_to_contract(&key).await;
 
             if let Err(e) = subscribe_result {
                 error!("Failed to subscribe to contract after GET: {}", e);
                 // Update the sync status to error
                 SYNC_INFO
                     .write()
-                    .update_sync_status(&owner_vk, RoomSyncStatus::Error(e.to_string()));
+                    .update_sync_status(&owner_vk, BoardSyncStatus::Error(e.to_string()));
             } else {
                 // Mark the invitation as subscribed and retrieved
                 PENDING_INVITES.with_mut(|pending_invites| {
                     if let Some(join) = pending_invites.map.get_mut(&owner_vk) {
-                        join.status = PendingRoomStatus::Subscribed;
+                        join.status = PendingBoardStatus::Subscribed;
                     }
                 });
 
@@ -333,54 +333,54 @@ pub async fn handle_get_response(
 
                 window.dispatch_event(&event).unwrap();
 
-                // Set the current room to the newly accepted room
-                CURRENT_ROOM.with_mut(|current_room| {
-                    current_room.owner_key = Some(owner_vk);
+                // Set the current board to the newly accepted board
+                CURRENT_BOARD.with_mut(|current_board| {
+                    current_board.owner_key = Some(owner_vk);
                 });
 
-                // Migrate the signing key to delegate for this new room
+                // Migrate the signing key to delegate for this new board
                 let signing_key_clone = self_sk.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    let room_key = owner_vk.to_bytes();
+                    let board_key = owner_vk.to_bytes();
                     let migrated =
-                        crate::signing::migrate_signing_key(room_key, &signing_key_clone).await;
+                        crate::signing::migrate_signing_key(board_key, &signing_key_clone).await;
                     if migrated {
-                        ROOMS.with_mut(|rooms| {
-                            if let Some(room_data) = rooms.map.get_mut(&owner_vk) {
-                                room_data.key_migrated_to_delegate = true;
-                                info!("Signing key migrated to delegate for new room");
+                        BOARDS.with_mut(|boards| {
+                            if let Some(board_data) = boards.map.get_mut(&owner_vk) {
+                                board_data.key_migrated_to_delegate = true;
+                                info!("Signing key migrated to delegate for new board");
                             }
                         });
                     }
                 });
 
-                // Mark room as needing sync so it gets saved to delegate storage.
-                // We do NOT trigger ProcessRooms because we haven't modified the
-                // room state — membership will be published with the first message.
+                // Mark board as needing sync so it gets saved to delegate storage.
+                // We do NOT trigger ProcessBoards because we haven't modified the
+                // board state — membership will be published with the first message.
                 use crate::components::app::NEEDS_SYNC;
                 NEEDS_SYNC.write().insert(owner_vk);
             }
-        } else if is_existing_room {
-            // This is a refresh GET for an already-subscribed room (e.g., after wake from suspension)
-            info!("Processing GET response for existing room (refresh after suspension)");
-            let retrieved_state: ChatRoomStateV1 = from_cbor_slice::<ChatRoomStateV1>(&state);
+        } else if is_existing_board {
+            // This is a refresh GET for an already-subscribed board (e.g., after wake from suspension)
+            info!("Processing GET response for existing board (refresh after suspension)");
+            let retrieved_state: ChatBoardStateV1 = from_cbor_slice::<ChatBoardStateV1>(&state);
 
-            ROOMS.with_mut(|rooms| {
-                if let Some(room_data) = rooms.map.get_mut(&owner_vk) {
+            BOARDS.with_mut(|boards| {
+                if let Some(board_data) = boards.map.get_mut(&owner_vk) {
                     // Create parameters for merge
-                    let params = ChatRoomParametersV1 { owner: owner_vk };
+                    let params = ChatBoardParametersV1 { owner: owner_vk };
 
                     // Clone current state to avoid borrow issues during merge
-                    let current_state = room_data.room_state.clone();
+                    let current_state = board_data.board_state.clone();
 
                     // Merge the retrieved state into the existing state
-                    match room_data
-                        .room_state
+                    match board_data
+                        .board_state
                         .merge(&current_state, &params, &retrieved_state)
                     {
                         Ok(_) => {
                             info!(
-                                "Successfully merged refreshed state for room {:?}",
+                                "Successfully merged refreshed state for board {:?}",
                                 MemberId::from(owner_vk)
                             );
                             // Note: we intentionally do NOT record receive times here.
@@ -389,12 +389,12 @@ pub async fn handle_get_response(
                             // to our node. Only subscription UPDATE notifications
                             // capture the true arrival moment.
 
-                            // Migration: capture self membership data for old rooms
-                            room_data.capture_self_membership_data(&params);
+                            // Migration: capture self membership data for old boards
+                            board_data.capture_self_membership_data(&params);
                         }
                         Err(e) => {
                             error!(
-                                "Failed to merge refreshed state for room {:?}: {}",
+                                "Failed to merge refreshed state for board {:?}: {}",
                                 MemberId::from(owner_vk),
                                 e
                             );
@@ -405,7 +405,7 @@ pub async fn handle_get_response(
 
             // Update sync info to reflect we received fresh state
             SYNC_INFO.with_mut(|sync_info| {
-                sync_info.update_sync_status(&owner_vk, RoomSyncStatus::Subscribed);
+                sync_info.update_sync_status(&owner_vk, BoardSyncStatus::Subscribed);
             });
         }
     }

@@ -6,22 +6,22 @@ use colored::Colorize;
 
 #[derive(Subcommand)]
 pub enum MemberCommands {
-    /// List members of a room
+    /// List members of a board
     List {
         /// Board ID (owner key in base58)
-        room_id: String,
+        board_id: String,
     },
-    /// Set your nickname in a room
+    /// Set your nickname in a board
     SetNickname {
         /// Board ID (owner key in base58)
-        room_id: String,
+        board_id: String,
         /// Your new nickname
         nickname: String,
     },
-    /// Ban a member from a room
+    /// Ban a member from a board
     Ban {
         /// Board ID (owner key in base58)
-        room_id: String,
+        board_id: String,
         /// Member ID to ban (8-character short ID from member list)
         member_id: String,
     },
@@ -29,28 +29,28 @@ pub enum MemberCommands {
 
 pub async fn execute(command: MemberCommands, api: ApiClient, format: OutputFormat) -> Result<()> {
     match command {
-        MemberCommands::List { room_id } => {
+        MemberCommands::List { board_id } => {
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Listing members of room: {}", room_id);
+                eprintln!("Listing members of board: {}", board_id);
             }
 
-            // Parse the room owner key
-            let owner_key_bytes = bs58::decode(&room_id)
+            // Parse the board owner key
+            let owner_key_bytes = bs58::decode(&board_id)
                 .into_vec()
-                .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+                .map_err(|e| anyhow!("Invalid board ID: {}", e))?;
             if owner_key_bytes.len() != 32 {
-                return Err(anyhow!("Invalid room ID: expected 32 bytes"));
+                return Err(anyhow!("Invalid board ID: expected 32 bytes"));
             }
             let mut key_array = [0u8; 32];
             key_array.copy_from_slice(&owner_key_bytes);
             let owner_vk = ed25519_dalek::VerifyingKey::from_bytes(&key_array)
-                .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+                .map_err(|e| anyhow!("Invalid board ID: {}", e))?;
 
-            // Get the room state
-            let room_state = api.get_room(&owner_vk, false).await?;
+            // Get the board state
+            let board_state = api.get_board(&owner_vk, false).await?;
 
             // Collect member info
-            let members: Vec<_> = room_state
+            let members: Vec<_> = board_state
                 .member_info
                 .member_info
                 .iter()
@@ -64,7 +64,7 @@ pub async fn execute(command: MemberCommands, api: ApiClient, format: OutputForm
             match format {
                 OutputFormat::Human => {
                     if members.is_empty() {
-                        println!("No members found in room.");
+                        println!("No members found in board.");
                     } else {
                         println!("\n{} member(s) found:\n", members.len());
                         for (member_id, nickname) in members {
@@ -88,22 +88,22 @@ pub async fn execute(command: MemberCommands, api: ApiClient, format: OutputForm
             }
             Ok(())
         }
-        MemberCommands::SetNickname { room_id, nickname } => {
+        MemberCommands::SetNickname { board_id, nickname } => {
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Setting nickname to '{}' in room: {}", nickname, room_id);
+                eprintln!("Setting nickname to '{}' in board: {}", nickname, board_id);
             }
 
-            // Parse the room owner key
-            let owner_key_bytes = bs58::decode(&room_id)
+            // Parse the board owner key
+            let owner_key_bytes = bs58::decode(&board_id)
                 .into_vec()
-                .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+                .map_err(|e| anyhow!("Invalid board ID: {}", e))?;
             if owner_key_bytes.len() != 32 {
-                return Err(anyhow!("Invalid room ID: expected 32 bytes"));
+                return Err(anyhow!("Invalid board ID: expected 32 bytes"));
             }
             let mut key_array = [0u8; 32];
             key_array.copy_from_slice(&owner_key_bytes);
             let owner_vk = ed25519_dalek::VerifyingKey::from_bytes(&key_array)
-                .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+                .map_err(|e| anyhow!("Invalid board ID: {}", e))?;
 
             match api.set_nickname(&owner_vk, nickname.clone()).await {
                 Ok(()) => match format {
@@ -127,22 +127,22 @@ pub async fn execute(command: MemberCommands, api: ApiClient, format: OutputForm
             }
             Ok(())
         }
-        MemberCommands::Ban { room_id, member_id } => {
+        MemberCommands::Ban { board_id, member_id } => {
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Banning member '{}' from room: {}", member_id, room_id);
+                eprintln!("Banning member '{}' from board: {}", member_id, board_id);
             }
 
-            // Parse the room owner key
-            let owner_key_bytes = bs58::decode(&room_id)
+            // Parse the board owner key
+            let owner_key_bytes = bs58::decode(&board_id)
                 .into_vec()
-                .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+                .map_err(|e| anyhow!("Invalid board ID: {}", e))?;
             if owner_key_bytes.len() != 32 {
-                return Err(anyhow!("Invalid room ID: expected 32 bytes"));
+                return Err(anyhow!("Invalid board ID: expected 32 bytes"));
             }
             let mut key_array = [0u8; 32];
             key_array.copy_from_slice(&owner_key_bytes);
             let owner_vk = ed25519_dalek::VerifyingKey::from_bytes(&key_array)
-                .map_err(|e| anyhow!("Invalid room ID: {}", e))?;
+                .map_err(|e| anyhow!("Invalid board ID: {}", e))?;
 
             match api.ban_member(&owner_vk, &member_id).await {
                 Ok(()) => match format {

@@ -1,8 +1,8 @@
-use crate::room_state::member::MemberId;
-use crate::room_state::privacy::{PrivacyMode, RoomDisplayMetadata};
-use crate::room_state::ChatRoomParametersV1;
+use crate::board_state::member::MemberId;
+use crate::board_state::privacy::{PrivacyMode, BoardDisplayMetadata};
+use crate::board_state::ChatBoardParametersV1;
 use crate::util::truncated_base64;
-use crate::ChatRoomStateV1;
+use crate::ChatBoardStateV1;
 use ed25519_dalek::{Signature, SignatureError, Signer, SigningKey, Verifier, VerifyingKey};
 use freenet_scaffold::util::{fast_hash, FastHash};
 use freenet_scaffold::ComposableState;
@@ -16,10 +16,10 @@ pub struct AuthorizedConfigurationV1 {
 }
 
 impl ComposableState for AuthorizedConfigurationV1 {
-    type ParentState = ChatRoomStateV1;
+    type ParentState = ChatBoardStateV1;
     type Summary = u32;
     type Delta = AuthorizedConfigurationV1;
-    type Parameters = ChatRoomParametersV1;
+    type Parameters = ChatBoardParametersV1;
 
     fn verify(
         &self,
@@ -84,27 +84,27 @@ impl ComposableState for AuthorizedConfigurationV1 {
                 || delta.configuration.max_nickname_size == 0
                 || delta.configuration.max_members == 0
                 || delta.configuration.max_admins == 0
-                || delta.configuration.max_room_name == 0
-                || delta.configuration.max_room_description == 0
+                || delta.configuration.max_board_name == 0
+                || delta.configuration.max_board_description == 0
             {
                 return Err("Invalid configuration values".to_string());
             }
 
             // Validate display metadata declared lengths
-            if delta.configuration.display.name.declared_len() > delta.configuration.max_room_name {
+            if delta.configuration.display.name.declared_len() > delta.configuration.max_board_name {
                 return Err(format!(
-                    "Board name declared length {} exceeds max_room_name {}",
+                    "Board name declared length {} exceeds max_board_name {}",
                     delta.configuration.display.name.declared_len(),
-                    delta.configuration.max_room_name
+                    delta.configuration.max_board_name
                 ));
             }
 
             if let Some(desc) = &delta.configuration.display.description {
-                if desc.declared_len() > delta.configuration.max_room_description {
+                if desc.declared_len() > delta.configuration.max_board_description {
                     return Err(format!(
-                        "Board description declared length {} exceeds max_room_description {}",
+                        "Board description declared length {} exceeds max_board_description {}",
                         desc.declared_len(),
-                        delta.configuration.max_room_description
+                        delta.configuration.max_board_description
                     ));
                 }
             }
@@ -113,7 +113,7 @@ impl ComposableState for AuthorizedConfigurationV1 {
             if delta.configuration.privacy_mode == PrivacyMode::Private
                 && delta.configuration.display.name.is_public()
             {
-                return Err("Private room must have encrypted display metadata".to_string());
+                return Err("Private board must have encrypted display metadata".to_string());
             }
 
             // If all checks pass, apply the delta
@@ -176,15 +176,15 @@ impl Default for Configuration {
             owner_member_id: MemberId(FastHash(0)), // Default value, should be overwritten
             configuration_version: 1,
             privacy_mode: PrivacyMode::default(),
-            display: RoomDisplayMetadata::default(),
+            display: BoardDisplayMetadata::default(),
             max_recent_messages: 100,
             max_user_bans: 10,
             max_message_size: 1000,
             max_nickname_size: 50,
             max_members: 200,
             max_admins: 40,
-            max_room_name: 100,
-            max_room_description: 500,
+            max_board_name: 100,
+            max_board_description: 500,
         }
     }
 }
@@ -206,15 +206,15 @@ pub struct Configuration {
     pub owner_member_id: MemberId,
     pub configuration_version: u32,
     pub privacy_mode: PrivacyMode,
-    pub display: RoomDisplayMetadata,
+    pub display: BoardDisplayMetadata,
     pub max_recent_messages: usize,
     pub max_user_bans: usize,
     pub max_message_size: usize,
     pub max_nickname_size: usize,
     pub max_members: usize,
     pub max_admins: usize,
-    pub max_room_name: usize,
-    pub max_room_description: usize,
+    pub max_board_name: usize,
+    pub max_board_description: usize,
 }
 
 #[cfg(test)]
@@ -234,11 +234,11 @@ mod tests {
             .verify_signature(&owner_verifying_key)
             .is_ok());
 
-        let parent_state = ChatRoomStateV1 {
+        let parent_state = ChatBoardStateV1 {
             configuration: authorized_configuration.clone(),
-            ..ChatRoomStateV1::default()
+            ..ChatBoardStateV1::default()
         };
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -261,11 +261,11 @@ mod tests {
             .verify_signature(&wrong_owner_verifying_key)
             .is_err());
 
-        let parent_state = ChatRoomStateV1 {
+        let parent_state = ChatBoardStateV1 {
             configuration: authorized_configuration.clone(),
-            ..ChatRoomStateV1::default()
+            ..ChatBoardStateV1::default()
         };
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: wrong_owner_verifying_key,
         };
 
@@ -282,11 +282,11 @@ mod tests {
         let authorized_configuration =
             AuthorizedConfigurationV1::new(configuration.clone(), &owner_signing_key);
 
-        let parent_state = ChatRoomStateV1 {
+        let parent_state = ChatBoardStateV1 {
             configuration: authorized_configuration.clone(),
             ..Default::default()
         };
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -304,11 +304,11 @@ mod tests {
         let authorized_configuration =
             AuthorizedConfigurationV1::new(configuration.clone(), &owner_signing_key);
 
-        let parent_state = ChatRoomStateV1 {
+        let parent_state = ChatBoardStateV1 {
             configuration: authorized_configuration.clone(),
             ..Default::default()
         };
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -338,11 +338,11 @@ mod tests {
         let old_authorized_configuration =
             AuthorizedConfigurationV1::new(old_configuration.clone(), &owner_signing_key);
 
-        let parent_state = ChatRoomStateV1 {
+        let parent_state = ChatBoardStateV1 {
             configuration: old_authorized_configuration.clone(),
             ..Default::default()
         };
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -362,11 +362,11 @@ mod tests {
         let mut authorized_configuration =
             AuthorizedConfigurationV1::new(configuration.clone(), &owner_signing_key);
 
-        let parent_state = ChatRoomStateV1 {
+        let parent_state = ChatBoardStateV1 {
             configuration: authorized_configuration.clone(),
             ..Default::default()
         };
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -398,11 +398,11 @@ mod tests {
 
         let orig_authorized_configuration = authorized_configuration.clone();
 
-        let parent_state = ChatRoomStateV1 {
+        let parent_state = ChatBoardStateV1 {
             configuration: authorized_configuration.clone(),
             ..Default::default()
         };
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -438,11 +438,11 @@ mod tests {
         let mut authorized_configuration =
             AuthorizedConfigurationV1::new(configuration.clone(), &owner_signing_key);
 
-        let parent_state = ChatRoomStateV1 {
+        let parent_state = ChatBoardStateV1 {
             configuration: authorized_configuration.clone(),
             ..Default::default()
         };
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -470,11 +470,11 @@ mod tests {
         let mut authorized_configuration =
             AuthorizedConfigurationV1::new(configuration.clone(), &owner_signing_key);
 
-        let parent_state = ChatRoomStateV1 {
+        let parent_state = ChatBoardStateV1 {
             configuration: authorized_configuration.clone(),
             ..Default::default()
         };
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 

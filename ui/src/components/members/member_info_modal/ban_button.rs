@@ -1,39 +1,39 @@
-use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, NEEDS_SYNC, ROOMS};
-use crate::room_data::RoomData;
+use crate::components::app::{CURRENT_BOARD, MEMBER_INFO_MODAL, NEEDS_SYNC, BOARDS};
+use crate::board_data::BoardData;
 use crate::util::get_current_system_time;
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use freenet_scaffold::ComposableState;
-use river_core::room_state::ban::{AuthorizedUserBan, UserBan};
-use river_core::room_state::member::MemberId;
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1Delta};
+use river_core::board_state::ban::{AuthorizedUserBan, UserBan};
+use river_core::board_state::member::MemberId;
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1Delta};
 use wasm_bindgen_futures::spawn_local;
 
 #[component]
 pub fn BanButton(member_to_ban: MemberId, is_downstream: bool, nickname: String) -> Element {
     // Memos
-    let current_room_data_signal: Memo<Option<RoomData>> = use_memo(move || {
-        CURRENT_ROOM
+    let current_board_data_signal: Memo<Option<BoardData>> = use_memo(move || {
+        CURRENT_BOARD
             .read()
             .owner_key
             .as_ref()
-            .and_then(|key| ROOMS.read().map.get(key).cloned())
+            .and_then(|key| BOARDS.read().map.get(key).cloned())
     });
 
     let mut show_confirmation = use_signal(|| false);
 
     let execute_ban = move |_| {
-        if let (Some(current_room), Some(room_data)) = (
-            CURRENT_ROOM.read().owner_key,
-            current_room_data_signal.read().as_ref(),
+        if let (Some(current_board), Some(board_data)) = (
+            CURRENT_BOARD.read().owner_key,
+            current_board_data_signal.read().as_ref(),
         ) {
-            let room_key = room_data.room_key();
-            let self_sk = room_data.self_sk.clone();
-            let room_state_clone = room_data.room_state.clone();
+            let board_key = board_data.board_key();
+            let self_sk = board_data.self_sk.clone();
+            let board_state_clone = board_data.board_state.clone();
             let banned_by = MemberId::from(&self_sk.verifying_key());
 
             let ban = UserBan {
-                owner_member_id: MemberId::from(&current_room),
+                owner_member_id: MemberId::from(&current_board),
                 banned_at: get_current_system_time(),
                 banned_user: member_to_ban,
             };
@@ -53,21 +53,21 @@ pub fn BanButton(member_to_ban: MemberId, is_downstream: bool, nickname: String)
 
                 // Sign using delegate with fallback to local signing
                 let signature =
-                    crate::signing::sign_ban_with_fallback(room_key, ban_bytes, &self_sk).await;
+                    crate::signing::sign_ban_with_fallback(board_key, ban_bytes, &self_sk).await;
 
                 let authorized_ban = AuthorizedUserBan::with_signature(ban, banned_by, signature);
 
-                let delta = ChatRoomStateV1Delta {
+                let delta = ChatBoardStateV1Delta {
                     bans: Some(vec![authorized_ban]),
                     ..Default::default()
                 };
 
-                ROOMS.with_mut(|rooms| {
-                    if let Some(room_data_mut) = rooms.map.get_mut(&current_room) {
-                        if let Err(e) = room_data_mut.room_state.apply_delta(
-                            &room_state_clone,
-                            &ChatRoomParametersV1 {
-                                owner: current_room,
+                BOARDS.with_mut(|boards| {
+                    if let Some(board_data_mut) = boards.map.get_mut(&current_board) {
+                        if let Err(e) = board_data_mut.board_state.apply_delta(
+                            &board_state_clone,
+                            &ChatBoardParametersV1 {
+                                owner: current_board,
                             },
                             &Some(delta),
                         ) {
@@ -75,25 +75,25 @@ pub fn BanButton(member_to_ban: MemberId, is_downstream: bool, nickname: String)
                         } else {
                             info!("Successfully applied ban delta for member {:?}", member_to_ban);
 
-                            // If this is a private room and we're the owner, rotate the secret
+                            // If this is a private board and we're the owner, rotate the secret
                             // This ensures the banned member cannot decrypt future messages
-                            if room_data_mut.is_private() && room_data_mut.owner_vk == room_data_mut.self_sk.verifying_key() {
-                                info!("Private room - rotating secret after ban to ensure forward secrecy");
+                            if board_data_mut.is_private() && board_data_mut.owner_vk == board_data_mut.self_sk.verifying_key() {
+                                info!("Private board - rotating secret after ban to ensure forward secrecy");
 
-                                match room_data_mut.rotate_secret() {
+                                match board_data_mut.rotate_secret() {
                                     Ok(secrets_delta) => {
                                         info!("Secret rotated successfully after ban, applying delta");
 
                                         // Apply the secrets delta
-                                        let current_state = room_data_mut.room_state.clone();
-                                        let rotation_delta = ChatRoomStateV1Delta {
+                                        let current_state = board_data_mut.board_state.clone();
+                                        let rotation_delta = ChatBoardStateV1Delta {
                                             secrets: Some(secrets_delta),
                                             ..Default::default()
                                         };
 
-                                        if let Err(e) = room_data_mut.room_state.apply_delta(
+                                        if let Err(e) = board_data_mut.board_state.apply_delta(
                                             &current_state,
-                                            &ChatRoomParametersV1 { owner: current_room },
+                                            &ChatBoardParametersV1 { owner: current_board },
                                             &Some(rotation_delta),
                                         ) {
                                             error!("Failed to apply rotation delta after ban: {}", e);
@@ -110,9 +110,9 @@ pub fn BanButton(member_to_ban: MemberId, is_downstream: bool, nickname: String)
                     }
                 });
 
-                // Mark room as needing sync to propagate ban and rotation
-                NEEDS_SYNC.write().insert(current_room);
-                info!("Marked room for synchronization after ban");
+                // Mark board as needing sync to propagate ban and rotation
+                NEEDS_SYNC.write().insert(current_board);
+                info!("Marked board for synchronization after ban");
             });
         }
     };

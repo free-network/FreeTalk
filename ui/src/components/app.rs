@@ -5,7 +5,7 @@ pub mod notifications;
 pub mod receive_times;
 pub mod sync_info;
 
-use super::{admin_view::AdminView, conversation::Conversation, members::MemberList, room_list::RoomList, top_bar::TopBar};
+use super::{admin_view::AdminView, conversation::Conversation, members::MemberList, board_list::BoardList, top_bar::TopBar};
 use crate::components::app::document_title::DocumentTitleUpdater;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatus;
@@ -13,17 +13,17 @@ use crate::components::app::freenet_api::FreenetSynchronizer;
 use crate::components::members::member_info_modal::MemberInfoModal;
 use crate::components::members::Invitation;
 use crate::components::posts_view::{PostsView, SinglePostView};
-use crate::components::room_list::create_room_modal::CreateRoomModal;
-use crate::components::room_list::edit_room_modal::EditRoomModal;
-use crate::components::room_list::receive_invitation_modal::ReceiveInvitationModal;
+use crate::components::board_list::create_board_modal::CreateBoardModal;
+use crate::components::board_list::edit_board_modal::EditBoardModal;
+use crate::components::board_list::receive_invitation_modal::ReceiveInvitationModal;
 use crate::invites::PendingInvites;
-use crate::room_data::{CurrentRoom, Rooms};
+use crate::board_data::{CurrentBoard, Boards};
 use dioxus::document::{Link, Stylesheet};
 use dioxus::logger::tracing::{debug, error, info};
 use dioxus::prelude::*;
 use ed25519_dalek::VerifyingKey;
 use freenet_stdlib::client_api::WebApi;
-use river_core::room_state::member::MemberId;
+use river_core::board_state::member::MemberId;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
 
@@ -35,27 +35,27 @@ pub enum Route {
     Home,
     #[route("/invite/:invite_code")]
     Invite { invite_code: String },
-    #[route("/room/:room_id")]
-    Posts { room_id: String },
-    #[route("/room/:room_id/post/:post_id")]
-    Post { room_id: String, post_id: String },
-    #[route("/room/:room_id/conversation")]
-    ConversationView { room_id: String },
-    #[route("/room/:room_id/admin")]
-    Admin { room_id: String },
+    #[route("/board/:board_id")]
+    Posts { board_id: String },
+    #[route("/board/:board_id/post/:post_id")]
+    Post { board_id: String, post_id: String },
+    #[route("/board/:board_id/conversation")]
+    ConversationView { board_id: String },
+    #[route("/board/:board_id/admin")]
+    Admin { board_id: String },
     #[route("/:..route")]
     NotFound { route: Vec<String> },
 }
 
-pub static ROOMS: GlobalSignal<Rooms> = Global::new(initial_rooms);
-pub static CURRENT_ROOM: GlobalSignal<CurrentRoom> =
-    Global::new(|| CurrentRoom { owner_key: None });
+pub static BOARDS: GlobalSignal<Boards> = Global::new(initial_boards);
+pub static CURRENT_BOARD: GlobalSignal<CurrentBoard> =
+    Global::new(|| CurrentBoard { owner_key: None });
 pub static MEMBER_INFO_MODAL: GlobalSignal<MemberInfoModalSignal> =
     Global::new(|| MemberInfoModalSignal { member: None });
-pub static EDIT_ROOM_MODAL: GlobalSignal<EditRoomModalSignal> =
-    Global::new(|| EditRoomModalSignal { room: None });
-pub static CREATE_ROOM_MODAL: GlobalSignal<CreateRoomModalSignal> =
-    Global::new(|| CreateRoomModalSignal { show: false });
+pub static EDIT_BOARD_MODAL: GlobalSignal<EditBoardModalSignal> =
+    Global::new(|| EditBoardModalSignal { board: None });
+pub static CREATE_BOARD_MODAL: GlobalSignal<CreateBoardModalSignal> =
+    Global::new(|| CreateBoardModalSignal { show: false });
 pub static PENDING_INVITES: GlobalSignal<PendingInvites> = Global::new(PendingInvites::new);
 pub static SYNC_STATUS: GlobalSignal<SynchronizerStatus> =
     Global::new(|| SynchronizerStatus::Connecting);
@@ -63,7 +63,7 @@ pub static SYNCHRONIZER: GlobalSignal<FreenetSynchronizer> = Global::new(Freenet
 pub static WEB_API: GlobalSignal<Option<WebApi>> = Global::new(|| None);
 pub static AUTH_TOKEN: GlobalSignal<Option<String>> = Global::new(|| None);
 
-// Tracks which rooms need to be synced due to USER actions (not network updates)
+// Tracks which boards need to be synced due to USER actions (not network updates)
 // This prevents infinite loops where network responses trigger more syncs
 pub static NEEDS_SYNC: GlobalSignal<std::collections::HashSet<VerifyingKey>> =
     Global::new(std::collections::HashSet::new);
@@ -96,43 +96,43 @@ pub fn App() -> Element {
         // The synchronizer is now started in the auth token effect
 
         // Watch NEEDS_SYNC signal for USER-initiated changes only
-        // This prevents infinite loops from network response updates to ROOMS
+        // This prevents infinite loops from network response updates to boards
         use_effect(move || {
-            let rooms_needing_sync = NEEDS_SYNC.read().clone();
+            let boards_needing_sync = NEEDS_SYNC.read().clone();
 
-            if !rooms_needing_sync.is_empty() {
+            if !boards_needing_sync.is_empty() {
                 info!(
-                    "User changes detected for {} rooms, triggering synchronization",
-                    rooms_needing_sync.len()
+                    "User changes detected for {} boards, triggering synchronization",
+                    boards_needing_sync.len()
                 );
 
                 // Get all the data we need upfront to avoid nested borrows
                 let message_sender = SYNCHRONIZER.read().get_message_sender();
-                let has_rooms = !ROOMS.read().map.is_empty();
+                let has_boards = !BOARDS.read().map.is_empty();
                 let has_invitations = !PENDING_INVITES.read().map.is_empty();
 
-                if has_rooms || has_invitations {
-                    info!("Sending ProcessRooms message to synchronizer, has_rooms={}, has_invitations={}", has_rooms, has_invitations);
+                if has_boards || has_invitations {
+                    info!("Sending ProcessBoards message to synchronizer, has_boards={}, has_invitations={}", has_boards, has_invitations);
 
-                    if let Err(e) = message_sender.unbounded_send(SynchronizerMessage::ProcessRooms)
+                    if let Err(e) = message_sender.unbounded_send(SynchronizerMessage::ProcessBoards)
                     {
-                        error!("Failed to send ProcessRooms message: {}", e);
+                        error!("Failed to send ProcessBoards message: {}", e);
                     } else {
-                        info!("ProcessRooms message sent successfully");
+                        info!("ProcessBoards message sent successfully");
 
                         // Clear the sync queue after successfully sending message
                         NEEDS_SYNC.write().clear();
                     }
 
-                    // Also save rooms to delegate when they change
+                    // Also save boards to delegate when they change
                     // Use spawn_local to avoid blocking the UI thread
                     spawn_local(async {
-                        if let Err(e) = chat_delegate::save_rooms_to_delegate().await {
-                            error!("Failed to save rooms to delegate: {}", e);
+                        if let Err(e) = chat_delegate::save_boards_to_delegate().await {
+                            error!("Failed to save boards to delegate: {}", e);
                         }
                     });
                 } else {
-                    debug!("No rooms to synchronize");
+                    debug!("No boards to synchronize");
                     // Clear the queue even if there's nothing to sync
                     NEEDS_SYNC.write().clear();
                 }
@@ -150,18 +150,18 @@ pub fn App() -> Element {
         Stylesheet { href: asset!("/assets/main.css") }
 
         // Main layout with router
-        RoomList {}
+        BoardList {}
         TopBar {}
         Router::<Route> {}
         MemberList {}
-        EditRoomModal {}
+        EditBoardModal {}
         MemberInfoModal {}
-        CreateRoomModal {}
+        CreateBoardModal {}
         DocumentTitleUpdater {}
     }
 }
 
-/// Route component when no room is selected
+/// Route component when no board is selected
 #[component]
 fn Home() -> Element {
     rsx! {
@@ -199,29 +199,29 @@ fn Invite(invite_code: String) -> Element {
 
 /// Route component for posts list view
 #[component]
-fn Posts(room_id: String) -> Element {
-    sync_room_from_url(&room_id);
+fn Posts(board_id: String) -> Element {
+    sync_board_from_url(&board_id);
     rsx! { PostsView {} }
 }
 
 /// Route component for single post view
 #[component]
-fn Post(room_id: String, post_id: String) -> Element {
-    sync_room_from_url(&room_id);
+fn Post(board_id: String, post_id: String) -> Element {
+    sync_board_from_url(&board_id);
     rsx! { SinglePostView { post_id: post_id } }
 }
 
 /// Route component for conversation view
 #[component]
-fn ConversationView(room_id: String) -> Element {
-    sync_room_from_url(&room_id);
+fn ConversationView(board_id: String) -> Element {
+    sync_board_from_url(&board_id);
     rsx! { Conversation {} }
 }
 
 /// Route component for admin management view
 #[component]
-fn Admin(room_id: String) -> Element {
-    sync_room_from_url(&room_id);
+fn Admin(board_id: String) -> Element {
+    sync_board_from_url(&board_id);
     rsx! { AdminView {} }
 }
 
@@ -243,17 +243,17 @@ fn NotFound(route: Vec<String>) -> Element {
     }
 }
 
-/// Sync CURRENT_ROOM from URL room_id parameter
-fn sync_room_from_url(room_id: &str) {
-    // Parse room_id (base58-encoded VerifyingKey)
-    if let Ok(bytes) = bs58::decode(room_id).into_vec() {
+/// Sync CURRENT_BOARD from URL board_id parameter
+fn sync_board_from_url(board_id: &str) {
+    // Parse board_id (base58-encoded VerifyingKey)
+    if let Ok(bytes) = bs58::decode(board_id).into_vec() {
         if bytes.len() == 32 {
             if let Ok(vk) = VerifyingKey::from_bytes(&bytes.try_into().unwrap()) {
                 // Only update if different to avoid infinite loops
-                let current = CURRENT_ROOM.read().owner_key;
+                let current = CURRENT_BOARD.read().owner_key;
                 if current != Some(vk) {
-                    debug!("Syncing CURRENT_ROOM from URL: {}", room_id);
-                    *CURRENT_ROOM.write() = CurrentRoom { owner_key: Some(vk) };
+                    debug!("Syncing CURRENT_BOARD from URL: {}", board_id);
+                    *CURRENT_BOARD.write() = CurrentBoard { owner_key: Some(vk) };
                 }
             }
         }
@@ -261,24 +261,24 @@ fn sync_room_from_url(room_id: &str) {
 }
 
 #[cfg(not(feature = "example-data"))]
-fn initial_rooms() -> Rooms {
-    Rooms {
+fn initial_boards() -> Boards {
+    Boards {
         map: std::collections::HashMap::new(),
-        current_room_key: None,
-        migrated_rooms: Vec::new(),
+        current_board_key: None,
+        migrated_boards: Vec::new(),
     }
 }
 
 #[cfg(feature = "example-data")]
-fn initial_rooms() -> Rooms {
-    crate::example_data::create_example_rooms()
+fn initial_boards() -> Boards {
+    crate::example_data::create_example_boards()
 }
 
-pub struct EditRoomModalSignal {
-    pub room: Option<VerifyingKey>,
+pub struct EditBoardModalSignal {
+    pub board: Option<VerifyingKey>,
 }
 
-pub struct CreateRoomModalSignal {
+pub struct CreateBoardModalSignal {
     pub show: bool,
 }
 

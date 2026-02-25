@@ -1,19 +1,19 @@
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
-use crate::components::app::{Route, NEEDS_SYNC, PENDING_INVITES, ROOMS, SYNCHRONIZER};
+use crate::components::app::{Route, NEEDS_SYNC, PENDING_INVITES, BOARDS, SYNCHRONIZER};
 use crate::components::members::Invitation;
-use crate::invites::{PendingRoomJoin, PendingRoomStatus};
-use crate::room_data::Rooms;
+use crate::invites::{PendingBoardJoin, PendingBoardStatus};
+use crate::board_data::Boards;
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use ed25519_dalek::VerifyingKey;
-use river_core::room_state::member::MemberId;
+use river_core::board_state::member::MemberId;
 use wasm_bindgen::JsCast;
 
 /// Main component for the invitation modal
 #[component]
 pub fn ReceiveInvitationModal(invitation: Invitation) -> Element {
     let nav = navigator();
-    let room_key = invitation.room;
+    let board_key = invitation.board;
 
     // Listen for custom events from the FreenetSynchronizer
     use_effect(move || {
@@ -42,7 +42,7 @@ pub fn ReceiveInvitationModal(invitation: Invitation) -> Element {
                             // Use with_mut for atomic update
                             PENDING_INVITES.with_mut(|pending| {
                                 if let Some(join) = pending.map.get_mut(&key) {
-                                    join.status = PendingRoomStatus::Subscribed;
+                                    join.status = PendingBoardStatus::Subscribed;
                                     info!(
                                         "Updated pending invitation status to Subscribed for key: {:?}",
                                         key
@@ -70,13 +70,13 @@ pub fn ReceiveInvitationModal(invitation: Invitation) -> Element {
     let pending_status = PENDING_INVITES
         .read()
         .map
-        .get(&room_key)
+        .get(&board_key)
         .map(|join| join.status.clone());
 
-    if matches!(pending_status, Some(PendingRoomStatus::Subscribed)) {
-        // Room is ready, navigate to it
-        let room_id = bs58::encode(room_key.as_bytes()).into_string();
-        nav.push(Route::Posts { room_id });
+    if matches!(pending_status, Some(PendingBoardStatus::Subscribed)) {
+        // Board is ready, navigate to it
+        let board_id = bs58::encode(board_key.as_bytes()).into_string();
+        nav.push(Route::Posts { board_id });
         return rsx! {};
     }
 
@@ -104,26 +104,26 @@ pub fn ReceiveInvitationModal(invitation: Invitation) -> Element {
 /// Renders the content of the invitation modal based on the invitation data
 fn render_invitation_content(inv: Invitation) -> Element {
     let pending_invites = PENDING_INVITES.read();
-    let pending_status = pending_invites.map.get(&inv.room).map(|join| &join.status);
+    let pending_status = pending_invites.map.get(&inv.board).map(|join| &join.status);
 
     match pending_status {
-        Some(PendingRoomStatus::PendingSubscription) => render_pending_subscription_state(),
-        Some(PendingRoomStatus::Subscribing) => render_subscribing_state(),
-        Some(PendingRoomStatus::Error(e)) => render_error_state(e, inv.room),
-        Some(PendingRoomStatus::Subscribed) => {
-            // Room subscribed and retrieved successfully, navigate to it
-            render_subscribed_state(inv.room)
+        Some(PendingBoardStatus::PendingSubscription) => render_pending_subscription_state(),
+        Some(PendingBoardStatus::Subscribing) => render_subscribing_state(),
+        Some(PendingBoardStatus::Error(e)) => render_error_state(e, inv.board),
+        Some(PendingBoardStatus::Subscribed) => {
+            // Board subscribed and retrieved successfully, navigate to it
+            render_subscribed_state(inv.board)
         }
         None => render_invitation_options(inv),
     }
 }
 
-/// Renders the state when waiting to subscribe to room data
+/// Renders the state when waiting to subscribe to board data
 fn render_pending_subscription_state() -> Element {
     rsx! {
         div {
             class: "text-center py-4",
-            p { class: "mb-4 text-text", "Preparing to subscribe to room..." }
+            p { class: "mb-4 text-text", "Preparing to subscribe to board..." }
             div { class: "w-full h-2 bg-surface rounded-full overflow-hidden",
                 div { class: "h-full bg-accent animate-pulse w-1/2" }
             }
@@ -131,12 +131,12 @@ fn render_pending_subscription_state() -> Element {
     }
 }
 
-/// Renders the loading state when subscribing to room data
+/// Renders the loading state when subscribing to board data
 fn render_subscribing_state() -> Element {
     rsx! {
         div {
             class: "text-center py-4",
-            p { class: "mb-4 text-text", "Subscribing to room..." }
+            p { class: "mb-4 text-text", "Subscribing to board..." }
             div { class: "w-full h-2 bg-surface rounded-full overflow-hidden",
                 div { class: "h-full bg-blue-500 animate-pulse w-2/3" }
             }
@@ -144,12 +144,12 @@ fn render_subscribing_state() -> Element {
     }
 }
 
-/// Renders the error state when room retrieval fails
-fn render_error_state(error: &str, room_key: VerifyingKey) -> Element {
+/// Renders the error state when board retrieval fails
+fn render_error_state(error: &str, board_key: VerifyingKey) -> Element {
     rsx! {
         div {
             class: "bg-red-500/10 border border-red-500/20 rounded-lg p-4",
-            p { class: "mb-4 text-red-400", "Failed to retrieve room: {error}" }
+            p { class: "mb-4 text-red-400", "Failed to retrieve board: {error}" }
             div {
                 class: "flex gap-3",
                 button {
@@ -164,8 +164,8 @@ fn render_error_state(error: &str, room_key: VerifyingKey) -> Element {
                     onclick: move |_| {
                         // Reset to PendingSubscription so the synchronizer retries
                         PENDING_INVITES.with_mut(|pending| {
-                            if let Some(join) = pending.map.get_mut(&room_key) {
-                                join.status = PendingRoomStatus::PendingSubscription;
+                            if let Some(join) = pending.map.get_mut(&board_key) {
+                                join.status = PendingBoardStatus::PendingSubscription;
                             }
                         });
                     },
@@ -174,7 +174,7 @@ fn render_error_state(error: &str, room_key: VerifyingKey) -> Element {
                 button {
                     class: "px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
                     onclick: move |_| {
-                        PENDING_INVITES.write().map.remove(&room_key);
+                        PENDING_INVITES.write().map.remove(&board_key);
                         navigator().push(Route::Home);
                     },
                     "Dismiss"
@@ -184,17 +184,17 @@ fn render_error_state(error: &str, room_key: VerifyingKey) -> Element {
     }
 }
 
-/// Renders the state when room is successfully subscribed and retrieved
-fn render_subscribed_state(room_key: VerifyingKey) -> Element {
-    let room_id = bs58::encode(room_key.as_bytes()).into_string();
-    navigator().push(Route::Posts { room_id });
+/// Renders the state when board is successfully subscribed and retrieved
+fn render_subscribed_state(board_key: VerifyingKey) -> Element {
+    let board_id = bs58::encode(board_key.as_bytes()).into_string();
+    navigator().push(Route::Posts { board_id });
     rsx! {}
 }
 
 /// Renders the invitation options based on the user's membership status
 fn render_invitation_options(inv: Invitation) -> Element {
     let (current_key_is_member, invited_member_exists) =
-        check_membership_status(&inv, &ROOMS.read());
+        check_membership_status(&inv, &BOARDS.read());
 
     if current_key_is_member {
         render_already_member()
@@ -205,19 +205,19 @@ fn render_invitation_options(inv: Invitation) -> Element {
     }
 }
 
-/// Checks the membership status of the user in the room
-fn check_membership_status(inv: &Invitation, current_rooms: &Rooms) -> (bool, bool) {
-    if let Some(room_data) = current_rooms.map.get(&inv.room) {
+/// Checks the membership status of the user in the board
+fn check_membership_status(inv: &Invitation, current_boards: &Boards) -> (bool, bool) {
+    if let Some(board_data) = current_boards.map.get(&inv.board) {
         let user_vk = inv.invitee_signing_key.verifying_key();
-        let current_key_is_member = user_vk == room_data.owner_vk
-            || room_data
-                .room_state
+        let current_key_is_member = user_vk == board_data.owner_vk
+            || board_data
+                .board_state
                 .members
                 .members
                 .iter()
                 .any(|m| m.member.member_vk == user_vk);
-        let invited_member_exists = room_data
-            .room_state
+        let invited_member_exists = board_data
+            .board_state
             .members
             .members
             .iter()
@@ -228,10 +228,10 @@ fn check_membership_status(inv: &Invitation, current_rooms: &Rooms) -> (bool, bo
     }
 }
 
-/// Renders the UI when the user is already a member of the room
+/// Renders the UI when the user is already a member of the board
 fn render_already_member() -> Element {
     rsx! {
-        p { class: "text-text mb-4", "You are already a member of this room with your current key." }
+        p { class: "text-text mb-4", "You are already a member of this board with your current key." }
         button {
             class: "px-4 py-2 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-colors",
             autofocus: true,
@@ -251,12 +251,12 @@ fn render_already_member() -> Element {
 
 /// Renders the UI for restoring access to an existing member
 fn render_restore_access_option(inv: Invitation) -> Element {
-    let room = inv.room;
+    let board = inv.board;
     let member_vk = inv.invitee.member.member_vk;
     let invitee = inv.invitee.clone();
 
     rsx! {
-        p { class: "text-text mb-2", "This invitation is for a member that already exists in the room." }
+        p { class: "text-text mb-2", "This invitation is for a member that already exists in the board." }
         p { class: "text-text-muted mb-4", "If you lost access to your previous key, you can use this invitation to restore access with your current key." }
         div {
             class: "flex gap-3",
@@ -273,15 +273,15 @@ fn render_restore_access_option(inv: Invitation) -> Element {
                     let invitee = invitee.clone();
                     move |_| {
                         // Use with_mut for atomic update
-                        ROOMS.with_mut(|rooms| {
-                            if let Some(room_data) = rooms.map.get_mut(&room) {
-                                room_data.restore_member_access(member_vk, invitee.clone());
+                        BOARDS.with_mut(|boards| {
+                            if let Some(board_data) = boards.map.get_mut(&board) {
+                                board_data.restore_member_access(member_vk, invitee.clone());
                             }
                         });
-                        // Mark room as needing sync after restoring member access
-                        NEEDS_SYNC.write().insert(room);
-                        let room_id = bs58::encode(room.as_bytes()).into_string();
-                        navigator().push(Route::Posts { room_id });
+                        // Mark board as needing sync after restoring member access
+                        NEEDS_SYNC.write().insert(board);
+                        let board_id = bs58::encode(board.as_bytes()).into_string();
+                        navigator().push(Route::Posts { board_id });
                     }
                 },
                 "Restore Access"
@@ -311,8 +311,8 @@ fn render_new_invitation(inv: Invitation) -> Element {
     let mut nickname = use_signal(|| default_nickname);
 
     rsx! {
-        p { class: "text-text mb-2", "You have been invited to join a new room." }
-        p { class: "text-text-muted mb-4", "Choose a nickname to use in this room:" }
+        p { class: "text-text mb-2", "You have been invited to join a new board." }
+        p { class: "text-text-muted mb-4", "Choose a nickname to use in this board:" }
 
         div { class: "mb-4",
             input {
@@ -355,7 +355,7 @@ fn render_new_invitation(inv: Invitation) -> Element {
 
 /// Handles the invitation acceptance process
 fn accept_invitation(inv: Invitation, nickname: String) {
-    let room_owner = inv.room;
+    let board_owner = inv.board;
     let authorized_member = inv.invitee.clone();
     let invitee_signing_key = inv.invitee_signing_key.clone();
 
@@ -370,32 +370,32 @@ fn accept_invitation(inv: Invitation, nickname: String) {
     };
 
     info!(
-        "Adding room to pending invites: {:?}",
-        MemberId::from(room_owner)
+        "Adding board to pending invites: {:?}",
+        MemberId::from(board_owner)
     );
 
     // Add to pending invites
     PENDING_INVITES.with_mut(|pending_invites| {
         pending_invites.map.insert(
-            room_owner,
-            PendingRoomJoin {
+            board_owner,
+            PendingBoardJoin {
                 authorized_member: authorized_member.clone(),
                 invitee_signing_key: invitee_signing_key.clone(),
                 preferred_nickname: nickname.clone(),
-                status: PendingRoomStatus::PendingSubscription,
+                status: PendingBoardStatus::PendingSubscription,
                 subscribing_since: None,
             },
         );
     });
 
-    info!("Requesting room state for invitation");
+    info!("Requesting board state for invitation");
 
     // Send the AcceptInvitation message directly without spawn_local
     let result = SYNCHRONIZER
         .write()
         .get_message_sender()
         .unbounded_send(SynchronizerMessage::AcceptInvitation {
-            owner_vk: room_owner,
+            owner_vk: board_owner,
             authorized_member: Box::new(authorized_member),
             invitee_signing_key: Box::new(invitee_signing_key),
             nickname,
@@ -404,14 +404,14 @@ fn accept_invitation(inv: Invitation, nickname: String) {
 
     match result {
         Ok(_) => {
-            info!("Successfully requested room state for invitation");
+            info!("Successfully requested board state for invitation");
         }
         Err(e) => {
             // Log detailed error information
-            error!("Failed to request room state for invitation: {}", e);
+            error!("Failed to request board state for invitation: {}", e);
             error!(
-                "Error details: invitation for room with owner key: {:?}",
-                MemberId::from(room_owner)
+                "Error details: invitation for board with owner key: {:?}",
+                MemberId::from(board_owner)
             );
         }
     }

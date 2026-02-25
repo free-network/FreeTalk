@@ -5,7 +5,7 @@ use aes_gcm::{
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
-use river_core::room_state::privacy::SealedBytes;
+use river_core::board_state::privacy::SealedBytes;
 use sha2::{Digest, Sha256, Sha512};
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519EphemeralSecret};
 
@@ -111,14 +111,14 @@ fn ed25519_to_x25519_private_key(ed25519_sk: &SigningKey) -> X25519EphemeralSecr
 }
 
 // ============================================================================
-// Symmetric encryption utilities for room secrets
+// Symmetric encryption utilities for board secrets
 // ============================================================================
 
-/// Encrypts data using a symmetric key (for room secrets).
+/// Encrypts data using a symmetric key (for board secrets).
 ///
 /// # Arguments
 ///
-/// * `key` - A 32-byte symmetric key (the room secret).
+/// * `key` - A 32-byte symmetric key (the board secret).
 /// * `plaintext` - The data to encrypt.
 ///
 /// # Returns
@@ -141,7 +141,7 @@ pub fn encrypt_with_symmetric_key(key: &[u8; 32], plaintext: &[u8]) -> (Vec<u8>,
 ///
 /// # Arguments
 ///
-/// * `key` - A 32-byte symmetric key (the room secret).
+/// * `key` - A 32-byte symmetric key (the board secret).
 /// * `ciphertext` - The encrypted data.
 /// * `nonce` - The 12-byte nonce used for encryption.
 ///
@@ -163,19 +163,19 @@ pub fn decrypt_with_symmetric_key(
         .map_err(|e| format!("Decryption failed: {}", e))
 }
 
-/// Generates a new random 32-byte room secret.
+/// Generates a new random 32-byte board secret.
 #[allow(dead_code)]
-pub fn generate_room_secret() -> [u8; 32] {
+pub fn generate_board_secret() -> [u8; 32] {
     rand::random::<[u8; 32]>()
 }
 
-/// Encrypts a room secret for a specific member using ECIES.
+/// Encrypts a board secret for a specific member using ECIES.
 ///
 /// This creates the ciphertext that goes into an EncryptedSecretForMember blob.
 ///
 /// # Arguments
 ///
-/// * `secret` - The 32-byte room secret to encrypt.
+/// * `secret` - The 32-byte board secret to encrypt.
 /// * `member_public_key` - The member's Ed25519 public key.
 ///
 /// # Returns
@@ -192,7 +192,7 @@ pub fn encrypt_secret_for_member(
     encrypt(member_public_key, secret)
 }
 
-/// Decrypts a room secret from an EncryptedSecretForMember blob.
+/// Decrypts a board secret from an EncryptedSecretForMember blob.
 ///
 /// # Arguments
 ///
@@ -203,7 +203,7 @@ pub fn encrypt_secret_for_member(
 ///
 /// # Returns
 ///
-/// The decrypted 32-byte room secret, or an error if decryption fails.
+/// The decrypted 32-byte board secret, or an error if decryption fails.
 #[allow(dead_code)]
 pub fn decrypt_secret_from_member_blob(
     ciphertext: &[u8],
@@ -229,13 +229,13 @@ pub fn decrypt_secret_from_member_blob(
 // SealedBytes helpers
 // ============================================================================
 
-/// Creates a SealedBytes::Private variant by encrypting plaintext with a room secret.
+/// Creates a SealedBytes::Private variant by encrypting plaintext with a board secret.
 ///
 /// # Arguments
 ///
 /// * `plaintext` - The data to encrypt.
-/// * `secret_key` - The 32-byte room secret.
-/// * `secret_version` - The version number of the room secret.
+/// * `secret_key` - The 32-byte board secret.
+/// * `secret_version` - The version number of the board secret.
 ///
 /// # Returns
 ///
@@ -261,7 +261,7 @@ pub fn seal_bytes(plaintext: &[u8], secret_key: &[u8; 32], secret_version: u32) 
 /// # Arguments
 ///
 /// * `sealed` - The SealedBytes to unseal.
-/// * `secret_key` - The room secret (required for Private variants, ignored for Public).
+/// * `secret_key` - The board secret (required for Private variants, ignored for Public).
 ///
 /// # Returns
 ///
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_symmetric_encryption_decryption() {
-        let key = generate_room_secret();
+        let key = generate_board_secret();
         let plaintext = b"Board secret message";
 
         let (ciphertext, nonce) = encrypt_with_symmetric_key(&key, plaintext);
@@ -363,8 +363,8 @@ mod tests {
 
     #[test]
     fn test_symmetric_decryption_wrong_key() {
-        let key1 = generate_room_secret();
-        let key2 = generate_room_secret();
+        let key1 = generate_board_secret();
+        let key2 = generate_board_secret();
         let plaintext = b"Board secret message";
 
         let (ciphertext, nonce) = encrypt_with_symmetric_key(&key1, plaintext);
@@ -379,7 +379,7 @@ mod tests {
         let member_private_key = SigningKey::generate(&mut rng);
         let member_public_key = VerifyingKey::from(&member_private_key);
 
-        let original_secret = generate_room_secret();
+        let original_secret = generate_board_secret();
 
         // Encrypt secret for member
         let (ciphertext, nonce, ephemeral_key) =
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_seal_unseal_bytes_private() {
-        let secret_key = generate_room_secret();
+        let secret_key = generate_board_secret();
         let plaintext = b"Private nickname";
         let secret_version = 5;
 
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_unseal_private_without_key() {
-        let secret_key = generate_room_secret();
+        let secret_key = generate_board_secret();
         let plaintext = b"Private nickname";
         let sealed = seal_bytes(plaintext, &secret_key, 1);
 
@@ -450,8 +450,8 @@ mod tests {
 
     #[test]
     fn test_unseal_private_with_wrong_key() {
-        let key1 = generate_room_secret();
-        let key2 = generate_room_secret();
+        let key1 = generate_board_secret();
+        let key2 = generate_board_secret();
         let plaintext = b"Private nickname";
         let sealed = seal_bytes(plaintext, &key1, 1);
 

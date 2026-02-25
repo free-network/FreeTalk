@@ -5,7 +5,7 @@
 //! 2. Reject states from unknown future versions
 //! 3. Perform migration logic if needed
 
-use super::{ChatRoomParametersV1, ChatRoomStateV1};
+use super::{ChatBoardParametersV1, ChatBoardStateV1};
 use freenet_scaffold::ComposableState;
 use serde::{Deserialize, Serialize};
 
@@ -21,10 +21,10 @@ pub const CURRENT_STATE_VERSION: u32 = 1;
 pub struct StateVersion(pub u32);
 
 impl ComposableState for StateVersion {
-    type ParentState = ChatRoomStateV1;
+    type ParentState = ChatBoardStateV1;
     type Summary = u32;
     type Delta = ();
-    type Parameters = ChatRoomParametersV1;
+    type Parameters = ChatBoardParametersV1;
 
     fn verify(
         &self,
@@ -87,8 +87,8 @@ mod tests {
     #[test]
     fn test_version_verify_accepts_current() {
         let v = StateVersion(CURRENT_STATE_VERSION);
-        let parent = ChatRoomStateV1::default();
-        let params = ChatRoomParametersV1 {
+        let parent = ChatBoardStateV1::default();
+        let params = ChatBoardParametersV1 {
             owner: ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng).verifying_key(),
         };
         assert!(v.verify(&parent, &params).is_ok());
@@ -97,8 +97,8 @@ mod tests {
     #[test]
     fn test_version_verify_accepts_legacy() {
         let v = StateVersion(0);
-        let parent = ChatRoomStateV1::default();
-        let params = ChatRoomParametersV1 {
+        let parent = ChatBoardStateV1::default();
+        let params = ChatBoardParametersV1 {
             owner: ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng).verifying_key(),
         };
         assert!(v.verify(&parent, &params).is_ok());
@@ -107,8 +107,8 @@ mod tests {
     #[test]
     fn test_version_verify_rejects_future() {
         let v = StateVersion(CURRENT_STATE_VERSION + 1);
-        let parent = ChatRoomStateV1::default();
-        let params = ChatRoomParametersV1 {
+        let parent = ChatBoardStateV1::default();
+        let params = ChatBoardParametersV1 {
             owner: ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng).verifying_key(),
         };
         assert!(v.verify(&parent, &params).is_err());
@@ -127,13 +127,13 @@ mod tests {
     fn test_state_without_version_field_deserializes_with_default() {
         // Simulate a legacy state JSON that doesn't have a version field
         // The #[serde(default)] attribute should make version = 0
-        use crate::room_state::configuration::{AuthorizedConfigurationV1, Configuration};
+        use crate::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
 
         let owner_sk = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
         let owner_vk = owner_sk.verifying_key();
 
         // Create a minimal state and serialize it
-        let mut state = ChatRoomStateV1::default();
+        let mut state = ChatBoardStateV1::default();
         let config = Configuration {
             owner_member_id: owner_vk.into(),
             ..Default::default()
@@ -148,7 +148,7 @@ mod tests {
         let legacy_json = serde_json::to_string(&json_value).unwrap();
 
         // Deserialize - should use default version (0)
-        let deserialized: ChatRoomStateV1 = serde_json::from_str(&legacy_json).unwrap();
+        let deserialized: ChatBoardStateV1 = serde_json::from_str(&legacy_json).unwrap();
         assert_eq!(
             deserialized.version.0, 0,
             "Legacy state without version field should deserialize with version=0"
@@ -157,12 +157,12 @@ mod tests {
 
     #[test]
     fn test_state_with_version_field_roundtrips() {
-        use crate::room_state::configuration::{AuthorizedConfigurationV1, Configuration};
+        use crate::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
 
         let owner_sk = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
         let owner_vk = owner_sk.verifying_key();
 
-        let mut state = ChatRoomStateV1::default();
+        let mut state = ChatBoardStateV1::default();
         let config = Configuration {
             owner_member_id: owner_vk.into(),
             ..Default::default()
@@ -172,7 +172,7 @@ mod tests {
 
         // Serialize and deserialize
         let json = serde_json::to_string(&state).unwrap();
-        let deserialized: ChatRoomStateV1 = serde_json::from_str(&json).unwrap();
+        let deserialized: ChatBoardStateV1 = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.version.0, CURRENT_STATE_VERSION);
     }

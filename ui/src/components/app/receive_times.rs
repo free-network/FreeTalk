@@ -1,6 +1,6 @@
 use dioxus::logger::tracing::info;
 use dioxus::prelude::*;
-use river_core::room_state::message::MessageId;
+use river_core::board_state::message::MessageId;
 use std::collections::HashMap;
 
 #[cfg(target_arch = "wasm32")]

@@ -1,26 +1,26 @@
 //! Top bar component showing user profile, admin controls, and post input.
 
-use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
+use crate::components::app::{CURRENT_BOARD, MEMBER_INFO_MODAL, BOARDS};
 use crate::components::conversation::message_input::PostInput;
-use crate::room_data::SendMessageError;
+use crate::board_data::SendMessageError;
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::messaging::{send_message, ReplyContext};
 use dioxus::prelude::*;
-use river_core::room_state::member::MemberId;
-use river_core::room_state::privacy::PrivacyMode;
+use river_core::board_state::member::MemberId;
+use river_core::board_state::privacy::PrivacyMode;
 
 /// Top bar component displaying the current user's profile, admin controls, and post input.
 #[component]
 pub fn TopBar() -> Element {
     let replying_to = use_signal(|| None::<ReplyContext>);
 
-    // Get current room data
-    let current_room_data = use_memo(move || {
-        CURRENT_ROOM
+    // Get current board data
+    let current_board_data = use_memo(move || {
+        CURRENT_BOARD
             .read()
             .owner_key
-            .and_then(|key| ROOMS.read().map.get(&key).cloned())
+            .and_then(|key| BOARDS.read().map.get(&key).cloned())
     });
 
     // Message sending handler
@@ -30,20 +30,20 @@ pub fn TopBar() -> Element {
                 return;
             }
 
-            // Get room data for sending
-            let room_info = {
-                let current_room = CURRENT_ROOM.read();
-                if let Some(key) = current_room.owner_key {
-                    let rooms = ROOMS.read();
-                    if let Some(room_data) = rooms.map.get(&key) {
-                        let is_private = room_data
-                            .room_state
+            // Get board data for sending
+            let board_info = {
+                let current_board = CURRENT_BOARD.read();
+                if let Some(key) = current_board.owner_key {
+                    let boards = BOARDS.read();
+                    if let Some(board_data) = boards.map.get(&key) {
+                        let is_private = board_data
+                            .board_state
                             .configuration
                             .configuration
                             .privacy_mode
                             == PrivacyMode::Private;
                         let secret_opt = if is_private {
-                            room_data
+                            board_data
                                 .secrets
                                 .iter()
                                 .max_by_key(|(v, _)| *v)
@@ -53,9 +53,9 @@ pub fn TopBar() -> Element {
                         };
                         Some((
                             key,
-                            room_data.room_key(),
-                            room_data.self_sk.clone(),
-                            room_data.room_state.clone(),
+                            board_data.board_key(),
+                            board_data.self_sk.clone(),
+                            board_data.board_state.clone(),
                             is_private,
                             secret_opt,
                         ))
@@ -67,15 +67,15 @@ pub fn TopBar() -> Element {
                 }
             };
 
-            if let Some((current_room, room_key, self_sk, room_state_clone, is_private, secret_opt)) =
-                room_info
+            if let Some((current_board, board_key, self_sk, board_state_clone, is_private, secret_opt)) =
+                board_info
             {
                 spawn(async move {
                     send_message(
-                        current_room,
-                        room_key,
+                        current_board,
+                        board_key,
                         self_sk,
-                        room_state_clone,
+                        board_state_clone,
                         is_private,
                         secret_opt,
                         title_text,
@@ -87,24 +87,24 @@ pub fn TopBar() -> Element {
             }
         };
 
-    // Don't render if no room is selected
-    let Some(room_data) = current_room_data.read().clone() else {
+    // Don't render if no board is selected
+    let Some(board_data) = current_board_data.read().clone() else {
         return rsx! {};
     };
 
-    let self_member_id = MemberId::from(&room_data.self_sk.verifying_key());
-    let owner_id = MemberId::from(&room_data.owner_vk);
+    let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
+    let owner_id = MemberId::from(&board_data.owner_vk);
     let is_owner = self_member_id == owner_id;
-    let can_participate = room_data.can_participate();
+    let can_participate = board_data.can_participate();
 
-    let self_nickname = room_data
-        .room_state
+    let self_nickname = board_data
+        .board_state
         .member_info
         .member_info
         .iter()
         .find(|ami| ami.member_info.member_id == self_member_id)
         .map(|ami| {
-            match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, &room_data.secrets)
+            match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, &board_data.secrets)
             {
                 Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                 Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
@@ -113,7 +113,7 @@ pub fn TopBar() -> Element {
         .unwrap_or_else(|| "You".to_string());
 
     let self_avatar = get_avatar(&self_member_id);
-    let room_id = bs58::encode(room_data.owner_vk.as_bytes()).into_string();
+    let board_id = bs58::encode(board_data.owner_vk.as_bytes()).into_string();
 
     rsx! {
         div { class: "flex justify-between",
@@ -143,7 +143,7 @@ pub fn TopBar() -> Element {
                 // Admin button for owners
                 if is_owner {
                     a {
-                        href: "#/room/{room_id}/admin",
+                        href: "#/board/{board_id}/admin",
                         class: "flex items-center gap-2 px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
                         title: "Manage Admins",
                         span { "⚙" }

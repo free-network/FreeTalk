@@ -1,32 +1,32 @@
-use crate::components::app::{CURRENT_ROOM, NEEDS_SYNC, ROOMS};
+use crate::components::app::{CURRENT_BOARD, NEEDS_SYNC, BOARDS};
 use crate::util::ecies::{seal_bytes, unseal_bytes_with_secrets};
 use dioxus::logger::tracing::*;
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::FaPencil;
 use dioxus_free_icons::Icon;
 use freenet_scaffold::ComposableState;
-use river_core::room_state::member::MemberId;
-use river_core::room_state::member_info::{AuthorizedMemberInfo, MemberInfo};
-use river_core::room_state::privacy::SealedBytes;
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1Delta};
+use river_core::board_state::member::MemberId;
+use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
+use river_core::board_state::privacy::SealedBytes;
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1Delta};
 use std::collections::HashMap;
 use std::rc::Rc;
 
 #[component]
 pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
     // Compute values
-    let (self_signing_key, room_secrets, current_secret_opt) = {
-        let current_room = CURRENT_ROOM.read();
-        if let Some(key) = current_room.owner_key.as_ref() {
-            let rooms = ROOMS.read();
-            rooms
+    let (self_signing_key, board_secrets, current_secret_opt) = {
+        let current_board = CURRENT_BOARD.read();
+        if let Some(key) = current_board.owner_key.as_ref() {
+            let boards = BOARDS.read();
+            boards
                 .map
                 .get(key)
-                .map(|room_data| {
+                .map(|board_data| {
                     (
-                        Some(room_data.self_sk.clone()),
-                        room_data.secrets.clone(),
-                        room_data.get_secret().map(|(s, v)| (*s, v)),
+                        Some(board_data.self_sk.clone()),
+                        board_data.secrets.clone(),
+                        board_data.get_secret().map(|(s, v)| (*s, v)),
                     )
                 })
                 .unwrap_or((None, HashMap::new(), None))
@@ -47,7 +47,7 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
 
     // Decrypt nickname for display (version-aware)
     let initial_nickname =
-        match unseal_bytes_with_secrets(&member_info.member_info.preferred_nickname, &room_secrets)
+        match unseal_bytes_with_secrets(&member_info.member_info.preferred_nickname, &board_secrets)
         {
             Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
             Err(_) => member_info.member_info.preferred_nickname.to_string_lossy(),
@@ -68,7 +68,7 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
             }
 
             let delta = if let Some(signing_key) = self_signing_key.clone() {
-                // Encrypt nickname if room is private and we have a secret
+                // Encrypt nickname if board is private and we have a secret
                 let sealed_nickname = match current_secret_opt {
                     Some((secret, version)) => seal_bytes(new_value.as_bytes(), &secret, version),
                     _ => SealedBytes::public(new_value.into_bytes()),
@@ -82,36 +82,36 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
                     AuthorizedMemberInfo::new_with_member_key(new_member_info, &signing_key);
                 // Check if user needs to re-add themselves (pruned for inactivity)
                 let members_delta = {
-                    let rooms = ROOMS.read();
-                    let current_room = CURRENT_ROOM.read();
-                    if let (Some(owner_key), Some(room_data)) = (
-                        current_room.owner_key,
-                        current_room.owner_key.and_then(|k| rooms.map.get(&k)),
+                    let boards = BOARDS.read();
+                    let current_board = CURRENT_BOARD.read();
+                    if let (Some(owner_key), Some(board_data)) = (
+                        current_board.owner_key,
+                        current_board.owner_key.and_then(|k| boards.map.get(&k)),
                     ) {
                         let self_vk = signing_key.verifying_key();
                         let is_in_members = self_vk == owner_key
-                            || room_data
-                                .room_state
+                            || board_data
+                                .board_state
                                 .members
                                 .members
                                 .iter()
                                 .any(|m| m.member.member_vk == self_vk);
                         if !is_in_members {
-                            if let Some(ref authorized_member) = room_data.self_authorized_member {
-                                let current_member_ids: std::collections::HashSet<_> = room_data
-                                    .room_state
+                            if let Some(ref authorized_member) = board_data.self_authorized_member {
+                                let current_member_ids: std::collections::HashSet<_> = board_data
+                                    .board_state
                                     .members
                                     .members
                                     .iter()
                                     .map(|m| m.member.id())
                                     .collect();
                                 let mut members_to_add = vec![authorized_member.clone()];
-                                for chain_member in &room_data.invite_chain {
+                                for chain_member in &board_data.invite_chain {
                                     if !current_member_ids.contains(&chain_member.member.id()) {
                                         members_to_add.push(chain_member.clone());
                                     }
                                 }
-                                Some(river_core::room_state::member::MembersDelta::new(
+                                Some(river_core::board_state::member::MembersDelta::new(
                                     members_to_add,
                                 ))
                             } else {
@@ -125,7 +125,7 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
                     }
                 };
 
-                Some(ChatRoomStateV1Delta {
+                Some(ChatBoardStateV1Delta {
                     member_info: Some(vec![new_authorized_member_info]),
                     members: members_delta,
                     ..Default::default()
@@ -139,32 +139,32 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
                 info!("Saving changes to nickname with delta: {:?}", delta);
 
                 // Get the owner key first
-                let owner_key = CURRENT_ROOM.read().owner_key;
+                let owner_key = CURRENT_BOARD.read().owner_key;
 
                 if let Some(owner_key) = owner_key {
                     // Use with_mut for atomic update
-                    ROOMS.with_mut(|rooms| {
-                        if let Some(room_data) = rooms.map.get_mut(&owner_key) {
+                    BOARDS.with_mut(|boards| {
+                        if let Some(board_data) = boards.map.get_mut(&owner_key) {
                             info!(
                                 "State before applying nickname delta: {:?}",
-                                room_data.room_state
+                                board_data.board_state
                             );
-                            if let Err(e) = room_data.room_state.apply_delta(
-                                &room_data.room_state.clone(),
-                                &ChatRoomParametersV1 { owner: owner_key },
+                            if let Err(e) = board_data.board_state.apply_delta(
+                                &board_data.board_state.clone(),
+                                &ChatBoardParametersV1 { owner: owner_key },
                                 &Some(delta),
                             ) {
                                 error!("Failed to apply delta: {:?}", e);
                             } else {
                                 info!(
                                     "State after applying nickname delta: {:?}",
-                                    room_data.room_state
+                                    board_data.board_state
                                 );
-                                // Mark room as needing sync after nickname change
+                                // Mark board as needing sync after nickname change
                                 NEEDS_SYNC.write().insert(owner_key);
                             }
                         } else {
-                            warn!("Board state not found for current room");
+                            warn!("Board state not found for current board");
                         }
                     });
                 }

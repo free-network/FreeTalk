@@ -3,10 +3,10 @@
 use super::connection_manager::ConnectionManager;
 use super::error::SynchronizerError;
 use super::response_handler::ResponseHandler;
-use super::room_synchronizer::RoomSynchronizer;
+use super::board_synchronizer::BoardSynchronizer;
 use crate::components::app::chat_delegate::set_up_chat_delegate;
-use crate::components::app::sync_info::{RoomSyncStatus, SYNC_INFO};
-use crate::components::app::{ROOMS, SYNC_STATUS, WEB_API};
+use crate::components::app::sync_info::{BoardSyncStatus, SYNC_INFO};
+use crate::components::app::{BOARDS, SYNC_STATUS, WEB_API};
 use crate::util::{owner_vk_to_contract_key, sleep};
 use dioxus::logger::tracing::{error, info, warn};
 use dioxus::prelude::*;
@@ -16,8 +16,8 @@ use freenet_stdlib::client_api::HostResponse;
 use freenet_stdlib::prelude::OutboundDelegateMsg;
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
-use river_core::room_state::member::AuthorizedMember;
-use river_core::room_state::member::MemberId;
+use river_core::board_state::member::AuthorizedMember;
+use river_core::board_state::member::MemberId;
 use std::time::Duration;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
@@ -25,15 +25,15 @@ use wasm_bindgen_futures::spawn_local;
 
 /// Message types for communicating with the synchronizer
 pub enum SynchronizerMessage {
-    ProcessRooms,
+    ProcessBoards,
     Connect,
     /// Sent when WebSocket connection is lost (closed or errored)
     ConnectionLost,
     /// Sent when page becomes visible after being hidden (e.g., after sleep/wake)
     PageBecameVisible,
-    /// Sent to refresh all room states after reconnection (e.g., after sleep/wake)
-    /// This fetches current state for all rooms to catch any updates missed during suspension
-    RefreshAllRooms,
+    /// Sent to refresh all board states after reconnection (e.g., after sleep/wake)
+    /// This fetches current state for all boards to catch any updates missed during suspension
+    RefreshAllBoards,
     ApiResponse(Result<HostResponse, SynchronizerError>),
     AcceptInvitation {
         owner_vk: VerifyingKey,
@@ -43,7 +43,7 @@ pub enum SynchronizerMessage {
     },
 }
 
-/// Manages synchronization between local room state and Freenet network
+/// Manages synchronization between local board state and Freenet network
 pub struct FreenetSynchronizer {
     pub message_tx: UnboundedSender<SynchronizerMessage>,
     message_rx: Option<UnboundedReceiver<SynchronizerMessage>>,
@@ -70,8 +70,8 @@ impl FreenetSynchronizer {
     pub fn new() -> Self {
         let (message_tx, message_rx) = unbounded();
         let connection_manager = ConnectionManager::new();
-        let room_synchronizer = RoomSynchronizer::new();
-        let response_handler = ResponseHandler::new(room_synchronizer);
+        let board_synchronizer = BoardSynchronizer::new();
+        let response_handler = ResponseHandler::new(board_synchronizer);
 
         info!("Creating new FreenetSynchronizer instance");
 
@@ -104,9 +104,9 @@ impl FreenetSynchronizer {
         info!("Setting up message processing loop");
 
         let mut connection_manager = ConnectionManager::new();
-        let room_synchronizer_ref = self.response_handler.get_room_synchronizer();
+        let board_synchronizer_ref = self.response_handler.get_board_synchronizer();
         let mut response_handler =
-            ResponseHandler::new_with_shared_synchronizer(room_synchronizer_ref);
+            ResponseHandler::new_with_shared_synchronizer(board_synchronizer_ref);
 
         info!("Starting message processing loop");
         spawn_local(async move {
@@ -150,28 +150,28 @@ impl FreenetSynchronizer {
             info!("Entering message loop");
             while let Some(msg) = message_rx.next().await {
                 match msg {
-                    SynchronizerMessage::ProcessRooms => {
-                        info!("DEBUG: ProcessRooms message received in synchronizer");
-                        info!("Processing rooms request received");
+                    SynchronizerMessage::ProcessBoards => {
+                        info!("DEBUG: ProcessBoards message received in synchronizer");
+                        info!("Processing boards request received");
                         if !connection_manager.is_connected() {
-                            info!("Connection not ready, deferring room processing and attempting to connect");
+                            info!("Connection not ready, deferring board processing and attempting to connect");
                             if let Err(e) = message_tx.unbounded_send(SynchronizerMessage::Connect)
                             {
                                 error!("Failed to send Connect message: {}", e);
                             }
                             continue;
                         }
-                        info!("Connection is ready, processing rooms");
+                        info!("Connection is ready, processing boards");
                         if let Err(e) = response_handler
-                            .get_room_synchronizer_mut()
-                            .process_rooms()
+                            .get_board_synchronizer_mut()
+                            .process_boards()
                             .await
                         {
-                            error!("Error processing rooms: {}", e);
+                            error!("Error processing boards: {}", e);
                             // Check if this is a WebSocket error that needs reconnection
                             let error_str = e.to_string();
                             if error_str.contains("WebSocket") || error_str.contains("not open") {
-                                warn!("WebSocket error during room processing, triggering reconnection");
+                                warn!("WebSocket error during board processing, triggering reconnection");
                                 if let Err(e) =
                                     message_tx.unbounded_send(SynchronizerMessage::ConnectionLost)
                                 {
@@ -179,7 +179,7 @@ impl FreenetSynchronizer {
                                 }
                             }
                         } else {
-                            info!("Successfully processed rooms");
+                            info!("Successfully processed boards");
                         }
                     }
                     SynchronizerMessage::ConnectionLost => {
@@ -210,20 +210,20 @@ impl FreenetSynchronizer {
                             }
                         } else {
                             // Connection appears active, but we may have missed updates during suspension.
-                            // First verify connection with ProcessRooms, then refresh all rooms to
+                            // First verify connection with ProcessBoards, then refresh all boards to
                             // catch any updates that arrived while the page was hidden/PC was suspended.
-                            info!("Connection appears active, refreshing all rooms to catch missed updates");
+                            info!("Connection appears active, refreshing all boards to catch missed updates");
                             if let Err(e) =
-                                message_tx.unbounded_send(SynchronizerMessage::RefreshAllRooms)
+                                message_tx.unbounded_send(SynchronizerMessage::RefreshAllBoards)
                             {
-                                error!("Failed to send RefreshAllRooms message after wake: {}", e);
+                                error!("Failed to send RefreshAllBoards message after wake: {}", e);
                             }
                         }
                     }
-                    SynchronizerMessage::RefreshAllRooms => {
-                        // Refresh all room states by sending GET requests
+                    SynchronizerMessage::RefreshAllBoards => {
+                        // Refresh all board states by sending GET requests
                         // This catches any updates missed during PC suspension or page being hidden
-                        info!("Refreshing all rooms to catch missed updates");
+                        info!("Refreshing all boards to catch missed updates");
                         if !connection_manager.is_connected() {
                             info!(
                                 "Connection not ready, deferring refresh and attempting to connect"
@@ -235,16 +235,16 @@ impl FreenetSynchronizer {
                             continue;
                         }
                         if let Err(e) = response_handler
-                            .get_room_synchronizer_mut()
-                            .refresh_all_rooms()
+                            .get_board_synchronizer_mut()
+                            .refresh_all_boards()
                             .await
                         {
-                            error!("Error refreshing rooms: {}", e);
+                            error!("Error refreshing boards: {}", e);
                             // Check if this is a WebSocket error that needs reconnection
                             let error_str = e.to_string();
                             if error_str.contains("WebSocket") || error_str.contains("not open") {
                                 warn!(
-                                    "WebSocket error during room refresh, triggering reconnection"
+                                    "WebSocket error during board refresh, triggering reconnection"
                                 );
                                 if let Err(e) =
                                     message_tx.unbounded_send(SynchronizerMessage::ConnectionLost)
@@ -253,7 +253,7 @@ impl FreenetSynchronizer {
                                 }
                             }
                         } else {
-                            info!("Successfully refreshed all rooms");
+                            info!("Successfully refreshed all boards");
                         }
                     }
                     SynchronizerMessage::Connect => {
@@ -265,23 +265,23 @@ impl FreenetSynchronizer {
                             Ok(()) => {
                                 info!("Connection established successfully");
                                 // Check if web API is available without holding the lock
-                                // during process_rooms() call
+                                // during process_boards() call
                                 let api_available = WEB_API.read().is_some();
                                 if api_available {
-                                    // Set up the chat delegate to load rooms from storage
+                                    // Set up the chat delegate to load boards from storage
                                     if let Err(e) = set_up_chat_delegate().await {
                                         error!("Failed to set up chat delegate: {}", e);
                                     }
 
-                                    info!("Processing rooms after successful connection");
+                                    info!("Processing boards after successful connection");
                                     if let Err(e) = response_handler
-                                        .get_room_synchronizer_mut()
-                                        .process_rooms()
+                                        .get_board_synchronizer_mut()
+                                        .process_boards()
                                         .await
                                     {
-                                        error!("Error processing rooms after connection: {}", e);
+                                        error!("Error processing boards after connection: {}", e);
                                     } else {
-                                        info!("Successfully processed rooms after connection");
+                                        info!("Successfully processed boards after connection");
                                     }
                                 } else {
                                     error!("API not available after successful connection");
@@ -342,9 +342,9 @@ impl FreenetSynchronizer {
                                                     super::constants::REPUT_DELAY_MS,
                                                 ))
                                                 .await;
-                                                info!("Re-PUT delay elapsed, triggering ProcessRooms to PUT contract");
+                                                info!("Re-PUT delay elapsed, triggering ProcessBoards to PUT contract");
                                                 if let Err(e) = tx.unbounded_send(
-                                                    SynchronizerMessage::ProcessRooms,
+                                                    SynchronizerMessage::ProcessBoards,
                                                 ) {
                                                     error!("Failed to schedule re-PUT: {}", e);
                                                 }
@@ -362,7 +362,7 @@ impl FreenetSynchronizer {
                                                 .await;
                                                 info!("Subscription timeout check triggered");
                                                 if let Err(e) = tx.unbounded_send(
-                                                    SynchronizerMessage::ProcessRooms,
+                                                    SynchronizerMessage::ProcessBoards,
                                                 ) {
                                                     error!(
                                                         "Failed to schedule timeout check: {}",
@@ -405,31 +405,31 @@ impl FreenetSynchronizer {
                                             contract_id
                                         );
 
-                                        // Check if this contract ID exists in our rooms
-                                        // Collect room information first to avoid nested borrows
-                                        let room_matches: Vec<(VerifyingKey, String)> = {
-                                            let rooms = ROOMS.read();
-                                            rooms
+                                        // Check if this contract ID exists in our boards
+                                        // Collect board information first to avoid nested borrows
+                                        let board_matches: Vec<(VerifyingKey, String)> = {
+                                            let boards = BOARDS.read();
+                                            boards
                                                 .map
                                                 .keys()
-                                                .map(|room_key| {
+                                                .map(|board_key| {
                                                     let contract_key =
-                                                        owner_vk_to_contract_key(room_key);
-                                                    let room_contract_id = contract_key.id();
-                                                    (*room_key, room_contract_id.to_string())
+                                                        owner_vk_to_contract_key(board_key);
+                                                    let board_contract_id = contract_key.id();
+                                                    (*board_key, board_contract_id.to_string())
                                                 })
                                                 .collect()
                                         };
 
                                         let mut found = false;
-                                        let mut matching_rooms = Vec::new();
+                                        let mut matching_boards = Vec::new();
 
-                                        for (room_key, room_contract_id) in &room_matches {
-                                            if room_contract_id == contract_id {
-                                                info!("Contract ID {} matches room with owner key: {:?}", 
-                                                      contract_id, MemberId::from(*room_key));
+                                        for (board_key, board_contract_id) in &board_matches {
+                                            if board_contract_id == contract_id {
+                                                info!("Contract ID {} matches board with owner key: {:?}", 
+                                                      contract_id, MemberId::from(*board_key));
                                                 found = true;
-                                                matching_rooms.push(*room_key);
+                                                matching_boards.push(*board_key);
                                             }
                                         }
 
@@ -439,34 +439,34 @@ impl FreenetSynchronizer {
                                             // see: https://github.com/freenet/freenet-core/issues/1470
                                             info!("Detected race condition with contract creation. Scheduling retry...");
 
-                                            // Reset the room's sync status to Disconnected so it will be retried
-                                            for room_key in &matching_rooms {
-                                                info!("Resetting sync status for room {:?} to Disconnected for retry", 
-                                                      MemberId::from(*room_key));
+                                            // Reset the board's sync status to Disconnected so it will be retried
+                                            for board_key in &matching_boards {
+                                                info!("Resetting sync status for board {:?} to Disconnected for retry", 
+                                                      MemberId::from(*board_key));
                                                 SYNC_INFO.write().update_sync_status(
-                                                    room_key,
-                                                    RoomSyncStatus::Disconnected,
+                                                    board_key,
+                                                    BoardSyncStatus::Disconnected,
                                                 );
                                             }
 
                                             // Schedule a retry after a delay
                                             let tx = message_tx.clone();
                                             spawn_local(async move {
-                                                info!("Waiting before retrying room processing...");
+                                                info!("Waiting before retrying board processing...");
                                                 sleep(Duration::from_millis(
                                                     super::constants::POST_PUT_DELAY_MS,
                                                 ))
                                                 .await;
-                                                info!("Retrying room processing after contract not found error");
+                                                info!("Retrying board processing after contract not found error");
                                                 if let Err(e) = tx.unbounded_send(
-                                                    SynchronizerMessage::ProcessRooms,
+                                                    SynchronizerMessage::ProcessBoards,
                                                 ) {
                                                     error!("Failed to schedule retry: {}", e);
                                                 }
                                             });
                                         } else {
                                             info!(
-                                                "Contract ID {} not found in any of our rooms",
+                                                "Contract ID {} not found in any of our boards",
                                                 contract_id
                                             );
                                         }
@@ -482,14 +482,14 @@ impl FreenetSynchronizer {
                         nickname: _,
                     } => {
                         info!("Processing invitation acceptance");
-                        // Instead of creating the room immediately, we'll process it through
-                        // the regular room processing flow which will subscribe to the room
+                        // Instead of creating the board immediately, we'll process it through
+                        // the regular board processing flow which will subscribe to the board
                         if let Err(e) = response_handler
-                            .get_room_synchronizer_mut()
-                            .process_rooms()
+                            .get_board_synchronizer_mut()
+                            .process_boards()
                             .await
                         {
-                            error!("Failed to process rooms after invitation acceptance: {}", e);
+                            error!("Failed to process boards after invitation acceptance: {}", e);
                         }
                     }
                 }

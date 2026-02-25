@@ -12,13 +12,13 @@ use freenet_stdlib::prelude::{
     ContractCode, ContractContainer, ContractInstanceId, ContractKey, ContractWasmAPIVersion,
     Parameters, UpdateData, WrappedContract, WrappedState,
 };
-use river_core::room_state::ban::{AuthorizedUserBan, UserBan};
-use river_core::room_state::configuration::{AuthorizedConfigurationV1, Configuration};
-use river_core::room_state::member::{AuthorizedMember, Member, MemberId, MembersDelta};
-use river_core::room_state::member_info::{AuthorizedMemberInfo, MemberInfo};
-use river_core::room_state::privacy::{RoomDisplayMetadata, SealedBytes};
-use river_core::room_state::ChatRoomStateV1Delta;
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1};
+use river_core::board_state::ban::{AuthorizedUserBan, UserBan};
+use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
+use river_core::board_state::member::{AuthorizedMember, Member, MemberId, MembersDelta};
+use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
+use river_core::board_state::privacy::{BoardDisplayMetadata, SealedBytes};
+use river_core::board_state::ChatBoardStateV1Delta;
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
@@ -28,25 +28,25 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::connect_async;
 use tracing::{debug, info};
 
-// Load the room contract WASM copied by build.rs
-const ROOM_CONTRACT_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/room_contract.wasm"));
+// Load the board contract WASM copied by build.rs
+const BOARD_CONTRACT_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/board_contract.wasm"));
 
-/// Compute the contract key for a room from its owner verifying key.
+/// Compute the contract key for a board from its owner verifying key.
 /// This uses the current bundled WASM to ensure consistency.
 pub fn compute_contract_key(owner_vk: &VerifyingKey) -> ContractKey {
-    let params = ChatRoomParametersV1 { owner: *owner_vk };
+    let params = ChatBoardParametersV1 { owner: *owner_vk };
     let params_bytes = {
         let mut buf = Vec::new();
         ciborium::ser::into_writer(&params, &mut buf).expect("Failed to serialize parameters");
         buf
     };
-    let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+    let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
     ContractKey::from_params_and_code(Parameters::from(params_bytes), &contract_code)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Invitation {
-    pub room: VerifyingKey,
+    pub board: VerifyingKey,
     pub invitee_signing_key: SigningKey,
     pub invitee: AuthorizedMember,
 }
@@ -82,31 +82,31 @@ impl ApiClient {
         })
     }
 
-    pub async fn create_room(
+    pub async fn create_board(
         &self,
         name: String,
         nickname: String,
     ) -> Result<(VerifyingKey, ContractKey)> {
-        info!("Creating room: {}", name);
+        info!("Creating board: {}", name);
 
-        // Generate signing key for the room owner
+        // Generate signing key for the board owner
         let signing_key =
             SigningKey::from_bytes(&rand::Rng::gen::<[u8; 32]>(&mut rand::thread_rng()));
         let owner_vk = signing_key.verifying_key();
 
-        // Create initial room state
-        let mut room_state = ChatRoomStateV1::default();
+        // Create initial board state
+        let mut board_state = ChatBoardStateV1::default();
 
         // Set initial configuration
         let config = Configuration {
             owner_member_id: owner_vk.into(),
-            display: RoomDisplayMetadata {
+            display: BoardDisplayMetadata {
                 name: SealedBytes::public(name.clone().into_bytes()),
                 description: None,
             },
             ..Configuration::default()
         };
-        room_state.configuration = AuthorizedConfigurationV1::new(config, &signing_key);
+        board_state.configuration = AuthorizedConfigurationV1::new(config, &signing_key);
 
         // Add owner to member_info
         let owner_info = MemberInfo {
@@ -115,13 +115,13 @@ impl ApiClient {
             preferred_nickname: SealedBytes::public(nickname.into_bytes()),
         };
         let authorized_owner_info = AuthorizedMemberInfo::new(owner_info, &signing_key);
-        room_state
+        board_state
             .member_info
             .member_info
             .push(authorized_owner_info);
 
         // Generate contract key using ciborium for serialization (matching UI code)
-        let parameters = ChatRoomParametersV1 { owner: owner_vk };
+        let parameters = ChatBoardParametersV1 { owner: owner_vk };
         let params_bytes = {
             let mut buf = Vec::new();
             ciborium::ser::into_writer(&parameters, &mut buf)
@@ -129,7 +129,7 @@ impl ApiClient {
             buf
         };
 
-        let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+        let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
         // Use the full ContractKey constructor that includes the code hash
         let contract_key = ContractKey::from_params_and_code(
             Parameters::from(params_bytes.clone()),
@@ -144,13 +144,13 @@ impl ApiClient {
         // Create wrapped state using ciborium
         let state_bytes = {
             let mut buf = Vec::new();
-            ciborium::ser::into_writer(&room_state, &mut buf)
-                .map_err(|e| anyhow!("Failed to serialize room state: {}", e))?;
+            ciborium::ser::into_writer(&board_state, &mut buf)
+                .map_err(|e| anyhow!("Failed to serialize board state: {}", e))?;
             buf
         };
         let wrapped_state = WrappedState::new(state_bytes);
 
-        // Create PUT request - subscribe: true so we receive updates to our own room
+        // Create PUT request - subscribe: true so we receive updates to our own board
         let put_request = ContractRequest::Put {
             contract: contract_container,
             state: wrapped_state,
@@ -190,11 +190,11 @@ impl ApiClient {
                             ));
                         }
 
-                        // Store room info persistently
-                        self.storage.add_room(
+                        // Store board info persistently
+                        self.storage.add_board(
                             &owner_vk,
                             &signing_key,
-                            room_state,
+                            board_state,
                             &contract_key,
                         )?;
 
@@ -217,11 +217,11 @@ impl ApiClient {
                             ));
                         }
 
-                        // Store room info persistently
-                        self.storage.add_room(
+                        // Store board info persistently
+                        self.storage.add_board(
                             &owner_vk,
                             &signing_key,
-                            room_state,
+                            board_state,
                             &contract_key,
                         )?;
 
@@ -240,9 +240,9 @@ impl ApiClient {
                     contract_key.id()
                 );
 
-                // Store room info persistently
+                // Store board info persistently
                 self.storage
-                    .add_room(&owner_vk, &signing_key, room_state, &contract_key)?;
+                    .add_board(&owner_vk, &signing_key, board_state, &contract_key)?;
 
                 Ok((owner_vk, contract_key))
             }
@@ -250,25 +250,25 @@ impl ApiClient {
         }
     }
 
-    /// Republish a room contract to the network
+    /// Republish a board contract to the network
     ///
     /// This re-PUTs the contract with its current state, making this node seed it again.
     /// Use this when the contract exists locally but isn't being served on the network.
-    pub async fn republish_room(&self, room_owner_key: &VerifyingKey) -> Result<()> {
+    pub async fn republish_board(&self, board_owner_key: &VerifyingKey) -> Result<()> {
         info!(
-            "Republishing room owned by: {}",
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            "Republishing board owned by: {}",
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Get the room state from local storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
+        // Get the board state from local storage
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
             anyhow!("Board not found in local storage. Cannot republish without local state.")
         })?;
-        let (_signing_key, room_state, _contract_key_str) = room_data;
+        let (_signing_key, board_state, _contract_key_str) = board_data;
 
         // Create parameters
-        let parameters = ChatRoomParametersV1 {
-            owner: *room_owner_key,
+        let parameters = ChatBoardParametersV1 {
+            owner: *board_owner_key,
         };
         let params_bytes = {
             let mut buf = Vec::new();
@@ -277,7 +277,7 @@ impl ApiClient {
             buf
         };
 
-        let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+        let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
         let contract_key = ContractKey::from_params_and_code(
             Parameters::from(params_bytes.clone()),
             &contract_code,
@@ -291,8 +291,8 @@ impl ApiClient {
         // Serialize state
         let state_bytes = {
             let mut buf = Vec::new();
-            ciborium::ser::into_writer(&room_state, &mut buf)
-                .map_err(|e| anyhow!("Failed to serialize room state: {}", e))?;
+            ciborium::ser::into_writer(&board_state, &mut buf)
+                .map_err(|e| anyhow!("Failed to serialize board state: {}", e))?;
             buf
         };
         let wrapped_state = WrappedState::new(state_bytes);
@@ -344,13 +344,13 @@ impl ApiClient {
         }
     }
 
-    pub async fn get_room(
+    pub async fn get_board(
         &self,
-        room_owner_key: &VerifyingKey,
+        board_owner_key: &VerifyingKey,
         subscribe: bool,
-    ) -> Result<ChatRoomStateV1> {
-        let contract_key = self.owner_vk_to_contract_key(room_owner_key);
-        info!("Getting room state for contract: {}", contract_key.id());
+    ) -> Result<ChatBoardStateV1> {
+        let contract_key = self.owner_vk_to_contract_key(board_owner_key);
+        info!("Getting board state for contract: {}", contract_key.id());
 
         let get_request = ContractRequest::Get {
             key: *contract_key.id(),    // GET uses ContractInstanceId
@@ -381,15 +381,15 @@ impl ApiClient {
                 match contract_response {
                     ContractResponse::GetResponse { state, .. } => {
                         // Deserialize the state properly
-                        let mut room_state: ChatRoomStateV1 = ciborium::de::from_reader(&state[..])
-                            .map_err(|e| anyhow!("Failed to deserialize room state: {}", e))?;
+                        let mut board_state: ChatBoardStateV1 = ciborium::de::from_reader(&state[..])
+                            .map_err(|e| anyhow!("Failed to deserialize board state: {}", e))?;
 
                         // Rebuild actions state (edits, deletes, reactions) from message content
-                        room_state.recent_messages.rebuild_actions_state();
+                        board_state.recent_messages.rebuild_actions_state();
 
                         info!(
-                            "Successfully retrieved room state with {} messages",
-                            room_state.recent_messages.messages.len()
+                            "Successfully retrieved board state with {} messages",
+                            board_state.recent_messages.messages.len()
                         );
 
                         // Drop the lock before subscribing
@@ -445,7 +445,7 @@ impl ApiClient {
                             }
                         }
 
-                        Ok(room_state)
+                        Ok(board_state)
                     }
                     _ => Err(anyhow!("Unexpected contract response type")),
                 }
@@ -470,16 +470,16 @@ impl ApiClient {
         Ok(())
     }
 
-    pub async fn create_invitation(&self, room_owner_key: &VerifyingKey) -> Result<String> {
+    pub async fn create_invitation(&self, board_owner_key: &VerifyingKey) -> Result<String> {
         info!(
-            "Creating invitation for room owned by: {}",
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            "Creating invitation for board owned by: {}",
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Get the room info from persistent storage
-        let room_data = self.storage.get_room(room_owner_key)?
-            .ok_or_else(|| anyhow!("Board not found in local storage. You must be the room owner to create invitations."))?;
-        let (signing_key, _state, _contract_key) = room_data;
+        // Get the board info from persistent storage
+        let board_data = self.storage.get_board(board_owner_key)?
+            .ok_or_else(|| anyhow!("Board not found in local storage. You must be the board owner to create invitations."))?;
+        let (signing_key, _state, _contract_key) = board_data;
 
         // Generate a new signing key for the invitee
         let invitee_signing_key =
@@ -488,17 +488,17 @@ impl ApiClient {
 
         // Create the member entry for the invitee
         let member = Member {
-            owner_member_id: (*room_owner_key).into(),
+            owner_member_id: (*board_owner_key).into(),
             member_vk: invitee_vk,
             invited_by: signing_key.verifying_key().into(),
         };
 
-        // Sign the member entry with the inviter's key (room owner in this case)
+        // Sign the member entry with the inviter's key (board owner in this case)
         let authorized_member = AuthorizedMember::new(member, &signing_key);
 
         // Create the invitation struct
         let invitation = Invitation {
-            room: *room_owner_key,
+            board: *board_owner_key,
             invitee_signing_key,
             invitee: authorized_member,
         };
@@ -526,16 +526,16 @@ impl ApiClient {
         let invitation: Invitation = ciborium::de::from_reader(&decoded[..])
             .map_err(|e| anyhow!("Failed to deserialize invitation: {}", e))?;
 
-        let room_owner_vk = invitation.room;
-        let contract_key = self.owner_vk_to_contract_key(&room_owner_vk);
+        let board_owner_vk = invitation.board;
+        let contract_key = self.owner_vk_to_contract_key(&board_owner_vk);
 
         info!(
-            "Invitation is for room owned by: {}",
-            bs58::encode(room_owner_vk.as_bytes()).into_string()
+            "Invitation is for board owned by: {}",
+            bs58::encode(board_owner_vk.as_bytes()).into_string()
         );
         info!("Contract key: {}", contract_key.id());
 
-        // Perform a GET request to fetch the room state
+        // Perform a GET request to fetch the board state
         let get_request = ContractRequest::Get {
             key: *contract_key.id(),    // GET uses ContractInstanceId
             return_contract_code: true, // Request full contract to enable caching
@@ -565,27 +565,27 @@ impl ApiClient {
             HostResponse::ContractResponse(contract_response) => {
                 match contract_response {
                     ContractResponse::GetResponse { state, .. } => {
-                        info!("Successfully retrieved room state");
+                        info!("Successfully retrieved board state");
 
-                        // Parse the actual room state from the response
-                        let room_state: ChatRoomStateV1 = ciborium::de::from_reader(&state[..])
-                            .map_err(|e| anyhow!("Failed to deserialize room state: {}", e))?;
+                        // Parse the actual board state from the response
+                        let board_state: ChatBoardStateV1 = ciborium::de::from_reader(&state[..])
+                            .map_err(|e| anyhow!("Failed to deserialize board state: {}", e))?;
 
                         info!(
                             "Board state retrieved: name={}, members={}, messages={}",
-                            room_state
+                            board_state
                                 .configuration
                                 .configuration
                                 .display
                                 .name
                                 .to_string_lossy(),
-                            room_state.members.members.len(),
-                            room_state.recent_messages.messages.len()
+                            board_state.members.members.len(),
+                            board_state.recent_messages.messages.len()
                         );
 
-                        // Validate the room state is properly initialized
-                        if room_state.configuration.configuration.owner_member_id
-                            == river_core::room_state::member::MemberId(
+                        // Validate the board state is properly initialized
+                        if board_state.configuration.configuration.owner_member_id
+                            == river_core::board_state::member::MemberId(
                                 freenet_scaffold::util::FastHash(0),
                             )
                         {
@@ -595,43 +595,43 @@ impl ApiClient {
                         // Compute invite chain before storing (walks up from invitee
                         // to owner through existing members — doesn't require the
                         // invitee to be in the members list)
-                        let params_for_chain = ChatRoomParametersV1 {
-                            owner: room_owner_vk,
+                        let params_for_chain = ChatBoardParametersV1 {
+                            owner: board_owner_vk,
                         };
-                        let invite_chain = room_state
+                        let invite_chain = board_state
                             .members
                             .get_invite_chain(&invitation.invitee, &params_for_chain)
                             .unwrap_or_default();
 
-                        // Store the room state locally WITHOUT adding ourselves to
+                        // Store the board state locally WITHOUT adding ourselves to
                         // members. Membership will be added to the network atomically
                         // with our first message via build_rejoin_delta, which bundles
                         // AuthorizedMember + message in a single delta. This avoids a
                         // race where post_apply_cleanup prunes a member with no
                         // messages before their first message arrives.
-                        self.storage.add_room(
-                            &room_owner_vk,
+                        self.storage.add_board(
+                            &board_owner_vk,
                             &invitation.invitee_signing_key,
-                            room_state,
+                            board_state,
                             &contract_key,
                         )?;
 
                         // Store authorized member and invite chain so
                         // build_rejoin_delta can re-add us when we send a message
                         self.storage.store_authorized_member(
-                            &room_owner_vk,
+                            &board_owner_vk,
                             &invitation.invitee,
                             &invite_chain,
                         )?;
 
                         info!(
-                            "Invitation accepted: stored credentials for room, \
+                            "Invitation accepted: stored credentials for board, \
                              membership will be published with first message"
                         );
 
                         drop(web_api);
 
-                        Ok((room_owner_vk, contract_key))
+                        Ok((board_owner_vk, contract_key))
                     }
                     _ => Err(anyhow!("Unexpected contract response type")),
                 }
@@ -641,21 +641,21 @@ impl ApiClient {
     }
 
     pub fn owner_vk_to_contract_key(&self, owner_vk: &VerifyingKey) -> ContractKey {
-        let parameters = ChatRoomParametersV1 { owner: *owner_vk };
+        let parameters = ChatBoardParametersV1 { owner: *owner_vk };
         let params_bytes = {
             let mut buf = Vec::new();
             ciborium::ser::into_writer(&parameters, &mut buf)
                 .expect("Serialization should not fail");
             buf
         };
-        let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+        let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
         // Use the full ContractKey constructor that includes the code hash
         ContractKey::from_params_and_code(Parameters::from(params_bytes), &contract_code)
     }
 
-    /// Check if a room needs migration to a new contract version and perform it if needed.
+    /// Check if a board needs migration to a new contract version and perform it if needed.
     ///
-    /// This is called automatically when accessing a room. If the bundled contract WASM
+    /// This is called automatically when accessing a board. If the bundled contract WASM
     /// has changed (e.g., bug fixes), this will:
     /// 1. Detect the contract key mismatch
     /// 2. Fetch state from the old contract (or use local cache)
@@ -663,11 +663,11 @@ impl ApiClient {
     /// 4. Update local storage
     ///
     /// Returns the current contract key (possibly updated).
-    pub async fn ensure_room_migrated(&self, room_owner_key: &VerifyingKey) -> Result<ContractKey> {
-        let expected_key = self.owner_vk_to_contract_key(room_owner_key);
+    pub async fn ensure_board_migrated(&self, board_owner_key: &VerifyingKey) -> Result<ContractKey> {
+        let expected_key = self.owner_vk_to_contract_key(board_owner_key);
 
-        // Check if we have this room locally
-        let room_data = match self.storage.get_room(room_owner_key)? {
+        // Check if we have this board locally
+        let board_data = match self.storage.get_board(board_owner_key)? {
             Some(data) => data,
             None => {
                 // Board not in local storage, no migration needed
@@ -675,7 +675,7 @@ impl ApiClient {
             }
         };
 
-        let (signing_key, room_state, stored_contract_key_str) = room_data;
+        let (signing_key, board_state, stored_contract_key_str) = board_data;
 
         // Check if migration is needed
         let expected_key_str = expected_key.id().to_string();
@@ -712,10 +712,10 @@ impl ApiClient {
                     // Timeout - assume contract doesn't exist yet, we'll create it
                     drop(web_api);
                     return self
-                        .migrate_room_to_new_contract(
-                            room_owner_key,
+                        .migrate_board_to_new_contract(
+                            board_owner_key,
                             &signing_key,
-                            &room_state,
+                            &board_state,
                             expected_key,
                         )
                         .await;
@@ -727,16 +727,16 @@ impl ApiClient {
                 // New contract already exists, just update our local storage
                 info!("New contract already exists, updating local reference");
                 self.storage
-                    .update_contract_key(room_owner_key, &expected_key)?;
+                    .update_contract_key(board_owner_key, &expected_key)?;
                 Ok(expected_key)
             }
             _ => {
                 // Contract doesn't exist, migrate it
                 drop(web_api);
-                self.migrate_room_to_new_contract(
-                    room_owner_key,
+                self.migrate_board_to_new_contract(
+                    board_owner_key,
                     &signing_key,
-                    &room_state,
+                    &board_state,
                     expected_key,
                 )
                 .await
@@ -744,18 +744,18 @@ impl ApiClient {
         }
     }
 
-    /// Migrate a room to a new contract by PUTting the state
-    async fn migrate_room_to_new_contract(
+    /// Migrate a board to a new contract by PUTting the state
+    async fn migrate_board_to_new_contract(
         &self,
-        room_owner_key: &VerifyingKey,
+        board_owner_key: &VerifyingKey,
         _signing_key: &SigningKey, // Kept for potential future use (e.g., signing migration metadata)
-        room_state: &ChatRoomStateV1,
+        board_state: &ChatBoardStateV1,
         new_contract_key: ContractKey,
     ) -> Result<ContractKey> {
-        info!("Migrating room to new contract: {}", new_contract_key.id());
+        info!("Migrating board to new contract: {}", new_contract_key.id());
 
-        let parameters = ChatRoomParametersV1 {
-            owner: *room_owner_key,
+        let parameters = ChatBoardParametersV1 {
+            owner: *board_owner_key,
         };
         let params_bytes = {
             let mut buf = Vec::new();
@@ -764,15 +764,15 @@ impl ApiClient {
             buf
         };
 
-        let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+        let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
         let contract_container = ContractContainer::from(ContractWasmAPIVersion::V1(
             WrappedContract::new(Arc::new(contract_code), Parameters::from(params_bytes)),
         ));
 
         let state_bytes = {
             let mut buf = Vec::new();
-            ciborium::ser::into_writer(room_state, &mut buf)
-                .map_err(|e| anyhow!("Failed to serialize room state: {}", e))?;
+            ciborium::ser::into_writer(board_state, &mut buf)
+                .map_err(|e| anyhow!("Failed to serialize board state: {}", e))?;
             buf
         };
         let wrapped_state = WrappedState::new(state_bytes);
@@ -795,20 +795,20 @@ impl ApiClient {
             match tokio::time::timeout(std::time::Duration::from_secs(60), web_api.recv()).await {
                 Ok(Ok(resp)) => resp,
                 Ok(Err(e)) => return Err(anyhow!("Failed to receive migration response: {}", e)),
-                Err(_) => return Err(anyhow!("Timeout during room migration")),
+                Err(_) => return Err(anyhow!("Timeout during board migration")),
             };
 
         match response {
             HostResponse::ContractResponse(ContractResponse::PutResponse { key }) => {
                 info!("Board migrated successfully to: {}", key.id());
                 // Update local storage with new contract key
-                self.storage.update_contract_key(room_owner_key, &key)?;
+                self.storage.update_contract_key(board_owner_key, &key)?;
                 Ok(key)
             }
             HostResponse::Ok => {
                 info!("Board migrated successfully (Ok response)");
                 self.storage
-                    .update_contract_key(room_owner_key, &new_contract_key)?;
+                    .update_contract_key(board_owner_key, &new_contract_key)?;
                 Ok(new_contract_key)
             }
             _ => Err(anyhow!(
@@ -818,9 +818,9 @@ impl ApiClient {
         }
     }
 
-    pub async fn list_rooms(&self) -> Result<Vec<(String, String, String)>> {
-        self.storage.list_rooms().map(|rooms| {
-            rooms
+    pub async fn list_boards(&self) -> Result<Vec<(String, String, String)>> {
+        self.storage.list_boards().map(|boards| {
+            boards
                 .into_iter()
                 .map(|(owner_vk, name, contract_key)| {
                     (
@@ -837,19 +837,19 @@ impl ApiClient {
     /// Returns (members_delta, member_info_delta) if the user needs to re-add themselves.
     fn build_rejoin_delta(
         &self,
-        room_state: &ChatRoomStateV1,
-        room_owner_key: &VerifyingKey,
+        board_state: &ChatBoardStateV1,
+        board_owner_key: &VerifyingKey,
         signing_key: &SigningKey,
     ) -> (Option<MembersDelta>, Option<Vec<AuthorizedMemberInfo>>) {
         let self_vk = signing_key.verifying_key();
 
         // Owner doesn't need to re-add
-        if self_vk == *room_owner_key {
+        if self_vk == *board_owner_key {
             return (None, None);
         }
 
         // Already in members list
-        if room_state
+        if board_state
             .members
             .members
             .iter()
@@ -859,12 +859,12 @@ impl ApiClient {
         }
 
         // Try to get stored authorized member
-        let storage = match self.storage.load_rooms() {
+        let storage = match self.storage.load_boards() {
             Ok(s) => s,
             Err(_) => return (None, None),
         };
-        let key_str = bs58::encode(room_owner_key.as_bytes()).into_string();
-        let (authorized_member, invite_chain) = match storage.rooms.get(&key_str) {
+        let key_str = bs58::encode(board_owner_key.as_bytes()).into_string();
+        let (authorized_member, invite_chain) = match storage.boards.get(&key_str) {
             Some(info) => match &info.self_authorized_member {
                 Some(am) => (am.clone(), info.invite_chain.clone()),
                 None => return (None, None),
@@ -873,7 +873,7 @@ impl ApiClient {
         };
 
         // Build members delta - include self and any missing chain members
-        let current_member_ids: HashSet<MemberId> = room_state
+        let current_member_ids: HashSet<MemberId> = board_state
             .members
             .members
             .iter()
@@ -888,7 +888,7 @@ impl ApiClient {
 
         // Build member_info delta
         let self_id = MemberId::from(&self_vk);
-        let existing_version = room_state
+        let existing_version = board_state
             .member_info
             .member_info
             .iter()
@@ -911,26 +911,26 @@ impl ApiClient {
 
     /// Send a message using an explicit signing key (without requiring local storage)
     ///
-    /// This fetches the room state from the network and validates the sender is a member
+    /// This fetches the board state from the network and validates the sender is a member
     /// before sending. Useful for automation, bots, and CI/CD pipelines.
     pub async fn send_message_with_key(
         &self,
-        room_owner_key: &VerifyingKey,
+        board_owner_key: &VerifyingKey,
         message_content: String,
         signing_key: &SigningKey,
     ) -> Result<()> {
         info!(
-            "Sending message (with explicit key) to room owned by: {}",
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            "Sending message (with explicit key) to board owned by: {}",
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Fetch room state from the network
-        let mut room_state = self.get_room(room_owner_key, false).await?;
+        // Fetch board state from the network
+        let mut board_state = self.get_board(board_owner_key, false).await?;
 
-        // Verify the sender is a member of the room
+        // Verify the sender is a member of the board
         let sender_vk = signing_key.verifying_key();
         let sender_member_id: MemberId = (&sender_vk).into();
-        let is_member = room_state
+        let is_member = board_state
             .members
             .members
             .iter()
@@ -938,28 +938,28 @@ impl ApiClient {
 
         if !is_member {
             return Err(anyhow!(
-                "Signing key does not belong to a member of this room"
+                "Signing key does not belong to a member of this board"
             ));
         }
 
         // Create the message
-        let message = river_core::room_state::message::MessageV1 {
-            room_owner: MemberId::from(*room_owner_key),
+        let message = river_core::board_state::message::MessageV1 {
+            board_owner: MemberId::from(*board_owner_key),
             author: sender_member_id,
-            content: river_core::room_state::message::RoomMessageBody::public(String::new(), message_content),
+            content: river_core::board_state::message::BoardMessageBody::public(String::new(), message_content),
             time: std::time::SystemTime::now(),
         };
 
         // Sign the message
         let auth_message =
-            river_core::room_state::message::AuthorizedMessageV1::new(message, signing_key);
+            river_core::board_state::message::AuthorizedMessageV1::new(message, signing_key);
 
         // Check if we need to re-add ourselves (pruned for inactivity)
         let (members_delta, member_info_delta) =
-            self.build_rejoin_delta(&room_state, room_owner_key, signing_key);
+            self.build_rejoin_delta(&board_state, board_owner_key, signing_key);
 
         // Create a delta with the new message
-        let delta = ChatRoomStateV1Delta {
+        let delta = ChatBoardStateV1Delta {
             recent_messages: Some(vec![auth_message.clone()]),
             members: members_delta,
             member_info: member_info_delta,
@@ -967,15 +967,15 @@ impl ApiClient {
         };
 
         // Apply the delta locally for validation
-        let params = ChatRoomParametersV1 {
-            owner: *room_owner_key,
+        let params = ChatBoardParametersV1 {
+            owner: *board_owner_key,
         };
-        room_state
-            .apply_delta(&room_state.clone(), &params, &Some(delta.clone()))
+        board_state
+            .apply_delta(&board_state.clone(), &params, &Some(delta.clone()))
             .map_err(|e| anyhow!("Failed to apply message delta: {:?}", e))?;
 
         // Send the delta to the network
-        let contract_key = self.owner_vk_to_contract_key(room_owner_key);
+        let contract_key = self.owner_vk_to_contract_key(board_owner_key);
 
         let delta_bytes = {
             let mut buf = Vec::new();
@@ -1019,38 +1019,38 @@ impl ApiClient {
 
     pub async fn send_message(
         &self,
-        room_owner_key: &VerifyingKey,
+        board_owner_key: &VerifyingKey,
         message_content: String,
     ) -> Result<()> {
         info!(
-            "Sending message to room owned by: {}",
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            "Sending message to board owned by: {}",
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Get the room info from storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Board not found. You must be a member of the room to send messages.")
+        // Get the board info from storage
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
+            anyhow!("Board not found. You must be a member of the board to send messages.")
         })?;
-        let (signing_key, mut room_state, _contract_key_str) = room_data;
+        let (signing_key, mut board_state, _contract_key_str) = board_data;
 
         // Create the message
-        let message = river_core::room_state::message::MessageV1 {
-            room_owner: river_core::room_state::member::MemberId::from(*room_owner_key),
-            author: river_core::room_state::member::MemberId::from(&signing_key.verifying_key()),
-            content: river_core::room_state::message::RoomMessageBody::public(String::new(), message_content),
+        let message = river_core::board_state::message::MessageV1 {
+            board_owner: river_core::board_state::member::MemberId::from(*board_owner_key),
+            author: river_core::board_state::member::MemberId::from(&signing_key.verifying_key()),
+            content: river_core::board_state::message::BoardMessageBody::public(String::new(), message_content),
             time: std::time::SystemTime::now(),
         };
 
         // Sign the message
         let auth_message =
-            river_core::room_state::message::AuthorizedMessageV1::new(message, &signing_key);
+            river_core::board_state::message::AuthorizedMessageV1::new(message, &signing_key);
 
         // Check if we need to re-add ourselves (pruned for inactivity)
         let (members_delta, member_info_delta) =
-            self.build_rejoin_delta(&room_state, room_owner_key, &signing_key);
+            self.build_rejoin_delta(&board_state, board_owner_key, &signing_key);
 
         // Create a delta with the new message
-        let delta = river_core::room_state::ChatRoomStateV1Delta {
+        let delta = river_core::board_state::ChatBoardStateV1Delta {
             recent_messages: Some(vec![auth_message.clone()]),
             members: members_delta,
             member_info: member_info_delta,
@@ -1058,19 +1058,19 @@ impl ApiClient {
         };
 
         // Apply the delta to our local state for validation
-        let params = ChatRoomParametersV1 {
-            owner: *room_owner_key,
+        let params = ChatBoardParametersV1 {
+            owner: *board_owner_key,
         };
-        room_state
-            .apply_delta(&room_state.clone(), &params, &Some(delta.clone()))
+        board_state
+            .apply_delta(&board_state.clone(), &params, &Some(delta.clone()))
             .map_err(|e| anyhow!("Failed to apply message delta: {:?}", e))?;
 
         // Update the stored state
         self.storage
-            .update_room_state(room_owner_key, room_state.clone())?;
+            .update_board_state(board_owner_key, board_state.clone())?;
 
         // Send the delta to the network
-        let contract_key = self.owner_vk_to_contract_key(room_owner_key);
+        let contract_key = self.owner_vk_to_contract_key(board_owner_key);
 
         // Serialize the delta
         let delta_bytes = {
@@ -1117,27 +1117,27 @@ impl ApiClient {
     /// Edit a message you sent
     pub async fn edit_message(
         &self,
-        room_owner_key: &VerifyingKey,
-        target_message_id: river_core::room_state::message::MessageId,
+        board_owner_key: &VerifyingKey,
+        target_message_id: river_core::board_state::message::MessageId,
         new_title: String,
         new_content: String,
     ) -> Result<()> {
         info!(
-            "Editing message in room owned by: {}",
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            "Editing message in board owned by: {}",
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Get the room info from storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Board not found. You must be a member of the room to edit messages.")
+        // Get the board info from storage
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
+            anyhow!("Board not found. You must be a member of the board to edit messages.")
         })?;
-        let (signing_key, mut room_state, _contract_key_str) = room_data;
+        let (signing_key, mut board_state, _contract_key_str) = board_data;
 
         // Create the edit action message
-        let message = river_core::room_state::message::MessageV1 {
-            room_owner: MemberId::from(*room_owner_key),
+        let message = river_core::board_state::message::MessageV1 {
+            board_owner: MemberId::from(*board_owner_key),
             author: MemberId::from(&signing_key.verifying_key()),
-            content: river_core::room_state::message::RoomMessageBody::edit(
+            content: river_core::board_state::message::BoardMessageBody::edit(
                 target_message_id,
                 new_title,
                 new_content,
@@ -1147,14 +1147,14 @@ impl ApiClient {
 
         // Sign the message
         let auth_message =
-            river_core::room_state::message::AuthorizedMessageV1::new(message, &signing_key);
+            river_core::board_state::message::AuthorizedMessageV1::new(message, &signing_key);
 
         // Check if we need to re-add ourselves (pruned for inactivity)
         let (members_delta, member_info_delta) =
-            self.build_rejoin_delta(&room_state, room_owner_key, &signing_key);
+            self.build_rejoin_delta(&board_state, board_owner_key, &signing_key);
 
         // Create a delta with the edit action
-        let delta = ChatRoomStateV1Delta {
+        let delta = ChatBoardStateV1Delta {
             recent_messages: Some(vec![auth_message]),
             members: members_delta,
             member_info: member_info_delta,
@@ -1162,55 +1162,55 @@ impl ApiClient {
         };
 
         // Apply the delta to our local state for validation
-        let params = ChatRoomParametersV1 {
-            owner: *room_owner_key,
+        let params = ChatBoardParametersV1 {
+            owner: *board_owner_key,
         };
-        room_state
-            .apply_delta(&room_state.clone(), &params, &Some(delta.clone()))
+        board_state
+            .apply_delta(&board_state.clone(), &params, &Some(delta.clone()))
             .map_err(|e| anyhow!("Failed to apply edit delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_room_state(room_owner_key, room_state)?;
+        self.storage.update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
-        self.send_delta(room_owner_key, delta).await
+        self.send_delta(board_owner_key, delta).await
     }
 
     /// Delete a message you sent
     pub async fn delete_message(
         &self,
-        room_owner_key: &VerifyingKey,
-        target_message_id: river_core::room_state::message::MessageId,
+        board_owner_key: &VerifyingKey,
+        target_message_id: river_core::board_state::message::MessageId,
     ) -> Result<()> {
         info!(
-            "Deleting message in room owned by: {}",
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            "Deleting message in board owned by: {}",
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Get the room info from storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Board not found. You must be a member of the room to delete messages.")
+        // Get the board info from storage
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
+            anyhow!("Board not found. You must be a member of the board to delete messages.")
         })?;
-        let (signing_key, mut room_state, _contract_key_str) = room_data;
+        let (signing_key, mut board_state, _contract_key_str) = board_data;
 
         // Create the delete action message
-        let message = river_core::room_state::message::MessageV1 {
-            room_owner: MemberId::from(*room_owner_key),
+        let message = river_core::board_state::message::MessageV1 {
+            board_owner: MemberId::from(*board_owner_key),
             author: MemberId::from(&signing_key.verifying_key()),
-            content: river_core::room_state::message::RoomMessageBody::delete(target_message_id),
+            content: river_core::board_state::message::BoardMessageBody::delete(target_message_id),
             time: std::time::SystemTime::now(),
         };
 
         // Sign the message
         let auth_message =
-            river_core::room_state::message::AuthorizedMessageV1::new(message, &signing_key);
+            river_core::board_state::message::AuthorizedMessageV1::new(message, &signing_key);
 
         // Check if we need to re-add ourselves (pruned for inactivity)
         let (members_delta, member_info_delta) =
-            self.build_rejoin_delta(&room_state, room_owner_key, &signing_key);
+            self.build_rejoin_delta(&board_state, board_owner_key, &signing_key);
 
         // Create a delta with the delete action
-        let delta = ChatRoomStateV1Delta {
+        let delta = ChatBoardStateV1Delta {
             recent_messages: Some(vec![auth_message]),
             members: members_delta,
             member_info: member_info_delta,
@@ -1218,44 +1218,44 @@ impl ApiClient {
         };
 
         // Apply the delta to our local state for validation
-        let params = ChatRoomParametersV1 {
-            owner: *room_owner_key,
+        let params = ChatBoardParametersV1 {
+            owner: *board_owner_key,
         };
-        room_state
-            .apply_delta(&room_state.clone(), &params, &Some(delta.clone()))
+        board_state
+            .apply_delta(&board_state.clone(), &params, &Some(delta.clone()))
             .map_err(|e| anyhow!("Failed to apply delete delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_room_state(room_owner_key, room_state)?;
+        self.storage.update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
-        self.send_delta(room_owner_key, delta).await
+        self.send_delta(board_owner_key, delta).await
     }
 
     /// Add a reaction to a message
     pub async fn add_reaction(
         &self,
-        room_owner_key: &VerifyingKey,
-        target_message_id: river_core::room_state::message::MessageId,
+        board_owner_key: &VerifyingKey,
+        target_message_id: river_core::board_state::message::MessageId,
         emoji: String,
     ) -> Result<()> {
         info!(
-            "Adding reaction '{}' in room owned by: {}",
+            "Adding reaction '{}' in board owned by: {}",
             emoji,
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Get the room info from storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Board not found. You must be a member of the room to add reactions.")
+        // Get the board info from storage
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
+            anyhow!("Board not found. You must be a member of the board to add reactions.")
         })?;
-        let (signing_key, mut room_state, _contract_key_str) = room_data;
+        let (signing_key, mut board_state, _contract_key_str) = board_data;
 
         // Create the reaction action message
-        let message = river_core::room_state::message::MessageV1 {
-            room_owner: MemberId::from(*room_owner_key),
+        let message = river_core::board_state::message::MessageV1 {
+            board_owner: MemberId::from(*board_owner_key),
             author: MemberId::from(&signing_key.verifying_key()),
-            content: river_core::room_state::message::RoomMessageBody::reaction(
+            content: river_core::board_state::message::BoardMessageBody::reaction(
                 target_message_id,
                 emoji,
             ),
@@ -1264,14 +1264,14 @@ impl ApiClient {
 
         // Sign the message
         let auth_message =
-            river_core::room_state::message::AuthorizedMessageV1::new(message, &signing_key);
+            river_core::board_state::message::AuthorizedMessageV1::new(message, &signing_key);
 
         // Check if we need to re-add ourselves (pruned for inactivity)
         let (members_delta, member_info_delta) =
-            self.build_rejoin_delta(&room_state, room_owner_key, &signing_key);
+            self.build_rejoin_delta(&board_state, board_owner_key, &signing_key);
 
         // Create a delta with the reaction action
-        let delta = ChatRoomStateV1Delta {
+        let delta = ChatBoardStateV1Delta {
             recent_messages: Some(vec![auth_message]),
             members: members_delta,
             member_info: member_info_delta,
@@ -1279,44 +1279,44 @@ impl ApiClient {
         };
 
         // Apply the delta to our local state for validation
-        let params = ChatRoomParametersV1 {
-            owner: *room_owner_key,
+        let params = ChatBoardParametersV1 {
+            owner: *board_owner_key,
         };
-        room_state
-            .apply_delta(&room_state.clone(), &params, &Some(delta.clone()))
+        board_state
+            .apply_delta(&board_state.clone(), &params, &Some(delta.clone()))
             .map_err(|e| anyhow!("Failed to apply reaction delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_room_state(room_owner_key, room_state)?;
+        self.storage.update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
-        self.send_delta(room_owner_key, delta).await
+        self.send_delta(board_owner_key, delta).await
     }
 
     /// Remove a reaction from a message
     pub async fn remove_reaction(
         &self,
-        room_owner_key: &VerifyingKey,
-        target_message_id: river_core::room_state::message::MessageId,
+        board_owner_key: &VerifyingKey,
+        target_message_id: river_core::board_state::message::MessageId,
         emoji: String,
     ) -> Result<()> {
         info!(
-            "Removing reaction '{}' in room owned by: {}",
+            "Removing reaction '{}' in board owned by: {}",
             emoji,
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Get the room info from storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Board not found. You must be a member of the room to remove reactions.")
+        // Get the board info from storage
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
+            anyhow!("Board not found. You must be a member of the board to remove reactions.")
         })?;
-        let (signing_key, mut room_state, _contract_key_str) = room_data;
+        let (signing_key, mut board_state, _contract_key_str) = board_data;
 
         // Create the remove_reaction action message
-        let message = river_core::room_state::message::MessageV1 {
-            room_owner: MemberId::from(*room_owner_key),
+        let message = river_core::board_state::message::MessageV1 {
+            board_owner: MemberId::from(*board_owner_key),
             author: MemberId::from(&signing_key.verifying_key()),
-            content: river_core::room_state::message::RoomMessageBody::remove_reaction(
+            content: river_core::board_state::message::BoardMessageBody::remove_reaction(
                 target_message_id,
                 emoji,
             ),
@@ -1325,14 +1325,14 @@ impl ApiClient {
 
         // Sign the message
         let auth_message =
-            river_core::room_state::message::AuthorizedMessageV1::new(message, &signing_key);
+            river_core::board_state::message::AuthorizedMessageV1::new(message, &signing_key);
 
         // Check if we need to re-add ourselves (pruned for inactivity)
         let (members_delta, member_info_delta) =
-            self.build_rejoin_delta(&room_state, room_owner_key, &signing_key);
+            self.build_rejoin_delta(&board_state, board_owner_key, &signing_key);
 
         // Create a delta with the remove_reaction action
-        let delta = ChatRoomStateV1Delta {
+        let delta = ChatBoardStateV1Delta {
             recent_messages: Some(vec![auth_message]),
             members: members_delta,
             member_info: member_info_delta,
@@ -1340,40 +1340,40 @@ impl ApiClient {
         };
 
         // Apply the delta to our local state for validation
-        let params = ChatRoomParametersV1 {
-            owner: *room_owner_key,
+        let params = ChatBoardParametersV1 {
+            owner: *board_owner_key,
         };
-        room_state
-            .apply_delta(&room_state.clone(), &params, &Some(delta.clone()))
+        board_state
+            .apply_delta(&board_state.clone(), &params, &Some(delta.clone()))
             .map_err(|e| anyhow!("Failed to apply remove_reaction delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_room_state(room_owner_key, room_state)?;
+        self.storage.update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
-        self.send_delta(room_owner_key, delta).await
+        self.send_delta(board_owner_key, delta).await
     }
 
     /// Reply to a message
     pub async fn send_reply(
         &self,
-        room_owner_key: &VerifyingKey,
-        target_message_id: river_core::room_state::message::MessageId,
+        board_owner_key: &VerifyingKey,
+        target_message_id: river_core::board_state::message::MessageId,
         reply_text: String,
     ) -> Result<()> {
         info!(
-            "Sending reply in room owned by: {}",
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            "Sending reply in board owned by: {}",
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Get the room info from storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Board not found. You must be a member of the room to send replies.")
+        // Get the board info from storage
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
+            anyhow!("Board not found. You must be a member of the board to send replies.")
         })?;
-        let (signing_key, mut room_state, _contract_key_str) = room_data;
+        let (signing_key, mut board_state, _contract_key_str) = board_data;
 
         // Find the target message to extract author name and content preview
-        let target_msg = room_state
+        let target_msg = board_state
             .recent_messages
             .display_messages()
             .find(|m| m.id() == target_message_id)
@@ -1381,7 +1381,7 @@ impl ApiClient {
                 anyhow!("Target message not found in recent messages. Cannot reply to expired messages via CLI.")
             })?;
 
-        let target_author_name = room_state
+        let target_author_name = board_state
             .member_info
             .member_info
             .iter()
@@ -1389,7 +1389,7 @@ impl ApiClient {
             .map(|info| info.member_info.preferred_nickname.to_string_lossy())
             .unwrap_or_else(|| target_msg.message.author.to_string());
 
-        let target_content_preview: String = room_state
+        let target_content_preview: String = board_state
             .recent_messages
             .effective_text(target_msg)
             .unwrap_or_else(|| "<encrypted>".to_string())
@@ -1398,10 +1398,10 @@ impl ApiClient {
             .collect();
 
         // Create the reply message
-        let message = river_core::room_state::message::MessageV1 {
-            room_owner: MemberId::from(*room_owner_key),
+        let message = river_core::board_state::message::MessageV1 {
+            board_owner: MemberId::from(*board_owner_key),
             author: MemberId::from(&signing_key.verifying_key()),
-            content: river_core::room_state::message::RoomMessageBody::reply(
+            content: river_core::board_state::message::BoardMessageBody::reply(
                 String::new(),
                 reply_text,
                 target_message_id,
@@ -1413,14 +1413,14 @@ impl ApiClient {
 
         // Sign the message
         let auth_message =
-            river_core::room_state::message::AuthorizedMessageV1::new(message, &signing_key);
+            river_core::board_state::message::AuthorizedMessageV1::new(message, &signing_key);
 
         // Check if we need to re-add ourselves (pruned for inactivity)
         let (members_delta, member_info_delta) =
-            self.build_rejoin_delta(&room_state, room_owner_key, &signing_key);
+            self.build_rejoin_delta(&board_state, board_owner_key, &signing_key);
 
         // Create a delta with the reply message
-        let delta = ChatRoomStateV1Delta {
+        let delta = ChatBoardStateV1Delta {
             recent_messages: Some(vec![auth_message]),
             members: members_delta,
             member_info: member_info_delta,
@@ -1428,27 +1428,27 @@ impl ApiClient {
         };
 
         // Apply the delta to our local state for validation
-        let params = ChatRoomParametersV1 {
-            owner: *room_owner_key,
+        let params = ChatBoardParametersV1 {
+            owner: *board_owner_key,
         };
-        room_state
-            .apply_delta(&room_state.clone(), &params, &Some(delta.clone()))
+        board_state
+            .apply_delta(&board_state.clone(), &params, &Some(delta.clone()))
             .map_err(|e| anyhow!("Failed to apply reply delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_room_state(room_owner_key, room_state)?;
+        self.storage.update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
-        self.send_delta(room_owner_key, delta).await
+        self.send_delta(board_owner_key, delta).await
     }
 
     /// Helper to send a delta to the network
     async fn send_delta(
         &self,
-        room_owner_key: &VerifyingKey,
-        delta: ChatRoomStateV1Delta,
+        board_owner_key: &VerifyingKey,
+        delta: ChatBoardStateV1Delta,
     ) -> Result<()> {
-        let contract_key = self.owner_vk_to_contract_key(room_owner_key);
+        let contract_key = self.owner_vk_to_contract_key(board_owner_key);
 
         // Serialize the delta
         let delta_bytes = {
@@ -1492,29 +1492,29 @@ impl ApiClient {
         }
     }
 
-    /// Stream messages from a room by polling for updates
+    /// Stream messages from a board by polling for updates
     pub async fn stream_messages(
         &self,
-        room_owner_key: &VerifyingKey,
+        board_owner_key: &VerifyingKey,
         poll_interval_ms: u64,
         timeout_secs: u64,
         max_messages: usize,
         initial_messages: usize,
         format: OutputFormat,
     ) -> Result<()> {
-        // Get the contract key for the room
-        let room = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
+        // Get the contract key for the board
+        let board = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
             anyhow!("Board not found in local storage. You may need to create or join it first.")
         })?;
 
-        let (_signing_key, _room_state, contract_key_str) = room;
+        let (_signing_key, _board_state, contract_key_str) = board;
         let _contract_key = contract_key_str.clone();
 
         // Print header for human format
         if matches!(format, OutputFormat::Human) {
             eprintln!(
-                "Streaming messages from room {} (press Ctrl+C to stop)...\n",
-                bs58::encode(room_owner_key.as_bytes()).into_string()
+                "Streaming messages from board {} (press Ctrl+C to stop)...\n",
+                bs58::encode(board_owner_key.as_bytes()).into_string()
             );
         }
 
@@ -1525,8 +1525,8 @@ impl ApiClient {
 
         // Show initial messages if requested
         if initial_messages > 0 {
-            let room_state = self.get_room(room_owner_key, false).await?;
-            let messages = &room_state.recent_messages.messages;
+            let board_state = self.get_board(board_owner_key, false).await?;
+            let messages = &board_state.recent_messages.messages;
 
             let initial_msgs: Vec<_> = messages.iter().rev().take(initial_messages).rev().collect();
 
@@ -1535,7 +1535,7 @@ impl ApiClient {
                 let msg_id = format!("{:?}:{:?}", msg.message.author, msg.message.time);
                 seen_messages.insert(msg_id);
 
-                Self::output_message(&room_state, msg, room_owner_key, &format)?;
+                Self::output_message(&board_state, msg, board_owner_key, &format)?;
             }
         }
 
@@ -1571,9 +1571,9 @@ impl ApiClient {
             }
 
             // Poll for new messages
-            match self.get_room(room_owner_key, false).await {
-                Ok(room_state) => {
-                    let messages = &room_state.recent_messages.messages;
+            match self.get_board(board_owner_key, false).await {
+                Ok(board_state) => {
+                    let messages = &board_state.recent_messages.messages;
 
                     for msg in messages {
                         // Generate a unique ID for this message
@@ -1581,7 +1581,7 @@ impl ApiClient {
 
                         // Only show if we haven't seen it before
                         if seen_messages.insert(msg_id.clone()) {
-                            Self::output_message(&room_state, msg, room_owner_key, &format)?;
+                            Self::output_message(&board_state, msg, board_owner_key, &format)?;
                             new_message_count += 1;
 
                             // Check max messages after each new message
@@ -1593,7 +1593,7 @@ impl ApiClient {
                 }
                 Err(e) => {
                     // Log error but continue polling
-                    debug!("Error fetching room state: {}", e);
+                    debug!("Error fetching board state: {}", e);
                 }
             }
 
@@ -1604,21 +1604,21 @@ impl ApiClient {
 
     /// Helper function to output a message in the requested format
     fn output_message(
-        room_state: &ChatRoomStateV1,
-        msg: &river_core::room_state::message::AuthorizedMessageV1,
-        room_owner_key: &VerifyingKey,
+        board_state: &ChatBoardStateV1,
+        msg: &river_core::board_state::message::AuthorizedMessageV1,
+        board_owner_key: &VerifyingKey,
         format: &OutputFormat,
     ) -> Result<()> {
         // Get effective content (handles edits)
-        let content = room_state
+        let content = board_state
             .recent_messages
             .effective_text(msg)
             .unwrap_or_else(|| "<encrypted>".to_string());
 
         // Get message ID for checking edited status and reactions
         let msg_id = msg.id();
-        let edited = room_state.recent_messages.is_edited(&msg_id);
-        let reactions = room_state.recent_messages.reactions(&msg_id);
+        let edited = board_state.recent_messages.is_edited(&msg_id);
+        let reactions = board_state.recent_messages.reactions(&msg_id);
 
         match format {
             OutputFormat::Human => {
@@ -1626,7 +1626,7 @@ impl ApiClient {
                 let author_short = author_str.chars().take(8).collect::<String>();
 
                 // Get nickname if available
-                let nickname = room_state
+                let nickname = board_state
                     .member_info
                     .member_info
                     .iter()
@@ -1664,7 +1664,7 @@ impl ApiClient {
             OutputFormat::Json => {
                 let author_str = msg.message.author.to_string();
 
-                let nickname = room_state
+                let nickname = board_state
                     .member_info
                     .member_info
                     .iter()
@@ -1683,7 +1683,7 @@ impl ApiClient {
                 let json_msg = json!({
                     "type": "message",
                     "message_id": message_id_str,
-                    "room": bs58::encode(room_owner_key.as_bytes()).into_string(),
+                    "board": bs58::encode(board_owner_key.as_bytes()).into_string(),
                     "author": author_str,
                     "nickname": nickname,
                     "content": content,
@@ -1701,28 +1701,28 @@ impl ApiClient {
         Ok(())
     }
 
-    /// Set the current user's nickname in a room
+    /// Set the current user's nickname in a board
     pub async fn set_nickname(
         &self,
-        room_owner_key: &VerifyingKey,
+        board_owner_key: &VerifyingKey,
         new_nickname: String,
     ) -> Result<()> {
         info!(
-            "Setting nickname to '{}' in room owned by: {}",
+            "Setting nickname to '{}' in board owned by: {}",
             new_nickname,
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
-        // Get the room info from storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Board not found. You must be a member of the room to change your nickname.")
+        // Get the board info from storage
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
+            anyhow!("Board not found. You must be a member of the board to change your nickname.")
         })?;
-        let (signing_key, mut room_state, _contract_key_str) = room_data;
+        let (signing_key, mut board_state, _contract_key_str) = board_data;
 
         let my_member_id = signing_key.verifying_key().into();
 
         // Find our current member info to get the version
-        let current_version = room_state
+        let current_version = board_state
             .member_info
             .member_info
             .iter()
@@ -1742,7 +1742,7 @@ impl ApiClient {
             AuthorizedMemberInfo::new_with_member_key(new_member_info, &signing_key);
 
         // Update local state first
-        if let Some(existing_info) = room_state
+        if let Some(existing_info) = board_state
             .member_info
             .member_info
             .iter_mut()
@@ -1750,7 +1750,7 @@ impl ApiClient {
         {
             *existing_info = authorized_member_info.clone();
         } else {
-            room_state
+            board_state
                 .member_info
                 .member_info
                 .push(authorized_member_info.clone());
@@ -1758,13 +1758,13 @@ impl ApiClient {
 
         // Save the updated state locally
         self.storage
-            .update_room_state(room_owner_key, room_state.clone())?;
+            .update_board_state(board_owner_key, board_state.clone())?;
 
         // Check if we need to re-add ourselves (pruned for inactivity)
-        let (members_delta, _) = self.build_rejoin_delta(&room_state, room_owner_key, &signing_key);
+        let (members_delta, _) = self.build_rejoin_delta(&board_state, board_owner_key, &signing_key);
 
         // Create delta with member info update (and members delta if needed)
-        let delta = ChatRoomStateV1Delta {
+        let delta = ChatBoardStateV1Delta {
             member_info: Some(vec![authorized_member_info]),
             members: members_delta,
             ..Default::default()
@@ -1779,7 +1779,7 @@ impl ApiClient {
         };
 
         // Get contract key and send the update
-        let contract_key = self.owner_vk_to_contract_key(room_owner_key);
+        let contract_key = self.owner_vk_to_contract_key(board_owner_key);
 
         let update_request = ContractRequest::Update {
             key: contract_key,
@@ -1815,35 +1815,35 @@ impl ApiClient {
         }
     }
 
-    /// Ban a member from the room
+    /// Ban a member from the board
     ///
-    /// The banning member must be either the room owner or an upstream member in the
+    /// The banning member must be either the board owner or an upstream member in the
     /// invite chain of the member being banned.
     pub async fn ban_member(
         &self,
-        room_owner_key: &VerifyingKey,
+        board_owner_key: &VerifyingKey,
         member_id_short: &str,
     ) -> Result<()> {
         info!(
-            "Banning member '{}' from room owned by: {}",
+            "Banning member '{}' from board owned by: {}",
             member_id_short,
-            bs58::encode(room_owner_key.as_bytes()).into_string()
+            bs58::encode(board_owner_key.as_bytes()).into_string()
         );
 
         // Get the signing key from storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Board not found. You must be a member of the room to ban members.")
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
+            anyhow!("Board not found. You must be a member of the board to ban members.")
         })?;
-        let (signing_key, _stored_state, _contract_key_str) = room_data;
+        let (signing_key, _stored_state, _contract_key_str) = board_data;
 
-        // Fetch fresh room state from the network
-        let room_state = self.get_room(room_owner_key, false).await?;
+        // Fetch fresh board state from the network
+        let board_state = self.get_board(board_owner_key, false).await?;
 
         let my_member_id: MemberId = signing_key.verifying_key().into();
-        let owner_member_id: MemberId = room_owner_key.into();
+        let owner_member_id: MemberId = board_owner_key.into();
 
         // Find the member to ban by their short ID (first 8 chars of member_id string)
-        let target_member = room_state
+        let target_member = board_state
             .member_info
             .member_info
             .iter()
@@ -1867,15 +1867,15 @@ impl ApiClient {
             return Err(anyhow!("Cannot ban yourself"));
         }
 
-        // Prevent banning the room owner
+        // Prevent banning the board owner
         if banned_member_id == owner_member_id {
-            return Err(anyhow!("Cannot ban the room owner"));
+            return Err(anyhow!("Cannot ban the board owner"));
         }
 
-        // Verify authorization: must be room owner OR in the invite chain of the banned member
+        // Verify authorization: must be board owner OR in the invite chain of the banned member
         if my_member_id != owner_member_id {
             // Build a map of member IDs to their AuthorizedMember for invite chain traversal
-            let members_by_id: std::collections::HashMap<_, _> = room_state
+            let members_by_id: std::collections::HashMap<_, _> = board_state
                 .members
                 .members
                 .iter()
@@ -1929,7 +1929,7 @@ impl ApiClient {
         let authorized_ban = AuthorizedUserBan::new(user_ban, my_member_id, &signing_key);
 
         // Create delta with just the ban
-        let delta = ChatRoomStateV1Delta {
+        let delta = ChatBoardStateV1Delta {
             bans: Some(vec![authorized_ban.clone()]),
             ..Default::default()
         };
@@ -1943,7 +1943,7 @@ impl ApiClient {
         };
 
         // Get contract key and send the update
-        let contract_key = self.owner_vk_to_contract_key(room_owner_key);
+        let contract_key = self.owner_vk_to_contract_key(board_owner_key);
 
         let update_request = ContractRequest::Update {
             key: contract_key,
@@ -1979,29 +1979,29 @@ impl ApiClient {
         }
     }
 
-    /// Update room configuration. Only the room owner can do this.
+    /// Update board configuration. Only the board owner can do this.
     pub async fn update_config(
         &self,
-        room_owner_key: &VerifyingKey,
+        board_owner_key: &VerifyingKey,
         modify: impl FnOnce(&mut Configuration),
     ) -> Result<()> {
         // Get the signing key from storage
-        let room_data = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
-            anyhow!("Board not found. You must be the room owner to update configuration.")
+        let board_data = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
+            anyhow!("Board not found. You must be the board owner to update configuration.")
         })?;
-        let (signing_key, _stored_state, _contract_key_str) = room_data;
+        let (signing_key, _stored_state, _contract_key_str) = board_data;
 
-        // Verify we are the room owner
+        // Verify we are the board owner
         let my_vk = signing_key.verifying_key();
-        if my_vk != *room_owner_key {
-            return Err(anyhow!("Only the room owner can update configuration"));
+        if my_vk != *board_owner_key {
+            return Err(anyhow!("Only the board owner can update configuration"));
         }
 
-        // Fetch fresh room state from the network
-        let room_state = self.get_room(room_owner_key, false).await?;
+        // Fetch fresh board state from the network
+        let board_state = self.get_board(board_owner_key, false).await?;
 
         // Clone current config and apply modifications
-        let mut new_config = room_state.configuration.configuration.clone();
+        let mut new_config = board_state.configuration.configuration.clone();
         new_config.configuration_version += 1;
         modify(&mut new_config);
 
@@ -2009,7 +2009,7 @@ impl ApiClient {
         let authorized_config = AuthorizedConfigurationV1::new(new_config, &signing_key);
 
         // Create delta with just the configuration change
-        let delta = ChatRoomStateV1Delta {
+        let delta = ChatBoardStateV1Delta {
             configuration: Some(authorized_config),
             ..Default::default()
         };
@@ -2022,7 +2022,7 @@ impl ApiClient {
             buf
         };
 
-        let contract_key = self.owner_vk_to_contract_key(room_owner_key);
+        let contract_key = self.owner_vk_to_contract_key(board_owner_key);
 
         let update_request = ContractRequest::Update {
             key: contract_key,
@@ -2060,24 +2060,24 @@ impl ApiClient {
         }
     }
 
-    /// Subscribe to a room and stream updates using Freenet subscriptions
+    /// Subscribe to a board and stream updates using Freenet subscriptions
     ///
     /// Unlike `stream_messages` which polls, this method subscribes to the contract
     /// and receives push notifications when the contract state changes.
     pub async fn subscribe_and_stream(
         &self,
-        room_owner_key: &VerifyingKey,
+        board_owner_key: &VerifyingKey,
         timeout_secs: u64,
         max_messages: usize,
         initial_messages: usize,
         format: OutputFormat,
     ) -> Result<()> {
-        // Get the contract key for the room
-        let room = self.storage.get_room(room_owner_key)?.ok_or_else(|| {
+        // Get the contract key for the board
+        let board = self.storage.get_board(board_owner_key)?.ok_or_else(|| {
             anyhow!("Board not found in local storage. You may need to create or join it first.")
         })?;
 
-        let (_signing_key, _room_state, contract_key_str) = room;
+        let (_signing_key, _board_state, contract_key_str) = board;
         // Parse the stored contract key string as a ContractInstanceId
         let contract_instance_id = ContractInstanceId::try_from(contract_key_str.clone())
             .map_err(|e| anyhow!("Invalid contract key: {}", e))?;
@@ -2085,8 +2085,8 @@ impl ApiClient {
         // Print header for human format
         if matches!(format, OutputFormat::Human) {
             eprintln!(
-                "Subscribing to room {} (press Ctrl+C to stop)...",
-                bs58::encode(room_owner_key.as_bytes()).into_string()
+                "Subscribing to board {} (press Ctrl+C to stop)...",
+                bs58::encode(board_owner_key.as_bytes()).into_string()
             );
         }
 
@@ -2097,15 +2097,15 @@ impl ApiClient {
 
         // Show initial messages if requested
         if initial_messages > 0 {
-            let room_state = self.get_room(room_owner_key, false).await?;
-            let messages = &room_state.recent_messages.messages;
+            let board_state = self.get_board(board_owner_key, false).await?;
+            let messages = &board_state.recent_messages.messages;
 
             let initial_msgs: Vec<_> = messages.iter().rev().take(initial_messages).rev().collect();
 
             for msg in &initial_msgs {
                 let msg_id = format!("{:?}:{:?}", msg.message.author, msg.message.time);
                 seen_messages.insert(msg_id);
-                Self::output_message(&room_state, msg, room_owner_key, &format)?;
+                Self::output_message(&board_state, msg, board_owner_key, &format)?;
             }
         }
 
@@ -2199,7 +2199,7 @@ impl ApiClient {
                     match update {
                         UpdateData::Delta(delta_bytes) => {
                             // Parse the delta
-                            if let Ok(delta) = ciborium::de::from_reader::<ChatRoomStateV1Delta, _>(
+                            if let Ok(delta) = ciborium::de::from_reader::<ChatBoardStateV1Delta, _>(
                                 &delta_bytes[..],
                             ) {
                                 // Check for new messages in the delta
@@ -2211,15 +2211,15 @@ impl ApiClient {
                                         );
 
                                         if seen_messages.insert(msg_id.clone()) {
-                                            // Need to get current room state for nickname lookup
+                                            // Need to get current board state for nickname lookup
                                             drop(web_api);
-                                            if let Ok(room_state) =
-                                                self.get_room(room_owner_key, false).await
+                                            if let Ok(board_state) =
+                                                self.get_board(board_owner_key, false).await
                                             {
                                                 Self::output_message(
-                                                    &room_state,
+                                                    &board_state,
                                                     msg,
-                                                    room_owner_key,
+                                                    board_owner_key,
                                                     &format,
                                                 )?;
                                             }
@@ -2237,18 +2237,18 @@ impl ApiClient {
                         }
                         UpdateData::State(state_bytes) => {
                             // Full state update - parse and check for new messages
-                            if let Ok(room_state) =
-                                ciborium::de::from_reader::<ChatRoomStateV1, _>(&state_bytes[..])
+                            if let Ok(board_state) =
+                                ciborium::de::from_reader::<ChatBoardStateV1, _>(&state_bytes[..])
                             {
-                                for msg in &room_state.recent_messages.messages {
+                                for msg in &board_state.recent_messages.messages {
                                     let msg_id =
                                         format!("{:?}:{:?}", msg.message.author, msg.message.time);
 
                                     if seen_messages.insert(msg_id.clone()) {
                                         Self::output_message(
-                                            &room_state,
+                                            &board_state,
                                             msg,
-                                            room_owner_key,
+                                            board_owner_key,
                                             &format,
                                         )?;
                                         new_message_count += 1;

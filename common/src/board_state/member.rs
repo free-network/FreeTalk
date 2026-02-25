@@ -1,7 +1,7 @@
-use crate::room_state::ban::BansV1;
-use crate::room_state::ChatRoomParametersV1;
+use crate::board_state::ban::BansV1;
+use crate::board_state::ChatBoardParametersV1;
 use crate::util::{sign_struct, truncated_base32, verify_struct};
-use crate::ChatRoomStateV1;
+use crate::ChatBoardStateV1;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use freenet_scaffold::util::{fast_hash, FastHash};
 use freenet_scaffold::ComposableState;
@@ -14,7 +14,7 @@ use std::hash::{Hash, Hasher};
 /*
 Note that the owner should not be in the members list but for most purposes (eg. sending messages)
 they should be treated as if they are in the list. The reason is to avoid storing the owner's
-VerifyingKey twice because it's already stored in the ChatRoomParametersV1.
+VerifyingKey twice because it's already stored in the ChatBoardParametersV1.
 */
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Clone, Debug, Default)]
@@ -23,10 +23,10 @@ pub struct MembersV1 {
 }
 
 impl ComposableState for MembersV1 {
-    type ParentState = ChatRoomStateV1;
+    type ParentState = ChatBoardStateV1;
     type Summary = HashSet<MemberId>;
     type Delta = MembersDelta;
-    type Parameters = ChatRoomParametersV1;
+    type Parameters = ChatBoardParametersV1;
 
     fn verify(
         &self,
@@ -54,7 +54,7 @@ impl ComposableState for MembersV1 {
             }
             if member.member.member_vk == parameters.owner {
                 return Err(
-                    "Member cannot have the same verifying key as the room owner".to_string(),
+                    "Member cannot have the same verifying key as the board owner".to_string(),
                 );
             }
             if member.member.invited_by == member.member.id() {
@@ -156,7 +156,7 @@ impl MembersV1 {
     fn verify_member_invite_with_lookup(
         &self,
         member: &AuthorizedMember,
-        parameters: &ChatRoomParametersV1,
+        parameters: &ChatBoardParametersV1,
         members_by_id: &HashMap<MemberId, &AuthorizedMember>,
     ) -> Result<(), String> {
         if member.member.invited_by == parameters.owner_id() {
@@ -174,12 +174,12 @@ impl MembersV1 {
 
 impl MembersV1 {
     /// Returns true if the given member_id invited the target_id, properly handling both
-    /// regular members and the room owner. Use this instead of checking the members list directly.
+    /// regular members and the board owner. Use this instead of checking the members list directly.
     pub fn is_inviter_of(
         &self,
         member_id: MemberId,
         target_id: MemberId,
-        params: &ChatRoomParametersV1,
+        params: &ChatBoardParametersV1,
     ) -> bool {
         if member_id == params.owner_id() {
             // Check if target was invited by owner
@@ -204,12 +204,12 @@ impl MembersV1 {
     }
 
     /// Checks if there are any banned members or members downstream of banned members in the invite chain
-    pub fn has_banned_members(&self, bans_v1: &BansV1, parameters: &ChatRoomParametersV1) -> bool {
+    pub fn has_banned_members(&self, bans_v1: &BansV1, parameters: &ChatBoardParametersV1) -> bool {
         self.check_banned_members(bans_v1, parameters).is_some()
     }
 
     /// Removes banned members or members downstream of banned members in the invite chain
-    fn remove_banned_members(&mut self, bans_v1: &BansV1, _parameters: &ChatRoomParametersV1) {
+    fn remove_banned_members(&mut self, bans_v1: &BansV1, _parameters: &ChatBoardParametersV1) {
         let mut banned_ids = HashSet::new();
         for ban in &bans_v1.0 {
             banned_ids.insert(ban.ban.banned_user);
@@ -237,7 +237,7 @@ impl MembersV1 {
     /// If the number of members exceeds the specified limit, remove the members with the longest invite chains
     /// until the limit is satisfied. When chain lengths are equal, remove the member with the highest MemberId
     /// for deterministic ordering (CRDT convergence requirement).
-    fn remove_excess_members(&mut self, parameters: &ChatRoomParametersV1, max_members: usize) {
+    fn remove_excess_members(&mut self, parameters: &ChatBoardParametersV1, max_members: usize) {
         if self.members.len() <= max_members {
             return;
         }
@@ -276,7 +276,7 @@ impl MembersV1 {
     fn check_banned_members(
         &self,
         bans_v1: &BansV1,
-        parameters: &ChatRoomParametersV1,
+        parameters: &ChatBoardParametersV1,
     ) -> Option<HashSet<MemberId>> {
         let banned_user_ids: HashSet<MemberId> =
             bans_v1.0.iter().map(|b| b.ban.banned_user).collect();
@@ -308,7 +308,7 @@ impl MembersV1 {
     pub fn get_invite_chain(
         &self,
         member: &AuthorizedMember,
-        parameters: &ChatRoomParametersV1,
+        parameters: &ChatBoardParametersV1,
     ) -> Result<Vec<AuthorizedMember>, String> {
         let members_by_id = self.members_by_member_id();
         self.get_invite_chain_with_lookup(member, parameters, &members_by_id)
@@ -319,7 +319,7 @@ impl MembersV1 {
     fn get_invite_chain_with_lookup(
         &self,
         member: &AuthorizedMember,
-        parameters: &ChatRoomParametersV1,
+        parameters: &ChatBoardParametersV1,
         members_by_id: &HashMap<MemberId, &AuthorizedMember>,
     ) -> Result<Vec<AuthorizedMember>, String> {
         let mut invite_chain = Vec::new();
@@ -545,7 +545,7 @@ impl Member {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::room_state::ban::{AuthorizedUserBan, UserBan};
+    use crate::board_state::ban::{AuthorizedUserBan, UserBan};
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
     use std::time::SystemTime;
@@ -581,9 +581,9 @@ mod tests {
         println!("Member2 ID: {:?}", member2.id());
         println!("Owner ID: {:?}", owner_id);
 
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.configuration.configuration.max_members = 3;
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -626,8 +626,8 @@ mod tests {
             members: vec![authorized_member1, authorized_member2],
         };
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -659,8 +659,8 @@ mod tests {
             members: vec![authorized_member1.clone(), authorized_member3.clone()],
         };
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -695,10 +695,10 @@ mod tests {
             added: vec![authorized_member3.clone()],
         };
 
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.configuration.configuration.max_members = 3;
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -776,8 +776,8 @@ mod tests {
             members: vec![authorized_member],
         };
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -805,8 +805,8 @@ mod tests {
             members: vec![authorized_member1, authorized_member2, authorized_member3],
         };
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -836,7 +836,7 @@ mod tests {
             members: vec![authorized_member1, authorized_member2.clone()],
         };
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -914,7 +914,7 @@ mod tests {
             members: vec![authorized_member1, authorized_member2, authorized_member3],
         };
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -958,7 +958,7 @@ mod tests {
             ],
         };
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -1048,7 +1048,7 @@ mod tests {
             members: vec![authorized_member1, authorized_member2, authorized_member3],
         };
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -1192,10 +1192,10 @@ mod tests {
             members: vec![authorized_member1.clone(), authorized_member2.clone()],
         };
 
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.configuration.configuration.max_members = 3;
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -1252,7 +1252,7 @@ mod tests {
             members: vec![authorized_member1.clone(), authorized_member2.clone()],
         };
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -1287,10 +1287,10 @@ mod tests {
         let owner_verifying_key = VerifyingKey::from(&owner_signing_key);
         let owner_id = owner_verifying_key.into();
 
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.configuration.configuration.max_members = 2;
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -1325,7 +1325,7 @@ mod tests {
     }
 
     #[test]
-    fn test_room_owner_key_not_allowed_in_members() {
+    fn test_board_owner_key_not_allowed_in_members() {
         let owner_signing_key = SigningKey::generate(&mut OsRng);
         let owner_verifying_key = VerifyingKey::from(&owner_signing_key);
         let owner_id = owner_verifying_key.into();
@@ -1342,10 +1342,10 @@ mod tests {
             members: vec![authorized_owner_member],
         };
 
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.configuration.configuration.max_members = 2;
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 

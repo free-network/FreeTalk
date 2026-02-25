@@ -15,7 +15,7 @@
             display: flex;
             height: 100vh;
         }
-        .room-list, .user-list {
+        .board-list, .user-list {
             width: 250px;
             overflow-y: auto;
             display: flex;
@@ -94,19 +94,19 @@
 </head>
 <body>
 <div class="chat-container">
-    <aside class="room-list has-background-light">
+    <aside class="board-list has-background-light">
         <div class="logo-container">
             <img src="/api/placeholder/125/92" alt="Freenet Logo" class="logo">
         </div>
         <div class="menu p-4" style="flex-grow: 1; display: flex; flex-direction: column;">
             <p class="menu-label">
-                Chat Rooms
+                Chat boards
             </p>
             <ul class="menu-list" style="flex-grow: 1; overflow-y: auto;">
                 <li>
                     <div class="is-active is-flex is-justify-content-space-between">
                         <a>General</a>
-                        <span class="more-info" onclick="openModal('room', 'General')">
+                        <span class="more-info" onclick="openModal('board', 'General')">
                                 <i class="fas fa-ellipsis-h"></i>
                             </span>
                     </div>
@@ -114,7 +114,7 @@
                 <li>
                     <div class="is-flex is-justify-content-space-between">
                         <a>Freenet Dev</a>
-                        <span class="more-info" onclick="openModal('room', 'Freenet Dev')">
+                        <span class="more-info" onclick="openModal('board', 'Freenet Dev')">
                                 <i class="fas fa-ellipsis-h"></i>
                             </span>
                     </div>
@@ -122,7 +122,7 @@
                 <li>
                     <div class="is-flex is-justify-content-space-between">
                         <a>Privacy Talk</a>
-                        <span class="more-info" onclick="openModal('room', 'Privacy Talk')">
+                        <span class="more-info" onclick="openModal('board', 'Privacy Talk')">
                                 <i class="fas fa-ellipsis-h"></i>
                             </span>
                     </div>
@@ -130,14 +130,14 @@
                 <li>
                     <div class="is-flex is-justify-content-space-between">
                         <a>Decentralization</a>
-                        <span class="more-info" onclick="openModal('room', 'Decentralization')">
+                        <span class="more-info" onclick="openModal('board', 'Decentralization')">
                                 <i class="fas fa-ellipsis-h"></i>
                             </span>
                     </div>
                 </li>
             </ul>
             <div class="add-button">
-                <button onclick="openModal('new-room', '')">
+                <button onclick="openModal('new-board', '')">
                         <span class="icon is-small">
                             <i class="fas fa-plus"></i>
                         </span>
@@ -215,7 +215,7 @@
     </aside>
 </div>
 
-<!-- Modal for user/room info -->
+<!-- Modal for user/board info -->
 <div class="modal" id="infoModal">
     <div class="modal-background"></div>
     <div class="modal-card">
@@ -257,7 +257,7 @@
                         </div>
                     `;
                 break;
-            case 'room':
+            case 'board':
                 title.textContent = `Board: ${name}`;
                 content.innerHTML = `
                         <div class="field">
@@ -274,19 +274,19 @@
                         </div>
                     `;
                 break;
-            case 'new-room':
+            case 'new-board':
                 title.textContent = 'Create New Board';
                 content.innerHTML = `
                         <div class="field">
                             <label class="label">Board Name</label>
                             <div class="control">
-                                <input class="input" type="text" placeholder="Enter room name">
+                                <input class="input" type="text" placeholder="Enter board name">
                             </div>
                         </div>
                         <div class="field">
                             <label class="label">Description</label>
                             <div class="control">
-                                <input class="input" type="text" placeholder="Enter room description">
+                                <input class="input" type="text" placeholder="Enter board description">
                             </div>
                         </div>
                     `;
