@@ -45,6 +45,9 @@
             wasm-bindgen-cli
             binaryen  # wasm-opt
 
+            # System jemalloc (for tikv-jemalloc-sys)
+            jemalloc
+
             # Development tools
             just  # Command runner (optional)
             bacon  # Background rust code checker (optional)
@@ -52,6 +55,9 @@
 
           # Environment variables
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+
+          # Use system jemalloc instead of building from source
+          JEMALLOC_OVERRIDE = "${pkgs.jemalloc}/lib/libjemalloc.so";
 
           shellHook = ''
             echo "Freetalk Environment"
