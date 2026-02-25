@@ -91,6 +91,36 @@ pub fn App() -> Element {
         synchronizer.start().await;
     });
 
+    // Watch CURRENT_BOARD and navigate if URL doesn't match
+    // This handles the case where sync/delegate sets the current board but URL remains unchanged
+    use_effect(move || {
+        let current_board = CURRENT_BOARD.read();
+        if let Some(owner_key) = current_board.owner_key {
+            let board_id = bs58::encode(owner_key.as_bytes()).into_string();
+
+            // Check if URL already shows this board to avoid race conditions with regular navigation
+            let url_matches = if let Some(window) = window() {
+                if let Ok(hash) = window.location().hash() {
+                    // URL hash is like "#/board/{board_id}" or "#/board/{board_id}/..."
+                    hash.contains(&format!("/board/{}", board_id))
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if !url_matches {
+                debug!("CURRENT_BOARD changed to {} but URL doesn't match, navigating", board_id);
+                if let Some(window) = window() {
+                    if let Err(e) = window.location().set_hash(&format!("#/board/{}", board_id)) {
+                        error!("Failed to navigate to board: {:?}", e);
+                    }
+                }
+            }
+        }
+    });
+
     #[cfg(not(feature = "no-sync"))]
     {
         // The synchronizer is now started in the auth token effect
