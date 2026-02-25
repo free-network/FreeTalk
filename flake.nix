@@ -8,15 +8,20 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils.url = "github:numtide/flake-utils";
+    freenet-shared = {
+      url = "github:free-network/freenet-shared";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils, ... }:
+  outputs = { self, nixpkgs, rust-overlay, flake-utils, freenet-shared, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs {
           inherit system overlays;
         };
+        freenet-shared-pkg = freenet-shared.packages.${system}.default;
 
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
@@ -51,6 +56,9 @@
             # Development tools
             just  # Command runner (optional)
             bacon  # Background rust code checker (optional)
+
+            # Freenet shared tools
+            freenet-shared-pkg
           ];
 
           # Environment variables
