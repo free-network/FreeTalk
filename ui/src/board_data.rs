@@ -2,25 +2,25 @@
 
 use crate::util::ecies::encrypt_secret_for_member;
 use crate::util::get_current_system_time;
-use crate::{constants::ROOM_CONTRACT_WASM, util::to_cbor_vec};
+use crate::{constants::BOARD_CONTRACT_WASM, util::to_cbor_vec};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use freenet_scaffold::ComposableState;
 use freenet_stdlib::prelude::{ContractCode, ContractKey, Parameters};
-use river_core::chat_delegate::RoomKey;
-use river_core::room_state::configuration::{AuthorizedConfigurationV1, Configuration};
-use river_core::room_state::member::AuthorizedMember;
-use river_core::room_state::member::MemberId;
-use river_core::room_state::member_info::{AuthorizedMemberInfo, MemberInfo};
-use river_core::room_state::message::MessageId;
-use river_core::room_state::privacy::{
-    PrivacyMode, RoomCipherSpec, RoomDisplayMetadata, SealedBytes,
+use river_core::chat_delegate::BoardKey;
+use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
+use river_core::board_state::member::AuthorizedMember;
+use river_core::board_state::member::MemberId;
+use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
+use river_core::board_state::message::MessageId;
+use river_core::board_state::privacy::{
+    PrivacyMode, BoardCipherSpec, BoardDisplayMetadata, SealedBytes,
 };
-use river_core::room_state::secret::{
+use river_core::board_state::secret::{
     AuthorizedEncryptedSecretForMember, AuthorizedSecretVersionRecord, EncryptedSecretForMemberV1,
     SecretVersionRecordV1,
 };
-use river_core::room_state::ChatRoomParametersV1;
-use river_core::ChatRoomStateV1;
+use river_core::board_state::ChatBoardParametersV1;
+use river_core::ChatBoardStateV1;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -31,9 +31,9 @@ pub enum SendMessageError {
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct RoomData {
+pub struct BoardData {
     pub owner_vk: VerifyingKey,
-    pub room_state: ChatRoomStateV1,
+    pub board_state: ChatBoardStateV1,
     pub self_sk: SigningKey,
     pub contract_key: ContractKey,
     /// The last message ID that was read by the user (for unread tracking)
@@ -41,7 +41,7 @@ pub struct RoomData {
     /// This is persisted to delegate storage.
     #[serde(default)]
     pub last_read_message_id: Option<MessageId>,
-    /// All decrypted room secrets by version (if room is private)
+    /// All decrypted board secrets by version (if board is private)
     /// Maps secret_version -> decrypted 32-byte secret
     #[serde(skip)]
     pub secrets: HashMap<u32, [u8; 32]>,
@@ -69,30 +69,30 @@ pub struct RoomData {
     pub self_member_info: Option<AuthorizedMemberInfo>,
 }
 
-impl RoomData {
+impl BoardData {
     /// Regenerate the contract_key from the owner_vk using the current WASM.
     /// This ensures the contract_key always matches the bundled WASM, which may
-    /// have been updated since the room was first created/stored.
+    /// have been updated since the board was first created/stored.
     pub fn regenerate_contract_key(&mut self) {
-        let params = ChatRoomParametersV1 {
+        let params = ChatBoardParametersV1 {
             owner: self.owner_vk,
         };
         let params_bytes = to_cbor_vec(&params);
-        let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+        let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
         self.contract_key =
             ContractKey::from_params_and_code(Parameters::from(params_bytes), &contract_code);
     }
 
-    /// Get the room key for delegate operations (owner's verifying key bytes)
-    pub fn room_key(&self) -> RoomKey {
+    /// Get the board key for delegate operations (owner's verifying key bytes)
+    pub fn board_key(&self) -> BoardKey {
         self.owner_vk.to_bytes()
     }
 
-    /// Check if the room is in private mode
+    /// Check if the board is in private mode
     pub fn is_private(&self) -> bool {
         matches!(
-            self.room_state.configuration.configuration.privacy_mode,
-            river_core::room_state::privacy::PrivacyMode::Private
+            self.board_state.configuration.configuration.privacy_mode,
+            river_core::board_state::privacy::PrivacyMode::Private
         )
     }
 
@@ -113,7 +113,7 @@ impl RoomData {
             .and_then(|v| self.secrets.get(&v))
     }
 
-    /// Set/add a room secret for a specific version
+    /// Set/add a board secret for a specific version
     pub fn set_secret(&mut self, secret: [u8; 32], version: u32) {
         self.secrets.insert(version, secret);
         // Update current version if this is a newer version
@@ -124,9 +124,9 @@ impl RoomData {
     }
 
     /// Check if the secret needs rotation (weekly rotation or never rotated)
-    /// Only applies to private rooms owned by this user
+    /// Only applies to private boards owned by this user
     pub fn needs_secret_rotation(&self) -> bool {
-        // Only check for private rooms
+        // Only check for private boards
         if !self.is_private() {
             return false;
         }
@@ -139,9 +139,9 @@ impl RoomData {
         // Check if we have a last rotation time
         match self.last_secret_rotation {
             None => {
-                // Never rotated, check if room has been around for a week
+                // Never rotated, check if board has been around for a week
                 // Get the creation time from the first secret version
-                if let Some(first_version) = self.room_state.secrets.versions.first() {
+                if let Some(first_version) = self.board_state.secrets.versions.first() {
                     let creation_time = first_version.record.created_at;
                     if let Ok(duration) = get_current_system_time().duration_since(creation_time) {
                         // Rotate if it's been more than 7 days since creation
@@ -161,7 +161,7 @@ impl RoomData {
         }
     }
 
-    /// Check if the user can send a message in the room.
+    /// Check if the user can send a message in the board.
     /// A user is considered a member if they are the owner, are in the active
     /// members list, or have a stored invitation (self_authorized_member).
     pub fn can_send_message(&self) -> Result<(), SendMessageError> {
@@ -170,7 +170,7 @@ impl RoomData {
 
         // Check if banned first
         if self
-            .room_state
+            .board_state
             .bans
             .0
             .iter()
@@ -186,7 +186,7 @@ impl RoomData {
 
         // Currently in members list
         if self
-            .room_state
+            .board_state
             .members
             .members
             .iter()
@@ -203,7 +203,7 @@ impl RoomData {
         Err(SendMessageError::UserNotMember)
     }
 
-    /// Check if the user can participate in the room (send messages, edit profile).
+    /// Check if the user can participate in the board (send messages, edit profile).
     /// Returns Ok if user is not banned AND (is owner OR has self_authorized_member OR is in members list).
     pub fn can_participate(&self) -> Result<(), SendMessageError> {
         let verifying_key = self.self_sk.verifying_key();
@@ -211,7 +211,7 @@ impl RoomData {
 
         // Check if banned first
         if self
-            .room_state
+            .board_state
             .bans
             .0
             .iter()
@@ -227,7 +227,7 @@ impl RoomData {
 
         // Currently in members list
         if self
-            .room_state
+            .board_state
             .members
             .members
             .iter()
@@ -245,9 +245,9 @@ impl RoomData {
     }
 
     /// Capture the user's AuthorizedMember and MemberInfo from the current state.
-    /// AuthorizedMember is only captured once (migration path for older rooms).
+    /// AuthorizedMember is only captured once (migration path for older boards).
     /// MemberInfo is always updated to the latest version so nickname edits are preserved.
-    pub fn capture_self_membership_data(&mut self, parameters: &ChatRoomParametersV1) {
+    pub fn capture_self_membership_data(&mut self, parameters: &ChatBoardParametersV1) {
         let verifying_key = self.self_sk.verifying_key();
         if verifying_key == self.owner_vk {
             return; // Owner doesn't need this
@@ -256,7 +256,7 @@ impl RoomData {
         // Always update self_member_info to latest version
         let member_id = MemberId::from(&verifying_key);
         if let Some(info) = self
-            .room_state
+            .board_state
             .member_info
             .member_info
             .iter()
@@ -271,7 +271,7 @@ impl RoomData {
             return;
         }
         if let Some(member) = self
-            .room_state
+            .board_state
             .members
             .members
             .iter()
@@ -279,7 +279,7 @@ impl RoomData {
         {
             self.self_authorized_member = Some(member.clone());
             // Capture invite chain
-            if let Ok(chain) = self.room_state.members.get_invite_chain(member, parameters) {
+            if let Ok(chain) = self.board_state.members.get_invite_chain(member, parameters) {
                 self.invite_chain = chain;
             }
         }
@@ -298,7 +298,7 @@ impl RoomData {
     ) -> bool {
         // Find and replace the member entry
         if let Some(member) = self
-            .room_state
+            .board_state
             .members
             .members
             .iter_mut()
@@ -311,40 +311,40 @@ impl RoomData {
         }
     }
 
-    pub fn parameters(&self) -> ChatRoomParametersV1 {
-        ChatRoomParametersV1 {
+    pub fn parameters(&self) -> ChatBoardParametersV1 {
+        ChatBoardParametersV1 {
             owner: self.owner_vk,
         }
     }
 
-    /// Rotate the room secret, generating a new secret and encrypting it for all current members
+    /// Rotate the board secret, generating a new secret and encrypting it for all current members
     /// This excludes banned members from receiving the new secret
     /// Returns a SecretsDelta with the new secret version and encrypted secrets
     pub fn rotate_secret(
         &mut self,
-    ) -> Result<river_core::room_state::secret::SecretsDelta, String> {
-        use river_core::room_state::secret::SecretsDelta;
+    ) -> Result<river_core::board_state::secret::SecretsDelta, String> {
+        use river_core::board_state::secret::SecretsDelta;
 
-        // Only allow rotation for private rooms
+        // Only allow rotation for private boards
         if !self.is_private() {
-            return Err("Cannot rotate secret for public room".to_string());
+            return Err("Cannot rotate secret for public board".to_string());
         }
 
-        // Only the room owner can rotate secrets
+        // Only the board owner can rotate secrets
         if self.owner_vk != self.self_sk.verifying_key() {
-            return Err("Only room owner can rotate secrets".to_string());
+            return Err("Only board owner can rotate secrets".to_string());
         }
 
         // Get current version and increment
-        let new_version = self.room_state.secrets.current_version + 1;
+        let new_version = self.board_state.secrets.current_version + 1;
 
         // Generate new secret
-        let new_secret = crate::util::ecies::generate_room_secret();
+        let new_secret = crate::util::ecies::generate_board_secret();
 
         // Create the secret version record
         let secret_version = SecretVersionRecordV1 {
             version: new_version,
-            cipher_spec: RoomCipherSpec::Aes256Gcm,
+            cipher_spec: BoardCipherSpec::Aes256Gcm,
             created_at: get_current_system_time(),
         };
 
@@ -352,7 +352,7 @@ impl RoomData {
 
         // Get all current members, excluding banned members
         let banned_members: std::collections::HashSet<MemberId> = self
-            .room_state
+            .board_state
             .bans
             .0
             .iter()
@@ -360,7 +360,7 @@ impl RoomData {
             .collect();
 
         let current_members: Vec<MemberId> = self
-            .room_state
+            .board_state
             .members
             .members
             .iter()
@@ -385,7 +385,7 @@ impl RoomData {
         for member_id in current_members {
             // Find the member's verifying key
             if let Some(member) = self
-                .room_state
+                .board_state
                 .members
                 .members
                 .iter()
@@ -393,7 +393,7 @@ impl RoomData {
             {
                 let member_vk = member.member.member_vk;
 
-                // Encrypt the room secret for this member
+                // Encrypt the board secret for this member
                 let (ciphertext, nonce, ephemeral_key) =
                     encrypt_secret_for_member(&new_secret, &member_vk);
 
@@ -430,19 +430,19 @@ impl RoomData {
     /// Returns a SecretsDelta if secrets were generated, None otherwise
     pub fn generate_missing_member_secrets(
         &self,
-    ) -> Option<river_core::room_state::secret::SecretsDelta> {
-        use river_core::room_state::secret::SecretsDelta;
+    ) -> Option<river_core::board_state::secret::SecretsDelta> {
+        use river_core::board_state::secret::SecretsDelta;
 
-        // Only generate secrets if this is a private room and we have the secret
+        // Only generate secrets if this is a private board and we have the secret
         if !self.is_private() {
             return None;
         }
 
-        let (room_secret, current_version) = self.get_secret()?;
+        let (board_secret, current_version) = self.get_secret()?;
 
         // Get all current members
         let member_ids: Vec<MemberId> = self
-            .room_state
+            .board_state
             .members
             .members
             .iter()
@@ -451,7 +451,7 @@ impl RoomData {
 
         // Find members who don't have encrypted secrets for the current version
         let members_with_secrets: std::collections::HashSet<MemberId> = self
-            .room_state
+            .board_state
             .secrets
             .encrypted_secrets
             .iter()
@@ -480,7 +480,7 @@ impl RoomData {
         for member_id in members_without_secrets {
             // Find the member's verifying key
             if let Some(member) = self
-                .room_state
+                .board_state
                 .members
                 .members
                 .iter()
@@ -488,9 +488,9 @@ impl RoomData {
             {
                 let member_vk = member.member.member_vk;
 
-                // Encrypt the room secret for this member
+                // Encrypt the board secret for this member
                 let (ciphertext, nonce, ephemeral_key) =
-                    encrypt_secret_for_member(room_secret, &member_vk);
+                    encrypt_secret_for_member(board_secret, &member_vk);
 
                 // Create the encrypted secret record
                 let encrypted_secret = EncryptedSecretForMemberV1 {
@@ -521,11 +521,11 @@ impl RoomData {
     }
 }
 
-pub struct CurrentRoom {
+pub struct CurrentBoard {
     pub owner_key: Option<VerifyingKey>,
 }
 
-impl CurrentRoom {
+impl CurrentBoard {
     pub fn owner_id(&self) -> Option<MemberId> {
         self.owner_key.map(|vk| vk.into())
     }
@@ -535,32 +535,32 @@ impl CurrentRoom {
     }
 }
 
-impl PartialEq for CurrentRoom {
+impl PartialEq for CurrentBoard {
     fn eq(&self, other: &Self) -> bool {
         self.owner_key == other.owner_key
     }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Rooms {
-    pub map: HashMap<VerifyingKey, RoomData>,
+pub struct Boards {
+    pub map: HashMap<VerifyingKey, BoardData>,
     #[serde(default)]
-    pub current_room_key: Option<VerifyingKey>,
-    /// Rooms whose contract key changed due to WASM update.
-    /// Each entry is (owner_vk, old_contract_key) for rooms where the owner
+    pub current_board_key: Option<VerifyingKey>,
+    /// Boards whose contract key changed due to WASM update.
+    /// Each entry is (owner_vk, old_contract_key) for boards where the owner
     /// should send an upgrade pointer to the old contract.
     #[serde(skip)]
-    pub migrated_rooms: Vec<(VerifyingKey, ContractKey)>,
+    pub migrated_boards: Vec<(VerifyingKey, ContractKey)>,
 }
 
-impl PartialEq for Rooms {
+impl PartialEq for Boards {
     fn eq(&self, other: &Self) -> bool {
         self.map == other.map
     }
 }
 
-impl Rooms {
-    pub fn create_new_room_with_name(
+impl Boards {
+    pub fn create_new_board_with_name(
         &mut self,
         self_sk: SigningKey,
         name: String,
@@ -569,19 +569,19 @@ impl Rooms {
     ) -> VerifyingKey {
         use dioxus::logger::tracing::info;
         info!(
-            "🟢 create_new_room_with_name called: name='{}', nickname='{}', is_private={}",
+            "🟢 create_new_board_with_name called: name='{}', nickname='{}', is_private={}",
             name, nickname, is_private
         );
 
         let owner_vk = self_sk.verifying_key();
-        let mut room_state = ChatRoomStateV1::default();
+        let mut board_state = ChatBoardStateV1::default();
 
-        // Generate room secret if private
+        // Generate board secret if private
         info!("🟢 Creating privacy mode and secrets...");
-        let (privacy_mode, room_secret, room_secret_version) = if is_private {
-            info!("🟢 Generating private room secret...");
+        let (privacy_mode, board_secret, board_secret_version) = if is_private {
+            info!("🟢 Generating private board secret...");
             // Generate a random 32-byte secret
-            let secret = crate::util::ecies::generate_room_secret();
+            let secret = crate::util::ecies::generate_board_secret();
 
             // Encrypt the secret for the owner using ECIES
             let (ciphertext, nonce, ephemeral_key) = encrypt_secret_for_member(&secret, &owner_vk);
@@ -589,7 +589,7 @@ impl Rooms {
             // Create the secret version record
             let secret_version = SecretVersionRecordV1 {
                 version: 0,
-                cipher_spec: RoomCipherSpec::Aes256Gcm,
+                cipher_spec: BoardCipherSpec::Aes256Gcm,
                 created_at: get_current_system_time(),
             };
 
@@ -608,18 +608,18 @@ impl Rooms {
             let authorized_encrypted_secret =
                 AuthorizedEncryptedSecretForMember::new(encrypted_secret, &self_sk);
 
-            // Add to room state
-            room_state.secrets.versions.push(authorized_version);
-            room_state
+            // Add to board state
+            board_state.secrets.versions.push(authorized_version);
+            board_state
                 .secrets
                 .encrypted_secrets
                 .push(authorized_encrypted_secret);
-            room_state.secrets.current_version = 0;
+            board_state.secrets.current_version = 0;
 
-            info!("🟢 Private room secret generated and encrypted");
+            info!("🟢 Private board secret generated and encrypted");
             (PrivacyMode::Private, Some(secret), Some(0u32))
         } else {
-            info!("🟢 Public room, no secret needed");
+            info!("🟢 Public board, no secret needed");
             (PrivacyMode::Public, None, None)
         };
 
@@ -628,9 +628,9 @@ impl Rooms {
         let config = Configuration {
             owner_member_id: owner_vk.into(),
             privacy_mode,
-            display: RoomDisplayMetadata {
-                name: if let Some(ref secret) = room_secret {
-                    // Encrypt room name for private rooms
+            display: BoardDisplayMetadata {
+                name: if let Some(ref secret) = board_secret {
+                    // Encrypt board name for private boards
                     use crate::util::ecies::encrypt_with_symmetric_key;
                     let (ciphertext, nonce) = encrypt_with_symmetric_key(secret, name.as_bytes());
                     SealedBytes::Private {
@@ -646,14 +646,14 @@ impl Rooms {
             },
             ..Configuration::default()
         };
-        room_state.configuration = AuthorizedConfigurationV1::new(config, &self_sk);
+        board_state.configuration = AuthorizedConfigurationV1::new(config, &self_sk);
 
         // Add owner to member_info
         let owner_info = MemberInfo {
             member_id: owner_vk.into(),
             version: 0,
-            preferred_nickname: if let Some(ref secret) = room_secret {
-                // Encrypt nickname for private rooms
+            preferred_nickname: if let Some(ref secret) = board_secret {
+                // Encrypt nickname for private boards
                 use crate::util::ecies::encrypt_with_symmetric_key;
                 let (ciphertext, nonce) = encrypt_with_symmetric_key(secret, nickname.as_bytes());
                 SealedBytes::Private {
@@ -667,38 +667,38 @@ impl Rooms {
             },
         };
         let authorized_owner_info = AuthorizedMemberInfo::new(owner_info, &self_sk);
-        room_state
+        board_state
             .member_info
             .member_info
             .push(authorized_owner_info);
 
-        // Generate contract key for the room
+        // Generate contract key for the board
         info!("🟢 Generating contract key...");
-        let parameters = ChatRoomParametersV1 { owner: owner_vk };
+        let parameters = ChatBoardParametersV1 { owner: owner_vk };
         let params_bytes = to_cbor_vec(&parameters);
-        let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+        let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
         // Use the full ContractKey constructor that includes the code hash
         let contract_key =
             ContractKey::from_params_and_code(Parameters::from(params_bytes), &contract_code);
         info!("🟢 Contract key generated: {:?}", contract_key);
 
-        info!("🟢 Creating RoomData struct...");
-        let secrets = if let Some(secret) = room_secret {
+        info!("🟢 Creating BoardData struct...");
+        let secrets = if let Some(secret) = board_secret {
             let mut map = HashMap::new();
             map.insert(0, secret);
             map
         } else {
             HashMap::new()
         };
-        let room_data = RoomData {
+        let board_data = BoardData {
             owner_vk,
-            room_state,
+            board_state,
             self_sk,
             contract_key,
             last_read_message_id: None,
             secrets,
-            current_secret_version: room_secret_version,
-            last_secret_rotation: if room_secret_version.is_some() {
+            current_secret_version: board_secret_version,
+            last_secret_rotation: if board_secret_version.is_some() {
                 Some(get_current_system_time())
             } else {
                 None
@@ -709,40 +709,40 @@ impl Rooms {
             self_member_info: None,
         };
 
-        info!("🟢 Inserting room into map...");
-        self.map.insert(owner_vk, room_data);
-        info!("🟢 create_new_room_with_name completed successfully, returning owner_vk");
+        info!("🟢 Inserting board into map...");
+        self.map.insert(owner_vk, board_data);
+        info!("🟢 create_new_board_with_name completed successfully, returning owner_vk");
         owner_vk
     }
 
-    /// Merge the other Rooms into this Rooms (eg. when Rooms are loaded from storage)
-    pub fn merge(&mut self, other: Rooms) -> Result<(), String> {
-        for (vk, mut room_data) in other.map {
+    /// Merge the other Boards into this Boards (eg. when Boards are loaded from storage)
+    pub fn merge(&mut self, other: Boards) -> Result<(), String> {
+        for (vk, mut board_data) in other.map {
             // Capture the old contract key before regeneration
-            let old_contract_key = room_data.contract_key;
+            let old_contract_key = board_data.contract_key;
 
             // Regenerate contract_key to ensure it matches the current bundled WASM
-            // This handles the case where rooms were stored with an older WASM version
-            room_data.regenerate_contract_key();
+            // This handles the case where boards were stored with an older WASM version
+            board_data.regenerate_contract_key();
 
             // If the contract key changed (WASM was updated), track for upgrade pointer
-            if old_contract_key != room_data.contract_key {
-                self.migrated_rooms.push((vk, old_contract_key));
+            if old_contract_key != board_data.contract_key {
+                self.migrated_boards.push((vk, old_contract_key));
             }
 
-            // If not already in the map, add the room
+            // If not already in the map, add the board
             if let std::collections::hash_map::Entry::Vacant(e) = self.map.entry(vk) {
-                e.insert(room_data);
+                e.insert(board_data);
             } else {
-                // If the room is already in the map, merge in the new data
-                let self_room_data = self.map.get_mut(&vk).unwrap();
-                if self_room_data.self_sk != room_data.self_sk {
+                // If the board is already in the map, merge in the new data
+                let self_board_data = self.map.get_mut(&vk).unwrap();
+                if self_board_data.self_sk != board_data.self_sk {
                     return Err("self_sk is different".to_string());
                 }
-                self_room_data.room_state.merge(
-                    &self_room_data.room_state.clone(),
-                    &ChatRoomParametersV1 { owner: vk },
-                    &room_data.room_state,
+                self_board_data.board_state.merge(
+                    &self_board_data.board_state.clone(),
+                    &ChatBoardParametersV1 { owner: vk },
+                    &board_data.board_state,
                 )?;
             }
         }
@@ -753,11 +753,11 @@ impl Rooms {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use river_core::room_state::configuration::{AuthorizedConfigurationV1, Configuration};
-    use river_core::room_state::member::{AuthorizedMember, Member};
+    use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
+    use river_core::board_state::member::{AuthorizedMember, Member};
 
-    /// Regression test for #85: accepting an invitation for a room that already
-    /// exists in the ROOMS map must update self_sk so can_send_message() passes.
+    /// Regression test for #85: accepting an invitation for a board that already
+    /// exists in the boards map must update self_sk so can_send_message() passes.
     #[test]
     fn test_can_send_message_after_self_sk_update() {
         let mut rng = rand::thread_rng();
@@ -766,9 +766,9 @@ mod tests {
         let owner_sk = SigningKey::generate(&mut rng);
         let owner_vk = owner_sk.verifying_key();
 
-        // Create room state with owner config
+        // Create board state with owner config
         let config = AuthorizedConfigurationV1::new(Configuration::default(), &owner_sk);
-        let mut room_state = ChatRoomStateV1 {
+        let mut board_state = ChatBoardStateV1 {
             configuration: config,
             ..Default::default()
         };
@@ -782,19 +782,19 @@ mod tests {
             member_vk: invitee_vk,
         };
         let authorized_member = AuthorizedMember::new(member, &owner_sk);
-        room_state.members.members.push(authorized_member);
+        board_state.members.members.push(authorized_member);
 
-        // Create RoomData with a STALE self_sk (different from the invitee key)
+        // Create BoardData with a STALE self_sk (different from the invitee key)
         let stale_sk = SigningKey::generate(&mut rng);
-        let params = ChatRoomParametersV1 { owner: owner_vk };
+        let params = ChatBoardParametersV1 { owner: owner_vk };
         let params_bytes = to_cbor_vec(&params);
-        let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+        let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
         let contract_key =
             ContractKey::from_params_and_code(Parameters::from(params_bytes), &contract_code);
 
-        let mut room_data = RoomData {
+        let mut board_data = BoardData {
             owner_vk,
-            room_state,
+            board_state,
             self_sk: stale_sk,
             contract_key,
             last_read_message_id: None,
@@ -809,19 +809,19 @@ mod tests {
 
         // With stale key, user should NOT be recognized as a member
         assert_eq!(
-            room_data.can_send_message(),
+            board_data.can_send_message(),
             Err(SendMessageError::UserNotMember)
         );
 
         // After updating self_sk to the invitee's key, user should be a member
-        room_data.self_sk = invitee_sk;
-        assert_eq!(room_data.can_send_message(), Ok(()));
+        board_data.self_sk = invitee_sk;
+        assert_eq!(board_data.can_send_message(), Ok(()));
     }
 
     /// Test that capture_self_membership_data captures and updates member_info.
     #[test]
     fn test_capture_self_membership_data_preserves_nickname() {
-        use river_core::room_state::privacy::SealedBytes;
+        use river_core::board_state::privacy::SealedBytes;
 
         let mut rng = rand::thread_rng();
         let owner_sk = SigningKey::generate(&mut rng);
@@ -831,7 +831,7 @@ mod tests {
         let member_id = MemberId::from(&invitee_vk);
 
         let config = AuthorizedConfigurationV1::new(Configuration::default(), &owner_sk);
-        let mut room_state = ChatRoomStateV1 {
+        let mut board_state = ChatBoardStateV1 {
             configuration: config,
             ..Default::default()
         };
@@ -842,7 +842,7 @@ mod tests {
             invited_by: owner_vk.into(),
             member_vk: invitee_vk,
         };
-        room_state
+        board_state
             .members
             .members
             .push(AuthorizedMember::new(member, &owner_sk));
@@ -854,17 +854,17 @@ mod tests {
             preferred_nickname: SealedBytes::public("Alice".to_string().into_bytes()),
         };
         let authorized_info = AuthorizedMemberInfo::new_with_member_key(info, &invitee_sk);
-        room_state.member_info.member_info.push(authorized_info);
+        board_state.member_info.member_info.push(authorized_info);
 
-        let params = ChatRoomParametersV1 { owner: owner_vk };
+        let params = ChatBoardParametersV1 { owner: owner_vk };
         let params_bytes = to_cbor_vec(&params);
-        let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+        let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
         let contract_key =
             ContractKey::from_params_and_code(Parameters::from(params_bytes), &contract_code);
 
-        let mut room_data = RoomData {
+        let mut board_data = BoardData {
             owner_vk,
-            room_state,
+            board_state,
             self_sk: invitee_sk.clone(),
             contract_key,
             last_read_message_id: None,
@@ -878,16 +878,16 @@ mod tests {
         };
 
         // Before capture, self_member_info should be None
-        assert!(room_data.self_member_info.is_none());
+        assert!(board_data.self_member_info.is_none());
 
         // Capture should populate self_member_info
-        room_data.capture_self_membership_data(&params);
-        assert!(room_data.self_member_info.is_some());
-        let stored = room_data.self_member_info.as_ref().unwrap();
+        board_data.capture_self_membership_data(&params);
+        assert!(board_data.self_member_info.is_some());
+        let stored = board_data.self_member_info.as_ref().unwrap();
         assert_eq!(stored.member_info.member_id, member_id);
         assert_eq!(stored.member_info.version, 0);
 
-        // Simulate nickname edit: update member_info in room_state with higher version
+        // Simulate nickname edit: update member_info in board_state with higher version
         let updated_info = MemberInfo {
             member_id,
             version: 1,
@@ -895,11 +895,11 @@ mod tests {
         };
         let updated_authorized =
             AuthorizedMemberInfo::new_with_member_key(updated_info, &invitee_sk);
-        room_data.room_state.member_info.member_info[0] = updated_authorized;
+        board_data.board_state.member_info.member_info[0] = updated_authorized;
 
         // Re-capture should update to latest version
-        room_data.capture_self_membership_data(&params);
-        let stored = room_data.self_member_info.as_ref().unwrap();
+        board_data.capture_self_membership_data(&params);
+        let stored = board_data.self_member_info.as_ref().unwrap();
         assert_eq!(stored.member_info.version, 1);
     }
 }

@@ -1,7 +1,7 @@
 use data_encoding::BASE32;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use freenet_scaffold::util::{fast_hash, FastHash};
-use river_core::room_state::member::MemberId;
+use river_core::board_state::member::MemberId;
 use std::collections::HashMap;
 
 #[cfg(test)]

@@ -10,29 +10,29 @@ pub enum DebugCommands {
     /// Perform a raw contract GET operation
     ContractGet {
         /// Board owner key (base58 encoded)
-        room_owner_key: String,
+        board_owner_key: String,
     },
     /// Test WebSocket connection
     Websocket,
-    /// Show contract key for a room
+    /// Show contract key for a board
     ContractKey {
         /// Board owner key (base58 encoded)
-        room_owner_key: String,
+        board_owner_key: String,
     },
-    /// Show room state summary including bans, members, and configuration
-    RoomState {
+    /// Show board state summary including bans, members, and configuration
+    BoardState {
         /// Board owner key (base58 encoded)
-        room_owner_key: String,
+        board_owner_key: String,
     },
-    /// Show current ban list for a room
+    /// Show current ban list for a board
     Bans {
         /// Board owner key (base58 encoded)
-        room_owner_key: String,
+        board_owner_key: String,
     },
-    /// Show room configuration
+    /// Show board configuration
     Config {
         /// Board owner key (base58 encoded)
-        room_owner_key: String,
+        board_owner_key: String,
     },
 }
 
@@ -44,8 +44,8 @@ struct BanInfo {
 }
 
 #[derive(Serialize)]
-struct RoomStateSummary {
-    room_name: String,
+struct BoardStateSummary {
+    board_name: String,
     member_count: usize,
     ban_count: usize,
     message_count: usize,
@@ -56,8 +56,8 @@ struct RoomStateSummary {
 }
 
 #[derive(Serialize)]
-struct RoomConfig {
-    room_name: String,
+struct BoardConfig {
+    board_name: String,
     privacy_mode: String,
     configuration_version: u32,
     max_recent_messages: usize,
@@ -65,21 +65,21 @@ struct RoomConfig {
     max_message_size: usize,
     max_nickname_size: usize,
     max_members: usize,
-    max_room_name: usize,
-    max_room_description: usize,
+    max_board_name: usize,
+    max_board_description: usize,
 }
 
 pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputFormat) -> Result<()> {
     match command {
-        DebugCommands::ContractGet { room_owner_key } => {
-            // Decode the room owner key from base58
-            let decoded = bs58::decode(&room_owner_key)
+        DebugCommands::ContractGet { board_owner_key } => {
+            // Decode the board owner key from base58
+            let decoded = bs58::decode(&board_owner_key)
                 .into_vec()
-                .map_err(|e| anyhow!("Failed to decode room owner key: {}", e))?;
+                .map_err(|e| anyhow!("Failed to decode board owner key: {}", e))?;
 
             if decoded.len() != 32 {
                 return Err(anyhow!(
-                    "Invalid room owner key length: expected 32 bytes, got {}",
+                    "Invalid board owner key length: expected 32 bytes, got {}",
                     decoded.len()
                 ));
             }
@@ -93,35 +93,35 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
 
             if !matches!(format, OutputFormat::Json) {
                 eprintln!(
-                    "DEBUG: Performing contract GET for room owned by: {}",
-                    room_owner_key
+                    "DEBUG: Performing contract GET for board owned by: {}",
+                    board_owner_key
                 );
                 eprintln!("Contract key: {}", contract_key.id());
             }
 
-            match api.get_room(&owner_vk, false).await {
-                Ok(room_state) => {
+            match api.get_board(&owner_vk, false).await {
+                Ok(board_state) => {
                     match format {
                         OutputFormat::Human => {
-                            println!("✓ Successfully retrieved room state");
+                            println!("✓ Successfully retrieved board state");
                             println!(
                                 "Configuration version: {}",
-                                room_state.configuration.configuration.configuration_version
+                                board_state.configuration.configuration.configuration_version
                             );
                             println!(
                                 "Board name: {}",
-                                room_state
+                                board_state
                                     .configuration
                                     .configuration
                                     .display
                                     .name
                                     .to_string_lossy()
                             );
-                            println!("Members: {}", room_state.members.members.len());
-                            println!("Messages: {}", room_state.recent_messages.messages.len());
+                            println!("Members: {}", board_state.members.members.len());
+                            println!("Messages: {}", board_state.recent_messages.messages.len());
                         }
                         OutputFormat::Json => {
-                            // TODO: Implement proper JSON serialization of room state
+                            // TODO: Implement proper JSON serialization of board state
                             println!(
                                 r#"{{"status": "success", "contract_key": "{}"}}"#,
                                 contract_key.id()
@@ -169,15 +169,15 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                 }
             }
         }
-        DebugCommands::ContractKey { room_owner_key } => {
-            // Decode the room owner key from base58
-            let decoded = bs58::decode(&room_owner_key)
+        DebugCommands::ContractKey { board_owner_key } => {
+            // Decode the board owner key from base58
+            let decoded = bs58::decode(&board_owner_key)
                 .into_vec()
-                .map_err(|e| anyhow!("Failed to decode room owner key: {}", e))?;
+                .map_err(|e| anyhow!("Failed to decode board owner key: {}", e))?;
 
             if decoded.len() != 32 {
                 return Err(anyhow!(
-                    "Invalid room owner key length: expected 32 bytes, got {}",
+                    "Invalid board owner key length: expected 32 bytes, got {}",
                     decoded.len()
                 ));
             }
@@ -191,29 +191,29 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
 
             match format {
                 OutputFormat::Human => {
-                    println!("Board owner key: {}", room_owner_key);
+                    println!("Board owner key: {}", board_owner_key);
                     println!("Contract key: {}", contract_key.id());
                 }
                 OutputFormat::Json => {
                     println!(
-                        r#"{{"room_owner_key": "{}", "contract_key": "{}"}}"#,
-                        room_owner_key,
+                        r#"{{"board_owner_key": "{}", "contract_key": "{}"}}"#,
+                        board_owner_key,
                         contract_key.id()
                     );
                 }
             }
             Ok(())
         }
-        DebugCommands::RoomState { room_owner_key } => {
-            let owner_vk = parse_owner_key(&room_owner_key)?;
-            let room_state = api.get_room(&owner_vk, false).await?;
+        DebugCommands::BoardState { board_owner_key } => {
+            let owner_vk = parse_owner_key(&board_owner_key)?;
+            let board_state = api.get_board(&owner_vk, false).await?;
 
-            let config = &room_state.configuration.configuration;
-            let summary = RoomStateSummary {
-                room_name: config.display.name.to_string_lossy(),
-                member_count: room_state.members.members.len(),
-                ban_count: room_state.bans.0.len(),
-                message_count: room_state.recent_messages.messages.len(),
+            let config = &board_state.configuration.configuration;
+            let summary = BoardStateSummary {
+                board_name: config.display.name.to_string_lossy(),
+                member_count: board_state.members.members.len(),
+                ban_count: board_state.bans.0.len(),
+                message_count: board_state.recent_messages.messages.len(),
                 max_user_bans: config.max_user_bans,
                 max_members: config.max_members,
                 privacy_mode: format!("{:?}", config.privacy_mode),
@@ -224,7 +224,7 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                 OutputFormat::Human => {
                     println!("Board State Summary");
                     println!("==================");
-                    println!("Board name: {}", summary.room_name);
+                    println!("Board name: {}", summary.board_name);
                     println!("Privacy mode: {}", summary.privacy_mode);
                     println!("Config version: {}", summary.configuration_version);
                     println!();
@@ -241,11 +241,11 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
             }
             Ok(())
         }
-        DebugCommands::Bans { room_owner_key } => {
-            let owner_vk = parse_owner_key(&room_owner_key)?;
-            let room_state = api.get_room(&owner_vk, false).await?;
+        DebugCommands::Bans { board_owner_key } => {
+            let owner_vk = parse_owner_key(&board_owner_key)?;
+            let board_state = api.get_board(&owner_vk, false).await?;
 
-            let bans: Vec<BanInfo> = room_state
+            let bans: Vec<BanInfo> = board_state
                 .bans
                 .0
                 .iter()
@@ -285,13 +285,13 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
             }
             Ok(())
         }
-        DebugCommands::Config { room_owner_key } => {
-            let owner_vk = parse_owner_key(&room_owner_key)?;
-            let room_state = api.get_room(&owner_vk, false).await?;
+        DebugCommands::Config { board_owner_key } => {
+            let owner_vk = parse_owner_key(&board_owner_key)?;
+            let board_state = api.get_board(&owner_vk, false).await?;
 
-            let config = &room_state.configuration.configuration;
-            let room_config = RoomConfig {
-                room_name: config.display.name.to_string_lossy(),
+            let config = &board_state.configuration.configuration;
+            let board_config = BoardConfig {
+                board_name: config.display.name.to_string_lossy(),
                 privacy_mode: format!("{:?}", config.privacy_mode),
                 configuration_version: config.configuration_version,
                 max_recent_messages: config.max_recent_messages,
@@ -299,32 +299,32 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                 max_message_size: config.max_message_size,
                 max_nickname_size: config.max_nickname_size,
                 max_members: config.max_members,
-                max_room_name: config.max_room_name,
-                max_room_description: config.max_room_description,
+                max_board_name: config.max_board_name,
+                max_board_description: config.max_board_description,
             };
 
             match format {
                 OutputFormat::Human => {
                     println!("Board Configuration");
                     println!("==================");
-                    println!("Board name: {}", room_config.room_name);
-                    println!("Privacy mode: {}", room_config.privacy_mode);
-                    println!("Config version: {}", room_config.configuration_version);
+                    println!("Board name: {}", board_config.board_name);
+                    println!("Privacy mode: {}", board_config.privacy_mode);
+                    println!("Config version: {}", board_config.configuration_version);
                     println!();
                     println!("Limits:");
-                    println!("  max_members: {}", room_config.max_members);
-                    println!("  max_user_bans: {}", room_config.max_user_bans);
-                    println!("  max_recent_messages: {}", room_config.max_recent_messages);
-                    println!("  max_message_size: {}", room_config.max_message_size);
-                    println!("  max_nickname_size: {}", room_config.max_nickname_size);
-                    println!("  max_room_name: {}", room_config.max_room_name);
+                    println!("  max_members: {}", board_config.max_members);
+                    println!("  max_user_bans: {}", board_config.max_user_bans);
+                    println!("  max_recent_messages: {}", board_config.max_recent_messages);
+                    println!("  max_message_size: {}", board_config.max_message_size);
+                    println!("  max_nickname_size: {}", board_config.max_nickname_size);
+                    println!("  max_board_name: {}", board_config.max_board_name);
                     println!(
-                        "  max_room_description: {}",
-                        room_config.max_room_description
+                        "  max_board_description: {}",
+                        board_config.max_board_description
                     );
                 }
                 OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&room_config)?);
+                    println!("{}", serde_json::to_string_pretty(&board_config)?);
                 }
             }
             Ok(())
@@ -332,15 +332,15 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
     }
 }
 
-/// Helper to parse a base58-encoded room owner key
-fn parse_owner_key(room_owner_key: &str) -> Result<VerifyingKey> {
-    let decoded = bs58::decode(room_owner_key)
+/// Helper to parse a base58-encoded board owner key
+fn parse_owner_key(board_owner_key: &str) -> Result<VerifyingKey> {
+    let decoded = bs58::decode(board_owner_key)
         .into_vec()
-        .map_err(|e| anyhow!("Failed to decode room owner key: {}", e))?;
+        .map_err(|e| anyhow!("Failed to decode board owner key: {}", e))?;
 
     if decoded.len() != 32 {
         return Err(anyhow!(
-            "Invalid room owner key length: expected 32 bytes, got {}",
+            "Invalid board owner key length: expected 32 bytes, got {}",
             decoded.len()
         ));
     }

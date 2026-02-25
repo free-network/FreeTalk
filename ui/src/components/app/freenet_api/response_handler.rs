@@ -5,18 +5,18 @@ mod update_notification;
 mod update_response;
 
 use super::error::SynchronizerError;
-use super::room_synchronizer::RoomSynchronizer;
+use super::board_synchronizer::BoardSynchronizer;
 use crate::components::app::chat_delegate::{
     complete_pending_public_key_request, complete_pending_request, complete_pending_sign_request,
     complete_pending_signing_key_request, is_legacy_delegate_key, mark_legacy_migration_done,
-    save_rooms_to_delegate, ROOMS_STORAGE_KEY,
+    save_boards_to_delegate, BOARDS_STORAGE_KEY,
 };
-use crate::components::app::document_title::{mark_current_room_as_read, update_document_title};
+use crate::components::app::document_title::{mark_current_board_as_read, update_document_title};
 use crate::components::app::notifications::mark_initial_sync_complete;
-use crate::components::app::sync_info::{RoomSyncStatus, SYNC_INFO};
-use crate::components::app::{CURRENT_ROOM, ROOMS};
-use crate::room_data::CurrentRoom;
-use crate::room_data::Rooms;
+use crate::components::app::sync_info::{BoardSyncStatus, SYNC_INFO};
+use crate::components::app::{CURRENT_BOARD, BOARDS};
+use crate::board_data::CurrentBoard;
+use crate::board_data::Boards;
 use crate::util::ecies::{decrypt_secret_from_member_blob, decrypt_with_symmetric_key};
 use crate::util::owner_vk_to_contract_key;
 use ciborium::de::from_reader;
@@ -27,9 +27,9 @@ use freenet_stdlib::prelude::OutboundDelegateMsg;
 pub use get_response::handle_get_response;
 pub use put_response::handle_put_response;
 use river_core::chat_delegate::{ChatDelegateRequestMsg, ChatDelegateResponseMsg};
-use river_core::room_state::member::MemberId;
-use river_core::room_state::message::{MessageId, RoomMessageBody};
-use river_core::room_state::privacy::PrivacyMode;
+use river_core::board_state::member::MemberId;
+use river_core::board_state::message::{MessageId, BoardMessageBody};
+use river_core::board_state::privacy::PrivacyMode;
 use std::collections::HashMap;
 pub use subscribe_response::handle_subscribe_response;
 pub use update_notification::handle_update_notification;
@@ -38,7 +38,7 @@ use x25519_dalek::PublicKey as X25519PublicKey;
 
 /// Handles responses from the Freenet API
 pub struct ResponseHandler {
-    room_synchronizer: RoomSynchronizer,
+    board_synchronizer: BoardSynchronizer,
 }
 
 /// Response flags returned from handle_api_response
@@ -51,15 +51,15 @@ pub struct ResponseFlags {
 }
 
 impl ResponseHandler {
-    pub fn new(room_synchronizer: RoomSynchronizer) -> Self {
-        Self { room_synchronizer }
+    pub fn new(board_synchronizer: BoardSynchronizer) -> Self {
+        Self { board_synchronizer }
     }
 
-    // Create a new ResponseHandler that shares the same RoomSynchronizer
-    pub fn new_with_shared_synchronizer(synchronizer: &RoomSynchronizer) -> Self {
-        // Clone the RoomSynchronizer to share the same state
+    // Create a new ResponseHandler that shares the same BoardSynchronizer
+    pub fn new_with_shared_synchronizer(synchronizer: &BoardSynchronizer) -> Self {
+        // Clone the BoardSynchronizer to share the same state
         Self {
-            room_synchronizer: synchronizer.clone(),
+            board_synchronizer: synchronizer.clone(),
         }
     }
 
@@ -82,7 +82,7 @@ impl ResponseHandler {
                     state,
                 } => {
                     handle_get_response(
-                        &mut self.room_synchronizer,
+                        &mut self.board_synchronizer,
                         key,
                         Vec::new(),
                         state.to_vec(),
@@ -90,10 +90,10 @@ impl ResponseHandler {
                     .await?;
                 }
                 ContractResponse::PutResponse { key } => {
-                    handle_put_response(&mut self.room_synchronizer, key).await?;
+                    handle_put_response(&mut self.board_synchronizer, key).await?;
                 }
                 ContractResponse::UpdateNotification { key, update } => {
-                    handle_update_notification(&mut self.room_synchronizer, key, update)?;
+                    handle_update_notification(&mut self.board_synchronizer, key, update)?;
                 }
                 ContractResponse::UpdateResponse { key, summary } => {
                     handle_update_response(key, summary.to_vec());
@@ -102,9 +102,9 @@ impl ResponseHandler {
                     flags.needs_reput = handle_subscribe_response(key, subscribed);
                     if subscribed {
                         // Fetch current contract state after successful subscribe.
-                        // On reconnect, rooms loaded from delegate storage may be stale.
+                        // On reconnect, boards loaded from delegate storage may be stale.
                         // Subscribe doesn't return state, so we need an explicit GET.
-                        if let Err(e) = self.room_synchronizer.get_contract_state(&key).await {
+                        if let Err(e) = self.board_synchronizer.get_contract_state(&key).await {
                             error!(
                                 "Failed to GET state after subscribe for {}: {}",
                                 key.id(),
@@ -188,26 +188,26 @@ impl ResponseHandler {
                                     }
                                     // Signing key management responses
                                     ChatDelegateResponseMsg::StoreSigningKeyResponse {
-                                        room_key,
+                                        board_key,
                                         ..
                                     } => complete_pending_signing_key_request(
-                                        room_key,
+                                        board_key,
                                         response.clone(),
                                     ),
                                     ChatDelegateResponseMsg::GetPublicKeyResponse {
-                                        room_key,
+                                        board_key,
                                         ..
                                     } => complete_pending_public_key_request(
-                                        room_key,
+                                        board_key,
                                         response.clone(),
                                     ),
-                                    // Signing response - use both room_key and request_id for correlation
+                                    // Signing response - use both board_key and request_id for correlation
                                     ChatDelegateResponseMsg::SignResponse {
-                                        room_key,
+                                        board_key,
                                         request_id,
                                         ..
                                     } => complete_pending_sign_request(
-                                        room_key,
+                                        board_key,
                                         *request_id,
                                         response.clone(),
                                     ),
@@ -226,53 +226,53 @@ impl ResponseHandler {
                                             value.is_some()
                                         );
 
-                                        // Check if this is the rooms data
-                                        if key.as_bytes() == ROOMS_STORAGE_KEY {
-                                            if let Some(rooms_data) = value {
-                                                // Deserialize the rooms data
-                                                match from_reader::<Rooms, _>(&rooms_data[..]) {
-                                                    Ok(loaded_rooms) => {
+                                        // Check if this is the boards data
+                                        if key.as_bytes() == BOARDS_STORAGE_KEY {
+                                            if let Some(boards_data) = value {
+                                                // Deserialize the boards data
+                                                match from_reader::<Boards, _>(&boards_data[..]) {
+                                                    Ok(loaded_boards) => {
                                                         // TODO: Remove legacy migration code after 2026-03-01
                                                         if is_legacy_delegate {
-                                                            info!("Successfully loaded rooms from LEGACY delegate - migrating to new delegate");
+                                                            info!("Successfully loaded boards from LEGACY delegate - migrating to new delegate");
                                                         } else {
-                                                            info!("Successfully loaded rooms from delegate");
+                                                            info!("Successfully loaded boards from delegate");
                                                         }
 
-                                                        // Restore the current room selection if saved
-                                                        if let Some(saved_room_key) =
-                                                            loaded_rooms.current_room_key
+                                                        // Restore the current board selection if saved
+                                                        if let Some(saved_board_key) =
+                                                            loaded_boards.current_board_key
                                                         {
-                                                            info!("Restoring current room selection from delegate");
-                                                            *CURRENT_ROOM.write() = CurrentRoom {
-                                                                owner_key: Some(saved_room_key),
+                                                            info!("Restoring current board selection from delegate");
+                                                            *CURRENT_BOARD.write() = CurrentBoard {
+                                                                owner_key: Some(saved_board_key),
                                                             };
                                                         }
 
-                                                        // Collect room keys before merge
-                                                        let room_keys: Vec<_> = loaded_rooms
+                                                        // Collect board keys before merge
+                                                        let board_keys: Vec<_> = loaded_boards
                                                             .map
                                                             .keys()
                                                             .copied()
                                                             .collect();
 
-                                                        // Merge the loaded rooms with the current rooms
-                                                        ROOMS.with_mut(|current_rooms| {
-                                                            if let Err(e) = current_rooms.merge(loaded_rooms) {
-                                                                error!("Failed to merge rooms: {}", e);
+                                                        // Merge the loaded boards with the current boards
+                                                        BOARDS.with_mut(|current_boards| {
+                                                            if let Err(e) = current_boards.merge(loaded_boards) {
+                                                                error!("Failed to merge boards: {}", e);
                                                             } else {
-                                                                info!("Successfully merged rooms from delegate");
+                                                                info!("Successfully merged boards from delegate");
 
-                                                                // Re-decrypt ALL secret versions for each room (secrets are #[serde(skip)])
-                                                                for room_data in current_rooms.map.values_mut() {
-                                                                    if room_data.room_state.configuration.configuration.privacy_mode == PrivacyMode::Private {
-                                                                        let member_id = MemberId::from(&room_data.self_sk.verifying_key());
-                                                                        let current_version = room_data.room_state.secrets.current_version;
-                                                                        let self_sk = room_data.self_sk.clone();
+                                                                // Re-decrypt ALL secret versions for each board (secrets are #[serde(skip)])
+                                                                for board_data in current_boards.map.values_mut() {
+                                                                    if board_data.board_state.configuration.configuration.privacy_mode == PrivacyMode::Private {
+                                                                        let member_id = MemberId::from(&board_data.self_sk.verifying_key());
+                                                                        let current_version = board_data.board_state.secrets.current_version;
+                                                                        let self_sk = board_data.self_sk.clone();
 
                                                                         // Extract encrypted secret data to avoid borrow issues
-                                                                        let member_secrets: Vec<_> = room_data
-                                                                            .room_state
+                                                                        let member_secrets: Vec<_> = board_data
+                                                                            .board_state
                                                                             .secrets
                                                                             .encrypted_secrets
                                                                             .iter()
@@ -298,40 +298,38 @@ impl ResponseHandler {
                                                                                     &self_sk,
                                                                                 ) {
                                                                                     Ok(decrypted_secret) => {
-                                                                                        info!("Re-decrypted room secret version {} for member {:?}", version, member_id);
-                                                                                        room_data.set_secret(decrypted_secret, version);
+                                                                                        info!("Re-decrypted board secret version {} for member {:?}", version, member_id);
+                                                                                        board_data.set_secret(decrypted_secret, version);
                                                                                     }
                                                                                     Err(e) => {
-                                                                                        warn!("Failed to re-decrypt room secret version {}: {}", version, e);
+                                                                                        warn!("Failed to re-decrypt board secret version {}: {}", version, e);
                                                                                     }
                                                                                 }
                                                                             }
                                                                         }
 
                                                                         // Ensure current_secret_version is set to the actual current version
-                                                                        room_data.current_secret_version = Some(current_version);
+                                                                        board_data.current_secret_version = Some(current_version);
                                                                     }
                                                                 }
 
-                                                                // Rebuild actions_state for each loaded room
+                                                                // Rebuild actions_state for each loaded board
                                                                 // This is needed because actions_state is #[serde(skip)] and not serialized
-                                                                for room_data in current_rooms.map.values_mut() {
-                                                                    let is_private = room_data.room_state.configuration.configuration.privacy_mode
-                                                                        == PrivacyMode::Private;
+                                                                for board_data in current_boards.map.values_mut() {
+                                                                    let is_private = board_data.board_state.configuration.configuration.privacy_mode == PrivacyMode::Private;
                                                                     if is_private {
                                                                         // Decrypt all private action messages using version-aware lookup
-                                                                        let decrypted_actions: HashMap<MessageId, Vec<u8>> = room_data
-                                                                            .room_state
+                                                                        let decrypted_actions: HashMap<MessageId, Vec<u8>> = board_data
+                                                                            .board_state
                                                                             .recent_messages
                                                                             .messages
                                                                             .iter()
                                                                             .filter(|msg| msg.message.content.is_action())
                                                                             .filter_map(|msg| {
-                                                                                if let RoomMessageBody::Private { ciphertext, nonce, secret_version, .. } =
-                                                                                    &msg.message.content
+                                                                                if let BoardMessageBody::Private { ciphertext, nonce, secret_version, .. } = &msg.message.content
                                                                                 {
                                                                                     // Look up the secret for this message's version
-                                                                                    room_data.get_secret_for_version(*secret_version)
+                                                                                    board_data.get_secret_for_version(*secret_version)
                                                                                         .and_then(|secret| {
                                                                                             decrypt_with_symmetric_key(secret, ciphertext, nonce)
                                                                                                 .ok()
@@ -343,14 +341,14 @@ impl ResponseHandler {
                                                                             })
                                                                             .collect();
 
-                                                                        room_data
-                                                                            .room_state
+                                                                        board_data
+                                                                            .board_state
                                                                             .recent_messages
                                                                             .rebuild_actions_state_with_decrypted(&decrypted_actions);
                                                                     } else {
-                                                                        // Public room - rebuild from public action messages
-                                                                        room_data
-                                                                            .room_state
+                                                                        // Public board - rebuild from public action messages
+                                                                        board_data
+                                                                            .board_state
                                                                             .recent_messages
                                                                             .rebuild_actions_state();
                                                                     }
@@ -358,23 +356,23 @@ impl ResponseHandler {
                                                             }
                                                         });
 
-                                                        // Mark current room as read since user is viewing it
-                                                        // (must be after merge so room data exists)
-                                                        mark_current_room_as_read();
+                                                        // Mark current board as read since user is viewing it
+                                                        // (must be after merge so board data exists)
+                                                        mark_current_board_as_read();
                                                         update_document_title();
 
-                                                        // Migrate signing keys to delegate for each loaded room
-                                                        info!("Migrating signing keys to delegate for {} rooms", room_keys.len());
-                                                        for room_key in &room_keys {
-                                                            // Get the room's signing key
+                                                        // Migrate signing keys to delegate for each loaded board
+                                                        info!("Migrating signing keys to delegate for {} boards", board_keys.len());
+                                                        for board_key in &board_keys {
+                                                            // Get the board's signing key
                                                             let signing_key_opt =
-                                                                ROOMS.with(|rooms| {
-                                                                    rooms.map.get(room_key).map(
-                                                                        |room_data| {
+                                                                BOARDS.with(|boards| {
+                                                                    boards.map.get(board_key).map(
+                                                                        |board_data| {
                                                                             (
-                                                                                room_data
-                                                                                    .room_key(),
-                                                                                room_data
+                                                                                board_data
+                                                                                    .board_key(),
+                                                                                board_data
                                                                                     .self_sk
                                                                                     .clone(),
                                                                             )
@@ -383,25 +381,25 @@ impl ResponseHandler {
                                                                 });
 
                                                             if let Some((
-                                                                delegate_room_key,
+                                                                delegate_board_key,
                                                                 signing_key,
                                                             )) = signing_key_opt
                                                             {
                                                                 // Spawn async migration task
-                                                                let room_key_copy = *room_key;
+                                                                let board_key_copy = *board_key;
                                                                 wasm_bindgen_futures::spawn_local(
                                                                     async move {
                                                                         let migrated = crate::signing::migrate_signing_key(
-                                                                        delegate_room_key,
+                                                                        delegate_board_key,
                                                                         &signing_key,
                                                                     )
                                                                     .await;
 
                                                                         if migrated {
-                                                                            // Mark the room as migrated
-                                                                            ROOMS.with_mut(|rooms| {
-                                                                            if let Some(room_data) = rooms.map.get_mut(&room_key_copy) {
-                                                                                room_data.key_migrated_to_delegate = true;
+                                                                            // Mark the board as migrated
+                                                                            BOARDS.with_mut(|boards| {
+                                                                            if let Some(board_data) = boards.map.get_mut(&board_key_copy) {
+                                                                                board_data.key_migrated_to_delegate = true;
                                                                             }
                                                                         });
                                                                         }
@@ -410,45 +408,45 @@ impl ResponseHandler {
                                                             }
                                                         }
 
-                                                        // Mark all loaded rooms as having completed initial sync
+                                                        // Mark all loaded boards as having completed initial sync
                                                         // and subscribe to receive updates
-                                                        for room_key in &room_keys {
-                                                            mark_initial_sync_complete(room_key);
+                                                        for board_key in &board_keys {
+                                                            mark_initial_sync_complete(board_key);
                                                         }
 
-                                                        // Subscribe to each loaded room's contract
+                                                        // Subscribe to each loaded board's contract
                                                         info!(
-                                                            "Subscribing to {} rooms loaded from delegate",
-                                                            room_keys.len()
+                                                            "Subscribing to {} boards loaded from delegate",
+                                                            board_keys.len()
                                                         );
-                                                        for room_key in room_keys {
-                                                            // Register the room in SYNC_INFO
+                                                        for board_key in board_keys {
+                                                            // Register the board in SYNC_INFO
                                                             SYNC_INFO
                                                                 .write()
-                                                                .register_new_room(room_key);
+                                                                .register_new_board(board_key);
                                                             SYNC_INFO.write().update_sync_status(
-                                                                &room_key,
-                                                                RoomSyncStatus::Subscribing,
+                                                                &board_key,
+                                                                BoardSyncStatus::Subscribing,
                                                             );
 
                                                             // Get contract key and subscribe
                                                             let contract_key =
-                                                                owner_vk_to_contract_key(&room_key);
+                                                                owner_vk_to_contract_key(&board_key);
                                                             if let Err(e) = self
-                                                                .room_synchronizer
+                                                                .board_synchronizer
                                                                 .subscribe_to_contract(
                                                                     &contract_key,
                                                                 )
                                                                 .await
                                                             {
                                                                 error!(
-                                                                    "Failed to subscribe to loaded room {:?}: {}",
+                                                                    "Failed to subscribe to loaded board {:?}: {}",
                                                                     contract_key.id(),
                                                                     e
                                                                 );
                                                             } else {
                                                                 info!(
-                                                                    "Successfully sent subscribe request for loaded room {:?}",
+                                                                    "Successfully sent subscribe request for loaded board {:?}",
                                                                     contract_key.id()
                                                                 );
                                                                 // Mark that subscriptions were initiated so timeout monitoring can be scheduled
@@ -460,18 +458,18 @@ impl ResponseHandler {
                                                         // TODO: Remove legacy migration code after 2026-03-01
                                                         // If this was from the legacy delegate, save to the new delegate
                                                         if is_legacy_delegate {
-                                                            info!("Migrating room data from legacy delegate to new delegate");
+                                                            info!("Migrating board data from legacy delegate to new delegate");
                                                             wasm_bindgen_futures::spawn_local(
                                                                 async {
-                                                                    match save_rooms_to_delegate()
+                                                                    match save_boards_to_delegate()
                                                                         .await
                                                                     {
                                                                         Ok(_) => {
-                                                                            info!("Successfully migrated room data to new delegate");
+                                                                            info!("Successfully migrated board data to new delegate");
                                                                             mark_legacy_migration_done();
                                                                         }
                                                                         Err(e) => {
-                                                                            error!("Failed to migrate room data to new delegate: {}", e);
+                                                                            error!("Failed to migrate board data to new delegate: {}", e);
                                                                             // Don't mark as done - will retry on next startup
                                                                         }
                                                                     }
@@ -481,17 +479,17 @@ impl ResponseHandler {
                                                     }
                                                     Err(e) => {
                                                         error!(
-                                                            "Failed to deserialize rooms data: {}",
+                                                            "Failed to deserialize boards data: {}",
                                                             e
                                                         );
                                                     }
                                                 }
                                             } else {
-                                                info!("No rooms data found in delegate");
+                                                info!("No boards data found in delegate");
                                                 // TODO: Remove legacy migration code after 2026-03-01
                                                 // If legacy delegate has no data, mark migration done so we don't keep trying
                                                 if is_legacy_delegate {
-                                                    info!("No rooms in legacy delegate - marking migration complete");
+                                                    info!("No boards in legacy delegate - marking migration complete");
                                                     mark_legacy_migration_done();
                                                 }
                                             }
@@ -535,32 +533,32 @@ impl ResponseHandler {
                                     }
                                     // Signing key management responses
                                     ChatDelegateResponseMsg::StoreSigningKeyResponse {
-                                        room_key,
+                                        board_key,
                                         result,
                                     } => match result {
                                         Ok(_) => {
-                                            info!("Stored signing key for room: {:?}", room_key)
+                                            info!("Stored signing key for board: {:?}", board_key)
                                         }
                                         Err(e) => warn!("Failed to store signing key: {}", e),
                                     },
                                     ChatDelegateResponseMsg::GetPublicKeyResponse {
-                                        room_key,
+                                        board_key,
                                         public_key,
                                     } => {
                                         info!(
-                                            "Got public key for room {:?}: present={}",
-                                            room_key,
+                                            "Got public key for board {:?}: present={}",
+                                            board_key,
                                             public_key.is_some()
                                         );
                                     }
                                     ChatDelegateResponseMsg::SignResponse {
-                                        room_key,
+                                        board_key,
                                         signature,
                                         ..
                                     } => match signature {
-                                        Ok(_) => info!("Got signature for room: {:?}", room_key),
+                                        Ok(_) => info!("Got signature for board: {:?}", board_key),
                                         Err(e) => {
-                                            warn!("Failed to sign for room {:?}: {}", room_key, e)
+                                            warn!("Failed to sign for board {:?}: {}", board_key, e)
                                         }
                                     },
                                 }
@@ -581,12 +579,12 @@ impl ResponseHandler {
         Ok(flags)
     }
 
-    pub fn get_room_synchronizer_mut(&mut self) -> &mut RoomSynchronizer {
-        &mut self.room_synchronizer
+    pub fn get_board_synchronizer_mut(&mut self) -> &mut BoardSynchronizer {
+        &mut self.board_synchronizer
     }
 
-    // Get a reference to the room synchronizer
-    pub fn get_room_synchronizer(&self) -> &RoomSynchronizer {
-        &self.room_synchronizer
+    // Get a reference to the board synchronizer
+    pub fn get_board_synchronizer(&self) -> &BoardSynchronizer {
+        &self.board_synchronizer
     }
 }

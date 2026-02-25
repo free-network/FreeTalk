@@ -1,7 +1,7 @@
 use crate::util::random_full_name;
 use crate::{
-    constants::ROOM_CONTRACT_WASM,
-    room_data::{RoomData, Rooms},
+    constants::BOARD_CONTRACT_WASM,
+    board_data::{BoardData, Boards},
     util::to_cbor_vec,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
@@ -9,45 +9,45 @@ use freenet_scaffold::ComposableState;
 use freenet_stdlib::prelude::{ContractCode, ContractInstanceId, ContractKey, Parameters};
 use lipsum::lipsum;
 use rand::rngs::OsRng;
-use river_core::room_state::ChatRoomParametersV1;
+use river_core::board_state::ChatBoardParametersV1;
 use river_core::{
-    room_state::{
+    board_state::{
         configuration::*,
         member::*,
         member_info::*,
         message::*,
-        privacy::{RoomDisplayMetadata, SealedBytes},
+        privacy::{BoardDisplayMetadata, SealedBytes},
     },
-    ChatRoomStateV1,
+    ChatBoardStateV1,
 };
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub fn create_example_rooms() -> Rooms {
+pub fn create_example_boards() -> Boards {
     let mut map = HashMap::new();
 
     // Board where you're just an observer (not a member)
-    let room1 = create_room(&"Public Discussion Board".to_string(), SelfIs::Observer);
-    map.insert(room1.owner_vk, room1.room_data);
+    let board1 = create_board(&"Public Discussion Board".to_string(), SelfIs::Observer);
+    map.insert(board1.owner_vk, board1.board_data);
 
     // Board where you're a member
-    let room2 = create_room(&"Team Chat Board".to_string(), SelfIs::Member);
-    map.insert(room2.owner_vk, room2.room_data);
+    let board2 = create_board(&"Team Chat Board".to_string(), SelfIs::Member);
+    map.insert(board2.owner_vk, board2.board_data);
 
     // Board where you're the owner
-    let room3 = create_room(&"Your Private Board".to_string(), SelfIs::Owner);
-    map.insert(room3.owner_vk, room3.room_data);
+    let board3 = create_board(&"Your Private Board".to_string(), SelfIs::Owner);
+    map.insert(board3.owner_vk, board3.board_data);
 
-    Rooms {
+    Boards {
         map,
-        current_room_key: None,
-        migrated_rooms: Vec::new(),
+        current_board_key: None,
+        migrated_boards: Vec::new(),
     }
 }
 
-struct CreatedRoom {
+struct CreatedBoard {
     owner_vk: VerifyingKey,
-    room_data: RoomData,
+    board_data: BoardData,
 }
 
 #[derive(Debug, PartialEq)]
@@ -57,9 +57,9 @@ enum SelfIs {
     Owner,
 }
 
-// Function to create a room with an owner and members, self_is determines whether
+// Function to create a board with an owner and members, self_is determines whether
 // the user of the UI is the owner, a member, or an observer (not an owner or member)
-fn create_room(room_name: &String, self_is: SelfIs) -> CreatedRoom {
+fn create_board(board_name: &String, self_is: SelfIs) -> CreatedBoard {
     let mut csprng = OsRng;
 
     // Create self - the user actually using the app
@@ -67,7 +67,7 @@ fn create_room(room_name: &String, self_is: SelfIs) -> CreatedRoom {
     let self_vk = self_sk.verifying_key();
     let self_id = self_vk.into();
 
-    // Create owner of the room
+    // Create owner of the board
     let owner_sk = if self_is == SelfIs::Owner {
         &self_sk
     } else {
@@ -76,16 +76,16 @@ fn create_room(room_name: &String, self_is: SelfIs) -> CreatedRoom {
     let owner_vk = owner_sk.verifying_key();
     let owner_id = MemberId::from(&owner_vk);
 
-    let mut room_state = ChatRoomStateV1::default();
+    let mut board_state = ChatBoardStateV1::default();
 
     // Set configuration
     let mut config = Configuration::default();
-    config.display = RoomDisplayMetadata {
-        name: SealedBytes::public(room_name.clone().into_bytes()),
+    config.display = BoardDisplayMetadata {
+        name: SealedBytes::public(board_name.clone().into_bytes()),
         description: None,
     };
     config.owner_member_id = owner_id;
-    room_state.configuration = AuthorizedConfigurationV1::new(config, owner_sk);
+    board_state.configuration = AuthorizedConfigurationV1::new(config, owner_sk);
 
     // Initialize member lists
     let mut members = MembersV1::default();
@@ -130,13 +130,13 @@ fn create_room(room_name: &String, self_is: SelfIs) -> CreatedRoom {
             ));
     }
 
-    // Always add another member to ensure the room has at least one member
+    // Always add another member to ensure the board has at least one member
     let other_member_sk = SigningKey::generate(&mut csprng);
     let other_member_vk = other_member_sk.verifying_key();
     let other_member_id = MemberId::from(&other_member_vk);
 
-    // In rooms where self is owner, other member should be invited by self
-    // In other rooms, other member should be invited by owner
+    // In boards where self is owner, other member should be invited by self
+    // In other boards, other member should be invited by owner
     let inviter_id = if self_is == SelfIs::Owner {
         self_id
     } else {
@@ -170,9 +170,9 @@ fn create_room(room_name: &String, self_is: SelfIs) -> CreatedRoom {
             &other_member_sk,
         ));
 
-    // Add members to the room
-    room_state.members = members.clone();
-    room_state.member_info = member_info.clone();
+    // Add members to the board
+    board_state.members = members.clone();
+    board_state.member_info = member_info.clone();
 
     // Create a map of member IDs to their signing keys for message creation
     let mut member_keys = HashMap::new();
@@ -182,34 +182,34 @@ fn create_room(room_name: &String, self_is: SelfIs) -> CreatedRoom {
     member_keys.insert(other_member_id, other_member_sk);
 
     // Add example messages
-    add_example_messages(&mut room_state, &owner_id, owner_sk, &member_keys);
+    add_example_messages(&mut board_state, &owner_id, owner_sk, &member_keys);
 
-    let verification_result = room_state.verify(
-        &room_state,
-        &ChatRoomParametersV1 {
+    let verification_result = board_state.verify(
+        &board_state,
+        &ChatBoardParametersV1 {
             owner: owner_vk.clone(),
         },
     );
     if !verification_result.is_ok() {
         panic!(
-            "Failed to verify room state: {:?}",
+            "Failed to verify board state: {:?}",
             verification_result.err()
         );
     }
 
-    // Generate contract key for the room
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
+    // Generate contract key for the board
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
     let params_bytes = to_cbor_vec(&parameters);
-    let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+    let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
     // Use the full ContractKey constructor that includes the code hash
     let contract_key =
         ContractKey::from_params_and_code(Parameters::from(params_bytes), &contract_code);
 
-    CreatedRoom {
+    CreatedBoard {
         owner_vk,
-        room_data: RoomData {
+        board_data: BoardData {
             owner_vk: owner_vk.clone(),
-            room_state,
+            board_state,
             self_sk: self_sk.clone(),
             contract_key,
             last_read_message_id: None,
@@ -225,7 +225,7 @@ fn create_room(room_name: &String, self_is: SelfIs) -> CreatedRoom {
 }
 
 fn add_example_messages(
-    room_state: &mut ChatRoomStateV1,
+    board_state: &mut ChatBoardStateV1,
     owner_id: &MemberId,
     owner_key: &SigningKey,
     member_keys: &HashMap<MemberId, SigningKey>,
@@ -241,7 +241,7 @@ fn add_example_messages(
     let mut current_time_ms = base_time;
 
     // Verify owner exists in member_info but NOT in members list
-    if !room_state
+    if !board_state
         .member_info
         .member_info
         .iter()
@@ -249,7 +249,7 @@ fn add_example_messages(
     {
         panic!("Owner ID not found in member_info: {}", owner_id);
     }
-    if room_state
+    if board_state
         .members
         .members
         .iter()
@@ -269,7 +269,7 @@ fn add_example_messages(
 
         // Verify they exist in members list (unless they're the owner)
         if *member_id != *owner_id
-            && !room_state
+            && !board_state
                 .members
                 .members
                 .iter()
@@ -297,10 +297,10 @@ fn add_example_messages(
         let word_count = rand::random::<u8>() % 21 + 15;
         let msg = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: *owner_id,
+                board_owner: *owner_id,
                 author: author_id,
                 time: get_time_from_millis(current_time_ms),
-                content: RoomMessageBody::public(lipsum(word_count as usize)),
+                content: BoardMessageBody::public(lipsum(word_count as usize)),
             },
             signing_key,
         );
@@ -342,7 +342,7 @@ fn add_example_messages(
         messages.actions_state.reactions.insert(msg_id, reactions);
     }
 
-    room_state.recent_messages = messages;
+    board_state.recent_messages = messages;
 }
 
 fn get_time_from_millis(ms: u64) -> SystemTime {
@@ -363,15 +363,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_create_example_rooms() {
-        let rooms = create_example_rooms();
-        assert_eq!(rooms.map.len(), 3);
+    fn test_create_example_boards() {
+        let boards = create_example_boards();
+        assert_eq!(boards.map.len(), 3);
 
-        for (owner_vk, room_data) in rooms.map.iter() {
-            // Verify the room state
-            let verification_result = room_data.room_state.verify(
-                &room_data.room_state,
-                &ChatRoomParametersV1 {
+        for (owner_vk, board_data) in boards.map.iter() {
+            // Verify the board state
+            let verification_result = board_data.board_state.verify(
+                &board_data.board_state,
+                &ChatBoardParametersV1 {
                     owner: owner_vk.clone(),
                 },
             );
@@ -381,10 +381,10 @@ mod tests {
                 verification_result.err()
             );
 
-            // Verify room has at least basic configuration
+            // Verify board has at least basic configuration
             assert!(
-                room_data
-                    .room_state
+                board_data
+                    .board_state
                     .configuration
                     .configuration
                     .display
@@ -394,10 +394,10 @@ mod tests {
             );
 
             // Verify members list exists
-            assert!(!room_data.room_state.members.members.is_empty());
+            assert!(!board_data.board_state.members.members.is_empty());
 
             // Verify member info exists
-            assert!(!room_data.room_state.member_info.member_info.is_empty());
+            assert!(!board_data.board_state.member_info.member_info.is_empty());
         }
     }
 }

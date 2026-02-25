@@ -1,17 +1,17 @@
 use dioxus::prelude::*;
 use ed25519_dalek::VerifyingKey;
-use river_core::room_state::member::AuthorizedMember;
+use river_core::board_state::member::AuthorizedMember;
 use std::collections::HashMap;
 
 #[derive(Clone)]
-pub struct PendingRoomJoin {
+pub struct PendingBoardJoin {
     pub authorized_member: AuthorizedMember,
     pub preferred_nickname: String,
-    pub status: PendingRoomStatus,
+    pub status: PendingBoardStatus,
 }
 
 #[derive(Clone, PartialEq)]
-pub enum PendingRoomStatus {
+pub enum PendingBoardStatus {
     Retrieving,
     Retrieved,
     Error(String),
@@ -19,7 +19,7 @@ pub enum PendingRoomStatus {
 
 #[derive(Clone, Default)]
 pub struct PendingInvites {
-    pub map: HashMap<VerifyingKey, PendingRoomJoin>,
+    pub map: HashMap<VerifyingKey, PendingBoardJoin>,
 }
 
 // Global signal for pending invites

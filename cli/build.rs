@@ -8,17 +8,17 @@ fn main() {
 
     // Get the output directory
     let out_dir = env::var("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("room_contract.wasm");
+    let dest_path = Path::new(&out_dir).join("board_contract.wasm");
 
     // Try to find the WASM file in several locations
     let possible_paths = [
         // When building from workspace
-        "../ui/public/contracts/room_contract.wasm",
+        "../ui/public/contracts/board_contract.wasm",
         // When building from workspace root
-        "ui/public/contracts/room_contract.wasm",
+        "ui/public/contracts/board_contract.wasm",
         // Pre-built WASM included in the package (required for crates.io)
         // This file MUST be committed to the repo for publishing
-        "contracts/room_contract.wasm",
+        "contracts/board_contract.wasm",
     ];
 
     let mut wasm_found = false;
@@ -27,7 +27,7 @@ fn main() {
         if Path::new(path).exists() {
             println!("cargo:rerun-if-changed={}", path);
             fs::copy(path, &dest_path).expect("Failed to copy WASM file");
-            println!("cargo:warning=Copied room_contract.wasm from {}", path);
+            println!("cargo:warning=Copied board_contract.wasm from {}", path);
             wasm_found = true;
 
             verify_matches_built_artifact(&dest_path);
@@ -43,7 +43,7 @@ fn main() {
             fs::write(&dest_path, b"dummy").expect("Failed to create dummy WASM file");
         } else {
             panic!(
-                "room_contract.wasm not found! Please ensure it exists in one of these locations: {:?}",
+                "board_contract.wasm not found! Please ensure it exists in one of these locations: {:?}",
                 possible_paths
             );
         }
@@ -56,7 +56,7 @@ fn verify_matches_built_artifact(dest_path: &Path) {
     }
 
     let expected_built_wasm =
-        Path::new("..").join("target/wasm32-unknown-unknown/release/room_contract.wasm");
+        Path::new("..").join("target/wasm32-unknown-unknown/release/board_contract.wasm");
 
     if !expected_built_wasm.exists() {
         // Nothing to compare against (contract probably not rebuilt yet)
@@ -67,7 +67,7 @@ fn verify_matches_built_artifact(dest_path: &Path) {
         Ok(bytes) => bytes,
         Err(err) => {
             eprintln!(
-                "Failed to read copied room_contract.wasm at {}: {err}",
+                "Failed to read copied board_contract.wasm at {}: {err}",
                 dest_path.display()
             );
             process::exit(1);
@@ -78,7 +78,7 @@ fn verify_matches_built_artifact(dest_path: &Path) {
         Ok(bytes) => bytes,
         Err(err) => {
             eprintln!(
-                "Failed to read built room_contract.wasm at {}: {err}",
+                "Failed to read built board_contract.wasm at {}: {err}",
                 expected_built_wasm.display()
             );
             process::exit(1);
@@ -87,7 +87,7 @@ fn verify_matches_built_artifact(dest_path: &Path) {
 
     if dest_bytes != built_bytes {
         panic!(
-            "room_contract.wasm is out of date.\n\
+            "board_contract.wasm is out of date.\n\
              The CLI is bundling {}, but the freshly built artifact at {}\n\
              differs. Run `cargo make sync-cli-wasm` to refresh the bundled WASM.",
             dest_path.display(),

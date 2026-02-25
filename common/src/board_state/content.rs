@@ -10,7 +10,7 @@
 //! - New fields on existing types: Just add them (old clients ignore unknown fields)
 //! - Breaking format changes: Bump the version constant for that type
 
-use crate::room_state::message::MessageId;
+use crate::board_state::message::MessageId;
 use serde::{Deserialize, Serialize};
 
 /// Content type constants

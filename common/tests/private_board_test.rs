@@ -1,22 +1,22 @@
 use ed25519_dalek::SigningKey;
 use freenet_scaffold::ComposableState;
 use rand::rngs::OsRng;
-use river_core::room_state::ban::{AuthorizedUserBan, UserBan};
-use river_core::room_state::configuration::{AuthorizedConfigurationV1, Configuration};
-use river_core::room_state::member::{AuthorizedMember, Member, MemberId};
-use river_core::room_state::message::{AuthorizedMessageV1, MessageV1, RoomMessageBody};
-use river_core::room_state::privacy::{
-    PrivacyMode, RoomCipherSpec, RoomDisplayMetadata, SealedBytes,
+use river_core::board_state::ban::{AuthorizedUserBan, UserBan};
+use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
+use river_core::board_state::member::{AuthorizedMember, Member, MemberId};
+use river_core::board_state::message::{AuthorizedMessageV1, MessageV1, BoardMessageBody};
+use river_core::board_state::privacy::{
+    PrivacyMode, BoardCipherSpec, BoardDisplayMetadata, SealedBytes,
 };
-use river_core::room_state::secret::{
+use river_core::board_state::secret::{
     AuthorizedEncryptedSecretForMember, AuthorizedSecretVersionRecord, EncryptedSecretForMemberV1,
-    RoomSecretsV1, SecretVersionRecordV1, SecretsDelta,
+    BoardSecretsV1, SecretVersionRecordV1, SecretsDelta,
 };
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1};
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1};
 use std::time::SystemTime;
 
 /// Helper function to generate a random 32-byte secret
-fn generate_room_secret() -> [u8; 32] {
+fn generate_board_secret() -> [u8; 32] {
     use rand::RngCore;
     let mut secret = [0u8; 32];
     OsRng.fill_bytes(&mut secret);
@@ -60,17 +60,17 @@ fn encrypt_secret_for_member(
 }
 
 #[test]
-fn test_private_room_creation_and_encryption() {
+fn test_private_board_creation_and_encryption() {
     // Create owner signing key
     let owner_sk = SigningKey::generate(&mut OsRng);
     let owner_vk = owner_sk.verifying_key();
     let owner_id = MemberId::from(&owner_vk);
 
-    // Generate room secret
-    let room_secret = generate_room_secret();
+    // Generate board secret
+    let board_secret = generate_board_secret();
 
     // Create encrypted secret for owner
-    let (ciphertext, nonce, ephemeral_key) = encrypt_secret_for_member(&room_secret, &owner_vk);
+    let (ciphertext, nonce, ephemeral_key) = encrypt_secret_for_member(&board_secret, &owner_vk);
 
     let encrypted_secret = EncryptedSecretForMemberV1 {
         member_id: owner_id,
@@ -87,23 +87,23 @@ fn test_private_room_creation_and_encryption() {
     // Create secret version record
     let secret_version = SecretVersionRecordV1 {
         version: 0,
-        cipher_spec: RoomCipherSpec::Aes256Gcm,
+        cipher_spec: BoardCipherSpec::Aes256Gcm,
         created_at: SystemTime::now(),
     };
 
     let auth_secret_version = AuthorizedSecretVersionRecord::new(secret_version, &owner_sk);
 
-    // Create room secrets
-    let secrets = RoomSecretsV1 {
+    // Create board secrets
+    let secrets = BoardSecretsV1 {
         current_version: 0,
         versions: vec![auth_secret_version],
         encrypted_secrets: vec![auth_encrypted_secret],
     };
 
-    // Create private room configuration
+    // Create private board configuration
     let config = Configuration {
         privacy_mode: PrivacyMode::Private,
-        display: RoomDisplayMetadata {
+        display: BoardDisplayMetadata {
             name: SealedBytes::public("Test Private Board".to_string().into_bytes()),
             description: None,
         },
@@ -111,44 +111,44 @@ fn test_private_room_creation_and_encryption() {
         ..Default::default()
     };
 
-    let room_state = ChatRoomStateV1 {
+    let board_state = ChatBoardStateV1 {
         configuration: AuthorizedConfigurationV1::new(config, &owner_sk),
         secrets,
         ..Default::default()
     };
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
 
-    // Verify the room state
-    room_state
-        .verify(&room_state, &parameters)
+    // Verify the board state
+    board_state
+        .verify(&board_state, &parameters)
         .expect("Board state should verify");
 
-    // Verify it's a private room
+    // Verify it's a private board
     assert_eq!(
-        room_state.configuration.configuration.privacy_mode,
+        board_state.configuration.configuration.privacy_mode,
         PrivacyMode::Private
     );
 
     // Verify secrets are present
-    assert_eq!(room_state.secrets.current_version, 0);
-    assert_eq!(room_state.secrets.versions.len(), 1);
-    assert_eq!(room_state.secrets.encrypted_secrets.len(), 1);
+    assert_eq!(board_state.secrets.current_version, 0);
+    assert_eq!(board_state.secrets.versions.len(), 1);
+    assert_eq!(board_state.secrets.encrypted_secrets.len(), 1);
 }
 
 #[test]
-fn test_private_room_member_addition_with_secrets() {
+fn test_private_board_member_addition_with_secrets() {
     // Create owner
     let owner_sk = SigningKey::generate(&mut OsRng);
     let owner_vk = owner_sk.verifying_key();
     let owner_id = MemberId::from(&owner_vk);
 
-    // Create initial private room
-    let mut room_state = ChatRoomStateV1 {
+    // Create initial private board
+    let mut board_state = ChatBoardStateV1 {
         configuration: AuthorizedConfigurationV1::new(
             Configuration {
                 privacy_mode: PrivacyMode::Private,
-                display: RoomDisplayMetadata {
+                display: BoardDisplayMetadata {
                     name: SealedBytes::public("Private Board".to_string().into_bytes()),
                     description: None,
                 },
@@ -161,16 +161,16 @@ fn test_private_room_member_addition_with_secrets() {
     };
 
     // Add initial secret
-    let room_secret = generate_room_secret();
-    let (ciphertext, nonce, ephemeral_key) = encrypt_secret_for_member(&room_secret, &owner_vk);
+    let board_secret = generate_board_secret();
+    let (ciphertext, nonce, ephemeral_key) = encrypt_secret_for_member(&board_secret, &owner_vk);
 
     let secret_version = SecretVersionRecordV1 {
         version: 0,
-        cipher_spec: RoomCipherSpec::Aes256Gcm,
+        cipher_spec: BoardCipherSpec::Aes256Gcm,
         created_at: SystemTime::now(),
     };
 
-    room_state.secrets = RoomSecretsV1 {
+    board_state.secrets = BoardSecretsV1 {
         current_version: 0,
         versions: vec![AuthorizedSecretVersionRecord::new(
             secret_version,
@@ -201,10 +201,10 @@ fn test_private_room_member_addition_with_secrets() {
     };
 
     let auth_member = AuthorizedMember::new(member, &owner_sk);
-    room_state.members.members.push(auth_member);
+    board_state.members.members.push(auth_member);
 
     // Generate encrypted secret for new member
-    let (ciphertext, nonce, ephemeral_key) = encrypt_secret_for_member(&room_secret, &member_vk);
+    let (ciphertext, nonce, ephemeral_key) = encrypt_secret_for_member(&board_secret, &member_vk);
 
     let encrypted_secret_for_member = EncryptedSecretForMemberV1 {
         member_id,
@@ -215,7 +215,7 @@ fn test_private_room_member_addition_with_secrets() {
         provider: owner_id,
     };
 
-    room_state
+    board_state
         .secrets
         .encrypted_secrets
         .push(AuthorizedEncryptedSecretForMember::new(
@@ -223,21 +223,21 @@ fn test_private_room_member_addition_with_secrets() {
             &owner_sk,
         ));
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
 
-    // Verify the room state
-    room_state
-        .verify(&room_state, &parameters)
+    // Verify the board state
+    board_state
+        .verify(&board_state, &parameters)
         .expect("Operation should succeed");
 
     // Verify both members have encrypted secrets
-    assert_eq!(room_state.secrets.encrypted_secrets.len(), 2);
-    assert!(room_state
+    assert_eq!(board_state.secrets.encrypted_secrets.len(), 2);
+    assert!(board_state
         .secrets
         .encrypted_secrets
         .iter()
         .any(|s| s.secret.member_id == owner_id));
-    assert!(room_state
+    assert!(board_state
         .secrets
         .encrypted_secrets
         .iter()
@@ -256,12 +256,12 @@ fn test_secret_rotation() {
     let member_vk = member_sk.verifying_key();
     let member_id = MemberId::from(&member_vk);
 
-    // Create initial private room with both members
-    let mut room_state = ChatRoomStateV1 {
+    // Create initial private board with both members
+    let mut board_state = ChatBoardStateV1 {
         configuration: AuthorizedConfigurationV1::new(
             Configuration {
                 privacy_mode: PrivacyMode::Private,
-                display: RoomDisplayMetadata {
+                display: BoardDisplayMetadata {
                     name: SealedBytes::public("Private Board".to_string().into_bytes()),
                     description: None,
                 },
@@ -274,7 +274,7 @@ fn test_secret_rotation() {
     };
 
     // Add member
-    room_state.members.members.push(AuthorizedMember::new(
+    board_state.members.members.push(AuthorizedMember::new(
         Member {
             owner_member_id: owner_id,
             invited_by: owner_id,
@@ -284,16 +284,16 @@ fn test_secret_rotation() {
     ));
 
     // Initial secret (version 0)
-    let secret_v0 = generate_room_secret();
+    let secret_v0 = generate_board_secret();
     let (ct1, n1, ek1) = encrypt_secret_for_member(&secret_v0, &owner_vk);
     let (ct2, n2, ek2) = encrypt_secret_for_member(&secret_v0, &member_vk);
 
-    room_state.secrets = RoomSecretsV1 {
+    board_state.secrets = BoardSecretsV1 {
         current_version: 0,
         versions: vec![AuthorizedSecretVersionRecord::new(
             SecretVersionRecordV1 {
                 version: 0,
-                cipher_spec: RoomCipherSpec::Aes256Gcm,
+                cipher_spec: BoardCipherSpec::Aes256Gcm,
                 created_at: SystemTime::now(),
             },
             &owner_sk,
@@ -325,7 +325,7 @@ fn test_secret_rotation() {
     };
 
     // Rotate to version 1
-    let secret_v1 = generate_room_secret();
+    let secret_v1 = generate_board_secret();
     let (ct1_v1, n1_v1, ek1_v1) = encrypt_secret_for_member(&secret_v1, &owner_vk);
     let (ct2_v1, n2_v1, ek2_v1) = encrypt_secret_for_member(&secret_v1, &member_vk);
 
@@ -334,7 +334,7 @@ fn test_secret_rotation() {
         new_versions: vec![AuthorizedSecretVersionRecord::new(
             SecretVersionRecordV1 {
                 version: 1,
-                cipher_spec: RoomCipherSpec::Aes256Gcm,
+                cipher_spec: BoardCipherSpec::Aes256Gcm,
                 created_at: SystemTime::now(),
             },
             &owner_sk,
@@ -365,37 +365,37 @@ fn test_secret_rotation() {
         ],
     };
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
-    let current_state = room_state.clone();
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
+    let current_state = board_state.clone();
 
     // Apply rotation delta
-    room_state
+    board_state
         .secrets
         .apply_delta(&current_state, &parameters, &Some(rotation_delta))
         .expect("Operation should succeed");
 
     // Verify rotation succeeded
-    assert_eq!(room_state.secrets.current_version, 1);
-    assert_eq!(room_state.secrets.versions.len(), 2); // v0 and v1
-    assert_eq!(room_state.secrets.encrypted_secrets.len(), 4); // 2 members × 2 versions
+    assert_eq!(board_state.secrets.current_version, 1);
+    assert_eq!(board_state.secrets.versions.len(), 2); // v0 and v1
+    assert_eq!(board_state.secrets.encrypted_secrets.len(), 4); // 2 members × 2 versions
 
     // Verify both members have secrets for both versions
-    assert!(room_state
+    assert!(board_state
         .secrets
         .encrypted_secrets
         .iter()
         .any(|s| s.secret.member_id == owner_id && s.secret.secret_version == 0));
-    assert!(room_state
+    assert!(board_state
         .secrets
         .encrypted_secrets
         .iter()
         .any(|s| s.secret.member_id == owner_id && s.secret.secret_version == 1));
-    assert!(room_state
+    assert!(board_state
         .secrets
         .encrypted_secrets
         .iter()
         .any(|s| s.secret.member_id == member_id && s.secret.secret_version == 0));
-    assert!(room_state
+    assert!(board_state
         .secrets
         .encrypted_secrets
         .iter()
@@ -418,12 +418,12 @@ fn test_ban_member_excludes_from_new_secrets() {
     let member2_vk = member2_sk.verifying_key();
     let member2_id = MemberId::from(&member2_vk);
 
-    // Create initial private room
-    let mut room_state = ChatRoomStateV1 {
+    // Create initial private board
+    let mut board_state = ChatBoardStateV1 {
         configuration: AuthorizedConfigurationV1::new(
             Configuration {
                 privacy_mode: PrivacyMode::Private,
-                display: RoomDisplayMetadata {
+                display: BoardDisplayMetadata {
                     name: SealedBytes::public("Private Board".to_string().into_bytes()),
                     description: None,
                 },
@@ -436,7 +436,7 @@ fn test_ban_member_excludes_from_new_secrets() {
     };
 
     // Add both members
-    room_state.members.members.push(AuthorizedMember::new(
+    board_state.members.members.push(AuthorizedMember::new(
         Member {
             owner_member_id: owner_id,
             invited_by: owner_id,
@@ -444,7 +444,7 @@ fn test_ban_member_excludes_from_new_secrets() {
         },
         &owner_sk,
     ));
-    room_state.members.members.push(AuthorizedMember::new(
+    board_state.members.members.push(AuthorizedMember::new(
         Member {
             owner_member_id: owner_id,
             invited_by: owner_id,
@@ -454,17 +454,17 @@ fn test_ban_member_excludes_from_new_secrets() {
     ));
 
     // Initial secret with all three (owner + 2 members)
-    let secret_v0 = generate_room_secret();
+    let secret_v0 = generate_board_secret();
     let (ct1, n1, ek1) = encrypt_secret_for_member(&secret_v0, &owner_vk);
     let (ct2, n2, ek2) = encrypt_secret_for_member(&secret_v0, &member1_vk);
     let (ct3, n3, ek3) = encrypt_secret_for_member(&secret_v0, &member2_vk);
 
-    room_state.secrets = RoomSecretsV1 {
+    board_state.secrets = BoardSecretsV1 {
         current_version: 0,
         versions: vec![AuthorizedSecretVersionRecord::new(
             SecretVersionRecordV1 {
                 version: 0,
-                cipher_spec: RoomCipherSpec::Aes256Gcm,
+                cipher_spec: BoardCipherSpec::Aes256Gcm,
                 created_at: SystemTime::now(),
             },
             &owner_sk,
@@ -513,13 +513,13 @@ fn test_ban_member_excludes_from_new_secrets() {
         banned_user: member1_id,
     };
 
-    room_state
+    board_state
         .bans
         .0
         .push(AuthorizedUserBan::new(ban, owner_id, &owner_sk));
 
     // Rotate secret (version 1) - should only include owner and member2, NOT member1
-    let secret_v1 = generate_room_secret();
+    let secret_v1 = generate_board_secret();
     let (ct1_v1, n1_v1, ek1_v1) = encrypt_secret_for_member(&secret_v1, &owner_vk);
     let (ct3_v1, n3_v1, ek3_v1) = encrypt_secret_for_member(&secret_v1, &member2_vk);
 
@@ -528,7 +528,7 @@ fn test_ban_member_excludes_from_new_secrets() {
         new_versions: vec![AuthorizedSecretVersionRecord::new(
             SecretVersionRecordV1 {
                 version: 1,
-                cipher_spec: RoomCipherSpec::Aes256Gcm,
+                cipher_spec: BoardCipherSpec::Aes256Gcm,
                 created_at: SystemTime::now(),
             },
             &owner_sk,
@@ -560,39 +560,39 @@ fn test_ban_member_excludes_from_new_secrets() {
         ],
     };
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
-    let current_state = room_state.clone();
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
+    let current_state = board_state.clone();
 
     // Apply rotation delta
-    room_state
+    board_state
         .secrets
         .apply_delta(&current_state, &parameters, &Some(rotation_delta))
         .expect("Operation should succeed");
 
     // Verify rotation succeeded
-    assert_eq!(room_state.secrets.current_version, 1);
+    assert_eq!(board_state.secrets.current_version, 1);
 
     // Verify member1 does NOT have a secret for version 1 (forward secrecy)
-    assert!(!room_state
+    assert!(!board_state
         .secrets
         .encrypted_secrets
         .iter()
         .any(|s| s.secret.member_id == member1_id && s.secret.secret_version == 1));
 
     // Verify owner and member2 DO have secrets for version 1
-    assert!(room_state
+    assert!(board_state
         .secrets
         .encrypted_secrets
         .iter()
         .any(|s| s.secret.member_id == owner_id && s.secret.secret_version == 1));
-    assert!(room_state
+    assert!(board_state
         .secrets
         .encrypted_secrets
         .iter()
         .any(|s| s.secret.member_id == member2_id && s.secret.secret_version == 1));
 
     // Verify member1 still has secret for version 0 (can decrypt old messages)
-    assert!(room_state
+    assert!(board_state
         .secrets
         .encrypted_secrets
         .iter()
@@ -600,18 +600,18 @@ fn test_ban_member_excludes_from_new_secrets() {
 }
 
 #[test]
-fn test_encrypted_messages_in_private_room() {
+fn test_encrypted_messages_in_private_board() {
     // Create owner
     let owner_sk = SigningKey::generate(&mut OsRng);
     let owner_vk = owner_sk.verifying_key();
     let owner_id = MemberId::from(&owner_vk);
 
-    // Create private room
-    let mut room_state = ChatRoomStateV1 {
+    // Create private board
+    let mut board_state = ChatBoardStateV1 {
         configuration: AuthorizedConfigurationV1::new(
             Configuration {
                 privacy_mode: PrivacyMode::Private,
-                display: RoomDisplayMetadata {
+                display: BoardDisplayMetadata {
                     name: SealedBytes::public("Private Board".to_string().into_bytes()),
                     description: None,
                 },
@@ -625,9 +625,9 @@ fn test_encrypted_messages_in_private_room() {
 
     // Add encrypted message
     let message = MessageV1 {
-        room_owner: owner_id,
+        board_owner: owner_id,
         author: owner_id,
-        content: RoomMessageBody::private_text(
+        content: BoardMessageBody::private_text(
             vec![1, 2, 3, 4, 5], // Mock encrypted content
             [0u8; 12],
             0,
@@ -635,26 +635,26 @@ fn test_encrypted_messages_in_private_room() {
         time: SystemTime::now(),
     };
 
-    room_state
+    board_state
         .recent_messages
         .messages
         .push(AuthorizedMessageV1::new(message, &owner_sk));
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
 
-    // Verify the room state with encrypted message
-    room_state
-        .verify(&room_state, &parameters)
+    // Verify the board state with encrypted message
+    board_state
+        .verify(&board_state, &parameters)
         .expect("Operation should succeed");
 
     // Verify message is encrypted
-    assert_eq!(room_state.recent_messages.messages.len(), 1);
-    match &room_state.recent_messages.messages[0].message.content {
-        RoomMessageBody::Private { secret_version, .. } => {
+    assert_eq!(board_state.recent_messages.messages.len(), 1);
+    match &board_state.recent_messages.messages[0].message.content {
+        BoardMessageBody::Private { secret_version, .. } => {
             assert_eq!(*secret_version, 0);
         }
-        RoomMessageBody::Public { .. } => {
-            panic!("Expected encrypted message in private room");
+        BoardMessageBody::Public { .. } => {
+            panic!("Expected encrypted message in private board");
         }
     }
 }

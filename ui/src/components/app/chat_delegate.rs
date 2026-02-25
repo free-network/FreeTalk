@@ -1,4 +1,4 @@
-use crate::components::app::{CURRENT_ROOM, ROOMS, WEB_API};
+use crate::components::app::{CURRENT_BOARD, BOARDS, WEB_API};
 use dioxus::logger::tracing::{error, info, warn};
 use dioxus::prelude::*;
 use freenet_stdlib::client_api::ClientRequest::DelegateOp;
@@ -10,20 +10,20 @@ use freenet_stdlib::prelude::{
 use futures::channel::oneshot;
 use futures::future::{select, Either};
 use river_core::chat_delegate::{
-    ChatDelegateKey, ChatDelegateRequestMsg, ChatDelegateResponseMsg, RequestId, RoomKey,
+    ChatDelegateKey, ChatDelegateRequestMsg, ChatDelegateResponseMsg, RequestId, BoardKey,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-// Constant for the rooms storage key
-pub const ROOMS_STORAGE_KEY: &[u8] = b"rooms_data";
+// Constant for the boards storage key
+pub const BOARDS_STORAGE_KEY: &[u8] = b"boards_data";
 
 // =============================================================================
 // LEGACY DELEGATE MIGRATION
 // When the delegate WASM changes (dependency updates, code changes), the delegate
 // key changes and old secrets become inaccessible. This migration code attempts
-// to load room data from known previous delegate keys and migrate it to the
+// to load board data from known previous delegate keys and migrate it to the
 // current delegate.
 // TODO: Remove entries older than 3 months once users have migrated.
 // =============================================================================
@@ -90,32 +90,32 @@ pub fn complete_pending_request(key: &ChatDelegateKey, response: ChatDelegateRes
 
 /// Complete a pending signing key store request.
 pub fn complete_pending_signing_key_request(
-    room_key: &RoomKey,
+    board_key: &BoardKey,
     response: ChatDelegateResponseMsg,
 ) -> bool {
     let mut key_bytes = SIGNING_KEY_PREFIX.to_vec();
-    key_bytes.extend_from_slice(room_key);
+    key_bytes.extend_from_slice(board_key);
     complete_pending_request_bytes(&key_bytes, response)
 }
 
 /// Complete a pending public key request.
 pub fn complete_pending_public_key_request(
-    room_key: &RoomKey,
+    board_key: &BoardKey,
     response: ChatDelegateResponseMsg,
 ) -> bool {
     let mut key_bytes = PUBLIC_KEY_PREFIX.to_vec();
-    key_bytes.extend_from_slice(room_key);
+    key_bytes.extend_from_slice(board_key);
     complete_pending_request_bytes(&key_bytes, response)
 }
 
-/// Complete a pending signing request using room_key and request_id for correlation.
+/// Complete a pending signing request using board_key and request_id for correlation.
 pub fn complete_pending_sign_request(
-    room_key: &RoomKey,
+    board_key: &BoardKey,
     request_id: RequestId,
     response: ChatDelegateResponseMsg,
 ) -> bool {
     let mut key_bytes = SIGN_PREFIX.to_vec();
-    key_bytes.extend_from_slice(room_key);
+    key_bytes.extend_from_slice(board_key);
     key_bytes.extend_from_slice(&request_id.to_le_bytes());
     complete_pending_request_bytes(&key_bytes, response)
 }
@@ -159,13 +159,13 @@ pub async fn set_up_chat_delegate() -> Result<(), String> {
     match api_result {
         Ok(_) => {
             info!("Chat delegate registered successfully");
-            // NOTE: We don't await load_rooms_from_delegate() here because it would
+            // NOTE: We don't await load_boards_from_delegate() here because it would
             // deadlock - it waits for a response that comes through the same message
             // loop that called us. Instead, we fire off the request and let the
             // response be handled by the response_handler through the message loop.
             //
-            // The response handler will process GetResponse and populate ROOMS.
-            fire_load_rooms_request().await;
+            // The response handler will process GetResponse and populate boards.
+            fire_load_boards_request().await;
 
             // Also try to migrate from legacy delegate (fire and forget)
             // TODO: Remove this after 2026-03-01
@@ -177,20 +177,20 @@ pub async fn set_up_chat_delegate() -> Result<(), String> {
     }
 }
 
-/// Fire a request to load rooms from delegate storage without waiting for response.
+/// Fire a request to load boards from delegate storage without waiting for response.
 /// The response will be handled by the response_handler through the message loop.
 /// This avoids deadlock when called from inside the message loop.
-async fn fire_load_rooms_request() {
-    info!("Firing request to load rooms from delegate storage");
+async fn fire_load_boards_request() {
+    info!("Firing request to load boards from delegate storage");
 
     let request = ChatDelegateRequestMsg::GetRequest {
-        key: ChatDelegateKey::new(ROOMS_STORAGE_KEY.to_vec()),
+        key: ChatDelegateKey::new(BOARDS_STORAGE_KEY.to_vec()),
     };
 
     // Serialize and send the request without waiting for response
     let mut payload = Vec::new();
     if let Err(e) = ciborium::ser::into_writer(&request, &mut payload) {
-        error!("Failed to serialize load rooms request: {}", e);
+        error!("Failed to serialize load boards request: {}", e);
         return;
     }
 
@@ -222,55 +222,55 @@ async fn fire_load_rooms_request() {
     };
 
     if let Err(e) = api_result {
-        error!("Failed to send load rooms request: {}", e);
+        error!("Failed to send load boards request: {}", e);
     } else {
-        info!("Load rooms request sent, response will be handled by message loop");
+        info!("Load boards request sent, response will be handled by message loop");
     }
 }
 
-/// Load rooms from the delegate storage (with response waiting - use outside message loop only)
+/// Load boards from the delegate storage (with response waiting - use outside message loop only)
 #[allow(dead_code)]
-pub async fn load_rooms_from_delegate() -> Result<(), String> {
-    info!("Loading rooms from delegate storage");
+pub async fn load_boards_from_delegate() -> Result<(), String> {
+    info!("Loading boards from delegate storage");
 
-    // Create a get request for the rooms data
+    // Create a get request for the boards data
     let request = ChatDelegateRequestMsg::GetRequest {
-        key: ChatDelegateKey::new(ROOMS_STORAGE_KEY.to_vec()),
+        key: ChatDelegateKey::new(BOARDS_STORAGE_KEY.to_vec()),
     };
 
     // Send the request to the delegate
     match send_delegate_request(request).await {
         Ok(_) => {
-            info!("Sent request to load rooms from delegate");
+            info!("Sent request to load boards from delegate");
             Ok(())
         }
         Err(e) => {
-            warn!("Failed to load rooms from delegate: {}", e);
-            // Don't fail the app if we can't load rooms
+            warn!("Failed to load boards from delegate: {}", e);
+            // Don't fail the app if we can't load boards
             Ok(())
         }
     }
 }
 
-/// Save rooms to the delegate storage
-pub async fn save_rooms_to_delegate() -> Result<(), String> {
-    info!("Saving rooms to delegate storage");
+/// Save boards to the delegate storage
+pub async fn save_boards_to_delegate() -> Result<(), String> {
+    info!("Saving boards to delegate storage");
 
-    // Get the current rooms data - clone the data to avoid holding the read lock
-    let rooms_data = {
-        let mut rooms_clone = ROOMS.read().clone();
-        // Include the current room selection
-        rooms_clone.current_room_key = CURRENT_ROOM.read().owner_key;
+    // Get the current boards data - clone the data to avoid holding the read lock
+    let boards_data = {
+        let mut boards_clone = BOARDS.read().clone();
+        // Include the current board selection
+        boards_clone.current_board_key = CURRENT_BOARD.read().owner_key;
         let mut buffer = Vec::new();
-        ciborium::ser::into_writer(&rooms_clone, &mut buffer)
-            .map_err(|e| format!("Failed to serialize rooms: {}", e))?;
+        ciborium::ser::into_writer(&boards_clone, &mut buffer)
+            .map_err(|e| format!("Failed to serialize boards: {}", e))?;
         buffer
     };
 
-    // Create a store request for the rooms data
+    // Create a store request for the boards data
     let request = ChatDelegateRequestMsg::StoreRequest {
-        key: ChatDelegateKey::new(ROOMS_STORAGE_KEY.to_vec()),
-        value: rooms_data,
+        key: ChatDelegateKey::new(BOARDS_STORAGE_KEY.to_vec()),
+        value: boards_data,
     };
 
     // Send the request to the delegate
@@ -300,65 +300,65 @@ fn get_request_key(request: &ChatDelegateRequestMsg) -> Vec<u8> {
         ChatDelegateRequestMsg::ListRequest => b"__list_request__".to_vec(),
 
         // Signing key management
-        ChatDelegateRequestMsg::StoreSigningKey { room_key, .. } => {
+        ChatDelegateRequestMsg::StoreSigningKey { board_key, .. } => {
             let mut key = SIGNING_KEY_PREFIX.to_vec();
-            key.extend_from_slice(room_key);
+            key.extend_from_slice(board_key);
             key
         }
-        ChatDelegateRequestMsg::GetPublicKey { room_key } => {
+        ChatDelegateRequestMsg::GetPublicKey { board_key } => {
             let mut key = PUBLIC_KEY_PREFIX.to_vec();
-            key.extend_from_slice(room_key);
+            key.extend_from_slice(board_key);
             key
         }
 
-        // Signing operations - use prefix + room_key + request_id for uniqueness
+        // Signing operations - use prefix + board_key + request_id for uniqueness
         ChatDelegateRequestMsg::SignMessage {
-            room_key,
+            board_key,
             request_id,
             ..
         }
         | ChatDelegateRequestMsg::SignMember {
-            room_key,
+            board_key,
             request_id,
             ..
         }
         | ChatDelegateRequestMsg::SignBan {
-            room_key,
+            board_key,
             request_id,
             ..
         }
         | ChatDelegateRequestMsg::SignConfig {
-            room_key,
+            board_key,
             request_id,
             ..
         }
         | ChatDelegateRequestMsg::SignMemberInfo {
-            room_key,
+            board_key,
             request_id,
             ..
         }
         | ChatDelegateRequestMsg::SignSecretVersion {
-            room_key,
+            board_key,
             request_id,
             ..
         }
         | ChatDelegateRequestMsg::SignEncryptedSecret {
-            room_key,
+            board_key,
             request_id,
             ..
         }
         | ChatDelegateRequestMsg::SignUpgrade {
-            room_key,
+            board_key,
             request_id,
             ..
         }
         | ChatDelegateRequestMsg::SignAdmin {
-            room_key,
+            board_key,
             request_id,
             ..
         } => {
             let mut key = SIGN_PREFIX.to_vec();
-            key.extend_from_slice(room_key);
+            key.extend_from_slice(board_key);
             key.extend_from_slice(&request_id.to_le_bytes());
             key
         }
@@ -500,8 +500,8 @@ pub fn mark_legacy_migration_done() {
     }
 }
 
-/// Fire requests to load rooms from all known legacy delegates (fire and forget).
-/// If any legacy delegate has room data, the response handler will migrate it.
+/// Fire requests to load boards from all known legacy delegates (fire and forget).
+/// If any legacy delegate has board data, the response handler will migrate it.
 async fn fire_legacy_migration_request() {
     // Check if migration has already been done
     if is_legacy_migration_done() {
@@ -519,7 +519,7 @@ async fn fire_legacy_migration_request() {
         let legacy_delegate_key = DelegateKey::new(*key_bytes, legacy_code_hash);
 
         let request = ChatDelegateRequestMsg::GetRequest {
-            key: ChatDelegateKey::new(ROOMS_STORAGE_KEY.to_vec()),
+            key: ChatDelegateKey::new(BOARDS_STORAGE_KEY.to_vec()),
         };
 
         let mut payload = Vec::new();

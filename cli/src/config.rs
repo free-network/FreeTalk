@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
-    pub default_room: Option<String>,
+    pub default_board: Option<String>,
     pub user_key_path: Option<String>,
 }
 

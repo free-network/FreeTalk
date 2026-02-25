@@ -10,15 +10,15 @@
 use crate::components::app::chat_delegate::{generate_request_id, send_delegate_request};
 use dioxus::logger::tracing::{info, warn};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
-use river_core::chat_delegate::{ChatDelegateRequestMsg, ChatDelegateResponseMsg, RoomKey};
+use river_core::chat_delegate::{ChatDelegateRequestMsg, ChatDelegateResponseMsg, BoardKey};
 
-/// Store a signing key in the delegate for a room.
+/// Store a signing key in the delegate for a board.
 ///
-/// This should be called when creating a new room or when migrating
-/// an existing room's signing key to the delegate.
-pub async fn store_signing_key(room_key: RoomKey, signing_key: &SigningKey) -> Result<(), String> {
+/// This should be called when creating a new board or when migrating
+/// an existing board's signing key to the delegate.
+pub async fn store_signing_key(board_key: BoardKey, signing_key: &SigningKey) -> Result<(), String> {
     let request = ChatDelegateRequestMsg::StoreSigningKey {
-        room_key,
+        board_key,
         signing_key_bytes: signing_key.to_bytes(),
     };
 
@@ -29,11 +29,11 @@ pub async fn store_signing_key(room_key: RoomKey, signing_key: &SigningKey) -> R
     }
 }
 
-/// Get the public key for a room from the delegate.
+/// Get the public key for a board from the delegate.
 ///
 /// Returns the VerifyingKey if the signing key exists, None otherwise.
-pub async fn get_public_key(room_key: RoomKey) -> Result<Option<VerifyingKey>, String> {
-    let request = ChatDelegateRequestMsg::GetPublicKey { room_key };
+pub async fn get_public_key(board_key: BoardKey) -> Result<Option<VerifyingKey>, String> {
+    let request = ChatDelegateRequestMsg::GetPublicKey { board_key };
 
     match send_delegate_request(request).await {
         Ok(ChatDelegateResponseMsg::GetPublicKeyResponse { public_key, .. }) => {
@@ -51,9 +51,9 @@ pub async fn get_public_key(room_key: RoomKey) -> Result<Option<VerifyingKey>, S
 }
 
 /// Sign a message (MessageV1).
-pub async fn sign_message(room_key: RoomKey, message_bytes: Vec<u8>) -> Result<Signature, String> {
+pub async fn sign_message(board_key: BoardKey, message_bytes: Vec<u8>) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignMessage {
-        room_key,
+        board_key,
         request_id: generate_request_id(),
         message_bytes,
     };
@@ -62,9 +62,9 @@ pub async fn sign_message(room_key: RoomKey, message_bytes: Vec<u8>) -> Result<S
 }
 
 /// Sign a member invitation (Member).
-pub async fn sign_member(room_key: RoomKey, member_bytes: Vec<u8>) -> Result<Signature, String> {
+pub async fn sign_member(board_key: BoardKey, member_bytes: Vec<u8>) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignMember {
-        room_key,
+        board_key,
         request_id: generate_request_id(),
         member_bytes,
     };
@@ -73,9 +73,9 @@ pub async fn sign_member(room_key: RoomKey, member_bytes: Vec<u8>) -> Result<Sig
 }
 
 /// Sign a ban (BanV1).
-pub async fn sign_ban(room_key: RoomKey, ban_bytes: Vec<u8>) -> Result<Signature, String> {
+pub async fn sign_ban(board_key: BoardKey, ban_bytes: Vec<u8>) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignBan {
-        room_key,
+        board_key,
         request_id: generate_request_id(),
         ban_bytes,
     };
@@ -83,10 +83,10 @@ pub async fn sign_ban(room_key: RoomKey, ban_bytes: Vec<u8>) -> Result<Signature
     extract_signature(send_delegate_request(request).await)
 }
 
-/// Sign a room configuration (Configuration).
-pub async fn sign_config(room_key: RoomKey, config_bytes: Vec<u8>) -> Result<Signature, String> {
+/// Sign a board configuration (Configuration).
+pub async fn sign_config(board_key: BoardKey, config_bytes: Vec<u8>) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignConfig {
-        room_key,
+        board_key,
         request_id: generate_request_id(),
         config_bytes,
     };
@@ -96,11 +96,11 @@ pub async fn sign_config(room_key: RoomKey, config_bytes: Vec<u8>) -> Result<Sig
 
 /// Sign member info (MemberInfo).
 pub async fn sign_member_info(
-    room_key: RoomKey,
+    board_key: BoardKey,
     member_info_bytes: Vec<u8>,
 ) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignMemberInfo {
-        room_key,
+        board_key,
         request_id: generate_request_id(),
         member_info_bytes,
     };
@@ -110,11 +110,11 @@ pub async fn sign_member_info(
 
 /// Sign a secret version record (SecretVersionRecordV1).
 pub async fn sign_secret_version(
-    room_key: RoomKey,
+    board_key: BoardKey,
     record_bytes: Vec<u8>,
 ) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignSecretVersion {
-        room_key,
+        board_key,
         request_id: generate_request_id(),
         record_bytes,
     };
@@ -124,11 +124,11 @@ pub async fn sign_secret_version(
 
 /// Sign an encrypted secret for member (EncryptedSecretForMemberV1).
 pub async fn sign_encrypted_secret(
-    room_key: RoomKey,
+    board_key: BoardKey,
     secret_bytes: Vec<u8>,
 ) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignEncryptedSecret {
-        room_key,
+        board_key,
         request_id: generate_request_id(),
         secret_bytes,
     };
@@ -136,10 +136,10 @@ pub async fn sign_encrypted_secret(
     extract_signature(send_delegate_request(request).await)
 }
 
-/// Sign a room upgrade (RoomUpgrade).
-pub async fn sign_upgrade(room_key: RoomKey, upgrade_bytes: Vec<u8>) -> Result<Signature, String> {
+/// Sign a board upgrade (BoardUpgrade).
+pub async fn sign_upgrade(board_key: BoardKey, upgrade_bytes: Vec<u8>) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignUpgrade {
-        room_key,
+        board_key,
         request_id: generate_request_id(),
         upgrade_bytes,
     };
@@ -148,9 +148,9 @@ pub async fn sign_upgrade(room_key: RoomKey, upgrade_bytes: Vec<u8>) -> Result<S
 }
 
 /// Sign an admin authorization (Admin).
-pub async fn sign_admin(room_key: RoomKey, admin_bytes: Vec<u8>) -> Result<Signature, String> {
+pub async fn sign_admin(board_key: BoardKey, admin_bytes: Vec<u8>) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignAdmin {
-        room_key,
+        board_key,
         request_id: generate_request_id(),
         admin_bytes,
     };
@@ -191,22 +191,22 @@ fn extract_signature(
 ///
 /// Returns true if migration was successful or key already exists in delegate.
 /// Returns false if migration failed (fallback to local signing should be used).
-pub async fn migrate_signing_key(room_key: RoomKey, signing_key: &SigningKey) -> bool {
+pub async fn migrate_signing_key(board_key: BoardKey, signing_key: &SigningKey) -> bool {
     // Check if key already exists in delegate
-    match get_public_key(room_key).await {
+    match get_public_key(board_key).await {
         Ok(Some(existing_vk)) => {
             // Verify it matches our key
             if existing_vk == signing_key.verifying_key() {
-                info!("Signing key already migrated to delegate for room");
+                info!("Signing key already migrated to delegate for board");
                 return true;
             } else {
-                warn!("Delegate has different key for room - using local signing");
+                warn!("Delegate has different key for board - using local signing");
                 return false;
             }
         }
         Ok(None) => {
             // Key not in delegate, try to store it
-            info!("Migrating signing key to delegate for room");
+            info!("Migrating signing key to delegate for board");
         }
         Err(e) => {
             warn!(
@@ -217,10 +217,10 @@ pub async fn migrate_signing_key(room_key: RoomKey, signing_key: &SigningKey) ->
     }
 
     // Store the key
-    match store_signing_key(room_key, signing_key).await {
+    match store_signing_key(board_key, signing_key).await {
         Ok(()) => {
             // Verify the key was stored correctly
-            match get_public_key(room_key).await {
+            match get_public_key(board_key).await {
                 Ok(Some(stored_vk)) if stored_vk == signing_key.verifying_key() => {
                     info!("Successfully migrated signing key to delegate");
                     true
@@ -251,11 +251,11 @@ pub async fn migrate_signing_key(room_key: RoomKey, signing_key: &SigningKey) ->
 
 /// Sign message bytes with delegate, falling back to local signing if delegate fails.
 pub async fn sign_message_with_fallback(
-    room_key: RoomKey,
+    board_key: BoardKey,
     message_bytes: Vec<u8>,
     fallback_key: &SigningKey,
 ) -> Signature {
-    match sign_message(room_key, message_bytes.clone()).await {
+    match sign_message(board_key, message_bytes.clone()).await {
         Ok(sig) => sig,
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);
@@ -266,11 +266,11 @@ pub async fn sign_message_with_fallback(
 
 /// Sign member bytes with delegate, falling back to local signing if delegate fails.
 pub async fn sign_member_with_fallback(
-    room_key: RoomKey,
+    board_key: BoardKey,
     member_bytes: Vec<u8>,
     fallback_key: &SigningKey,
 ) -> Signature {
-    match sign_member(room_key, member_bytes.clone()).await {
+    match sign_member(board_key, member_bytes.clone()).await {
         Ok(sig) => sig,
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);
@@ -281,11 +281,11 @@ pub async fn sign_member_with_fallback(
 
 /// Sign ban bytes with delegate, falling back to local signing if delegate fails.
 pub async fn sign_ban_with_fallback(
-    room_key: RoomKey,
+    board_key: BoardKey,
     ban_bytes: Vec<u8>,
     fallback_key: &SigningKey,
 ) -> Signature {
-    match sign_ban(room_key, ban_bytes.clone()).await {
+    match sign_ban(board_key, ban_bytes.clone()).await {
         Ok(sig) => sig,
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);
@@ -296,11 +296,11 @@ pub async fn sign_ban_with_fallback(
 
 /// Sign config bytes with delegate, falling back to local signing if delegate fails.
 pub async fn sign_config_with_fallback(
-    room_key: RoomKey,
+    board_key: BoardKey,
     config_bytes: Vec<u8>,
     fallback_key: &SigningKey,
 ) -> Signature {
-    match sign_config(room_key, config_bytes.clone()).await {
+    match sign_config(board_key, config_bytes.clone()).await {
         Ok(sig) => sig,
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);
@@ -311,11 +311,11 @@ pub async fn sign_config_with_fallback(
 
 /// Sign member info bytes with delegate, falling back to local signing if delegate fails.
 pub async fn sign_member_info_with_fallback(
-    room_key: RoomKey,
+    board_key: BoardKey,
     member_info_bytes: Vec<u8>,
     fallback_key: &SigningKey,
 ) -> Signature {
-    match sign_member_info(room_key, member_info_bytes.clone()).await {
+    match sign_member_info(board_key, member_info_bytes.clone()).await {
         Ok(sig) => sig,
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);
@@ -326,11 +326,11 @@ pub async fn sign_member_info_with_fallback(
 
 /// Sign secret version record bytes with delegate, falling back to local signing if delegate fails.
 pub async fn sign_secret_version_with_fallback(
-    room_key: RoomKey,
+    board_key: BoardKey,
     record_bytes: Vec<u8>,
     fallback_key: &SigningKey,
 ) -> Signature {
-    match sign_secret_version(room_key, record_bytes.clone()).await {
+    match sign_secret_version(board_key, record_bytes.clone()).await {
         Ok(sig) => sig,
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);
@@ -341,11 +341,11 @@ pub async fn sign_secret_version_with_fallback(
 
 /// Sign encrypted secret bytes with delegate, falling back to local signing if delegate fails.
 pub async fn sign_encrypted_secret_with_fallback(
-    room_key: RoomKey,
+    board_key: BoardKey,
     secret_bytes: Vec<u8>,
     fallback_key: &SigningKey,
 ) -> Signature {
-    match sign_encrypted_secret(room_key, secret_bytes.clone()).await {
+    match sign_encrypted_secret(board_key, secret_bytes.clone()).await {
         Ok(sig) => sig,
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);
@@ -356,11 +356,11 @@ pub async fn sign_encrypted_secret_with_fallback(
 
 /// Sign upgrade bytes with delegate, falling back to local signing if delegate fails.
 pub async fn sign_upgrade_with_fallback(
-    room_key: RoomKey,
+    board_key: BoardKey,
     upgrade_bytes: Vec<u8>,
     fallback_key: &SigningKey,
 ) -> Signature {
-    match sign_upgrade(room_key, upgrade_bytes.clone()).await {
+    match sign_upgrade(board_key, upgrade_bytes.clone()).await {
         Ok(sig) => sig,
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);
@@ -371,11 +371,11 @@ pub async fn sign_upgrade_with_fallback(
 
 /// Sign admin bytes with delegate, falling back to local signing if delegate fails.
 pub async fn sign_admin_with_fallback(
-    room_key: RoomKey,
+    board_key: BoardKey,
     admin_bytes: Vec<u8>,
     fallback_key: &SigningKey,
 ) -> Signature {
-    match sign_admin(room_key, admin_bytes.clone()).await {
+    match sign_admin(board_key, admin_bytes.clone()).await {
         Ok(sig) => sig,
         Err(e) => {
             warn!("Delegate signing failed, using fallback: {}", e);

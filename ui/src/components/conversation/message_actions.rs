@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
-use river_core::room_state::member::MemberId;
-use river_core::room_state::message::MessageId;
+use river_core::board_state::member::MemberId;
+use river_core::board_state::message::MessageId;
 
 use super::emoji_picker::FREQUENT_EMOJIS;
 

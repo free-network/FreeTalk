@@ -1,15 +1,15 @@
 use crate::components::app::freenet_api::error::SynchronizerError;
-use crate::components::app::freenet_api::room_synchronizer::RoomSynchronizer;
-use crate::components::app::sync_info::{RoomSyncStatus, SYNC_INFO};
-use crate::components::app::ROOMS;
+use crate::components::app::freenet_api::board_synchronizer::BoardSynchronizer;
+use crate::components::app::sync_info::{BoardSyncStatus, SYNC_INFO};
+use crate::components::app::BOARDS;
 use crate::util::owner_vk_to_contract_key;
 use dioxus::logger::tracing::{error, info, warn};
 use dioxus::prelude::ReadableExt;
 use freenet_stdlib::prelude::ContractKey;
-use river_core::room_state::member::MemberId;
+use river_core::board_state::member::MemberId;
 
 pub async fn handle_put_response(
-    room_synchronizer: &mut RoomSynchronizer,
+    board_synchronizer: &mut BoardSynchronizer,
     key: ContractKey,
 ) -> Result<(), SynchronizerError> {
     let contract_id = key.id();
@@ -21,22 +21,22 @@ pub async fn handle_put_response(
         sync_info.get_owner_vk_for_instance_id(contract_id)
     };
 
-    // If not found in SYNC_INFO, try fallback lookup from ROOMS
-    // This handles the case where the room creator's SYNC_INFO wasn't properly initialized
+    // If not found in SYNC_INFO, try fallback lookup from boards
+    // This handles the case where the board creator's SYNC_INFO wasn't properly initialized
     let owner_vk_opt = if owner_vk_opt.is_none() {
         warn!(
-            "Owner VK not found in SYNC_INFO for contract ID: {}, trying fallback from ROOMS",
+            "Owner VK not found in SYNC_INFO for contract ID: {}, trying fallback from boards",
             contract_id
         );
 
-        let rooms = ROOMS.read();
+        let boards = BOARDS.read();
         let mut found_owner_vk = None;
 
-        for owner_key in rooms.map.keys() {
-            let room_contract_key = owner_vk_to_contract_key(owner_key);
-            if room_contract_key.id() == contract_id {
+        for owner_key in boards.map.keys() {
+            let board_contract_key = owner_vk_to_contract_key(owner_key);
+            if board_contract_key.id() == contract_id {
                 info!(
-                    "Found matching owner key in ROOMS: {:?}",
+                    "Found matching owner key in boards: {:?}",
                     MemberId::from(*owner_key)
                 );
                 found_owner_vk = Some(*owner_key);
@@ -57,50 +57,50 @@ pub async fn handle_put_response(
                 MemberId::from(owner_vk)
             );
 
-            // Ensure SYNC_INFO is properly set up for this room before subscribing
+            // Ensure SYNC_INFO is properly set up for this board before subscribing
             SYNC_INFO.with_mut(|sync_info| {
-                sync_info.register_new_room(owner_vk);
+                sync_info.register_new_board(owner_vk);
             });
 
             // Now subscribe to the contract
-            let subscribe_result = room_synchronizer.subscribe_to_contract(&key).await;
+            let subscribe_result = board_synchronizer.subscribe_to_contract(&key).await;
 
             if let Err(e) = subscribe_result {
                 error!("Failed to subscribe to contract after PUT: {}", e);
                 // Update the sync status to error
                 SYNC_INFO
                     .write()
-                    .update_sync_status(&owner_vk, RoomSyncStatus::Error(e.to_string()));
+                    .update_sync_status(&owner_vk, BoardSyncStatus::Error(e.to_string()));
             } else {
                 // Update sync status in a separate block to avoid nested borrows
                 SYNC_INFO
                     .write()
-                    .update_sync_status(&owner_vk, RoomSyncStatus::Subscribed);
+                    .update_sync_status(&owner_vk, BoardSyncStatus::Subscribed);
             }
 
-            // Log the current state of all rooms after successful PUT
-            let rooms_count = {
-                let rooms = ROOMS.read();
-                rooms.map.len()
+            // Log the current state of all boards after successful PUT
+            let boards_count = {
+                let boards = BOARDS.read();
+                boards.map.len()
             };
-            info!("Current rooms count after PutResponse: {}", rooms_count);
+            info!("Current boards count after PutResponse: {}", boards_count);
 
-            // Get room information in a separate block
-            let room_info: Vec<(MemberId, String)> = {
-                let rooms = ROOMS.read();
-                rooms
+            // Get board information in a separate block
+            let board_info: Vec<(MemberId, String)> = {
+                let boards = BOARDS.read();
+                boards
                     .map
                     .keys()
-                    .map(|room_key| {
-                        let contract_key = owner_vk_to_contract_key(room_key);
-                        let room_contract_id = contract_key.id();
-                        (MemberId::from(*room_key), room_contract_id.to_string())
+                    .map(|board_key| {
+                        let contract_key = owner_vk_to_contract_key(board_key);
+                        let board_contract_id = contract_key.id();
+                        (MemberId::from(*board_key), board_contract_id.to_string())
                     })
                     .collect()
             };
 
-            // Log room information
-            for (member_id, contract_id) in room_info {
+            // Log board information
+            for (member_id, contract_id) in board_info {
                 info!("Board in map: {:?}, contract ID: {}", member_id, contract_id);
             }
         }

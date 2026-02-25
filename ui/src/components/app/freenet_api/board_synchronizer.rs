@@ -1,17 +1,17 @@
 #![allow(dead_code)]
 
 use super::error::SynchronizerError;
-use crate::components::app::chat_delegate::save_rooms_to_delegate;
+use crate::components::app::chat_delegate::save_boards_to_delegate;
 use crate::components::app::document_title::{
-    mark_current_room_as_read, update_document_title, DOCUMENT_VISIBLE,
+    mark_current_board_as_read, update_document_title, DOCUMENT_VISIBLE,
 };
 use crate::components::app::freenet_api::constants::INVITATION_TIMEOUT_MS;
 use crate::components::app::notifications::{mark_initial_sync_complete, notify_new_messages};
 use crate::components::app::receive_times::record_receive_times;
-use crate::components::app::sync_info::{now_ms, RoomSyncStatus, SYNC_INFO};
-use crate::components::app::{CURRENT_ROOM, PENDING_INVITES, ROOMS, WEB_API};
-use crate::constants::ROOM_CONTRACT_WASM;
-use crate::invites::PendingRoomStatus;
+use crate::components::app::sync_info::{now_ms, BoardSyncStatus, SYNC_INFO};
+use crate::components::app::{CURRENT_BOARD, PENDING_INVITES, BOARDS, WEB_API};
+use crate::constants::BOARD_CONTRACT_WASM;
+use crate::invites::PendingBoardStatus;
 use crate::util::ecies::decrypt_with_symmetric_key;
 use crate::util::{owner_vk_to_contract_key, to_cbor_vec};
 use dioxus::logger::tracing::{error, info, warn};
@@ -25,27 +25,27 @@ use freenet_stdlib::{
         Parameters, UpdateData, WrappedContract, WrappedState,
     },
 };
-use river_core::room_state::member::MemberId;
-use river_core::room_state::message::{MessageId, RoomMessageBody};
-use river_core::room_state::privacy::PrivacyMode;
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1, ChatRoomStateV1Delta};
+use river_core::board_state::member::MemberId;
+use river_core::board_state::message::{MessageId, BoardMessageBody};
+use river_core::board_state::privacy::PrivacyMode;
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1, ChatBoardStateV1Delta};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Identifies contracts that have changed in order to send state updates to Freene
 #[derive(Clone)]
-pub struct RoomSynchronizer {
+pub struct BoardSynchronizer {
     contract_sync_info: HashMap<ContractInstanceId, ContractSyncInfo>,
 }
 
-impl RoomSynchronizer {
-    pub(crate) fn apply_delta(&self, owner_vk: &VerifyingKey, delta: ChatRoomStateV1Delta) {
+impl BoardSynchronizer {
+    pub(crate) fn apply_delta(&self, owner_vk: &VerifyingKey, delta: ChatBoardStateV1Delta) {
         // Extract new messages for notifications before entering the mutable borrow
         let new_messages = delta.recent_messages.clone();
 
-        ROOMS.with_mut(|rooms| {
-            if let Some(room_data) = rooms.map.get_mut(owner_vk) {
-                let params = ChatRoomParametersV1 { owner: *owner_vk };
+        BOARDS.with_mut(|boards| {
+            if let Some(board_data) = boards.map.get_mut(owner_vk) {
+                let params = ChatBoardParametersV1 { owner: *owner_vk };
 
                 // Log the delta being applied, especially any member_info with versions
                 if let Some(member_info) = &delta.member_info {
@@ -60,44 +60,44 @@ impl RoomSynchronizer {
 
                 // Log current versions before applying delta
                 info!("Current member_info state before delta ({} items):",
-                      room_data.room_state.member_info.member_info.len());
-                for info in &room_data.room_state.member_info.member_info {
+                      board_data.board_state.member_info.member_info.len());
+                for info in &board_data.board_state.member_info.member_info {
                     info!("Current member_info version: {} for member: {:?}, nickname: {}",
                           info.member_info.version,
                           info.member_info.member_id,
                           info.member_info.preferred_nickname);
                 }
 
-                // Capture data for notifications before we modify room_data
-                let self_member_id: MemberId = room_data.self_sk.verifying_key().into();
-                let member_info = room_data.room_state.member_info.clone();
-                let room_secrets = room_data.secrets.clone();
+                // Capture data for notifications before we modify board_data
+                let self_member_id: MemberId = board_data.self_sk.verifying_key().into();
+                let member_info = board_data.board_state.member_info.clone();
+                let board_secrets = board_data.secrets.clone();
 
                 // Clone the state to avoid borrowing issues
-                let state_clone = room_data.room_state.clone();
+                let state_clone = board_data.board_state.clone();
 
-                match room_data
-                    .room_state
+                match board_data
+                    .board_state
                     .apply_delta(&state_clone, &params, &Some(delta))
                 {
                     Ok(_) => {
-                        // For private rooms, rebuild actions_state with decrypted content
+                        // For private boards, rebuild actions_state with decrypted content
                         // (apply_delta only processes public actions)
-                        let is_private = room_data.room_state.configuration.configuration.privacy_mode
+                        let is_private = board_data.board_state.configuration.configuration.privacy_mode
                             == PrivacyMode::Private;
                         if is_private {
                             // Decrypt all private action messages using version-aware lookup
-                            let decrypted_actions: HashMap<MessageId, Vec<u8>> = room_data
-                                .room_state
+                            let decrypted_actions: HashMap<MessageId, Vec<u8>> = board_data
+                                .board_state
                                 .recent_messages
                                 .messages
                                 .iter()
                                 .filter(|msg| msg.message.content.is_action())
                                 .filter_map(|msg| {
-                                    if let RoomMessageBody::Private { ciphertext, nonce, secret_version, .. } =
+                                    if let BoardMessageBody::Private { ciphertext, nonce, secret_version, .. } =
                                         &msg.message.content
                                     {
-                                        room_data.get_secret_for_version(*secret_version)
+                                        board_data.get_secret_for_version(*secret_version)
                                             .and_then(|secret| {
                                                 decrypt_with_symmetric_key(secret, ciphertext, nonce)
                                                     .ok()
@@ -109,16 +109,16 @@ impl RoomSynchronizer {
                                 })
                                 .collect();
 
-                            room_data
-                                .room_state
+                            board_data
+                                .board_state
                                 .recent_messages
                                 .rebuild_actions_state_with_decrypted(&decrypted_actions);
                         }
 
                         // Log versions after applying delta
                         info!("Updated member_info state after delta ({} items):",
-                              room_data.room_state.member_info.member_info.len());
-                        for info in &room_data.room_state.member_info.member_info {
+                              board_data.board_state.member_info.member_info.len());
+                        for info in &board_data.board_state.member_info.member_info {
                             info!("Updated member_info version: {} for member: {:?}, nickname: {}",
                                   info.member_info.version,
                                   info.member_info.member_id,
@@ -126,12 +126,12 @@ impl RoomSynchronizer {
                         }
 
                         // Keep cached self membership data up to date
-                        room_data.capture_self_membership_data(&params);
+                        board_data.capture_self_membership_data(&params);
 
                         // Update the last synced state
                         SYNC_INFO
                             .write()
-                            .update_last_synced_state(owner_vk, &room_data.room_state);
+                            .update_last_synced_state(owner_vk, &board_data.board_state);
 
                         // Notify about new messages from other users
                         if let Some(messages) = new_messages {
@@ -144,14 +144,14 @@ impl RoomSynchronizer {
                                 &messages,
                                 self_member_id,
                                 &member_info,
-                                &room_secrets,
+                                &board_secrets,
                             );
 
-                            // If user is viewing this room with tab visible, mark as read immediately
+                            // If user is viewing this board with tab visible, mark as read immediately
                             let is_visible = *DOCUMENT_VISIBLE.read();
-                            let is_current_room = CURRENT_ROOM.read().owner_key == Some(*owner_vk);
-                            if is_visible && is_current_room {
-                                mark_current_room_as_read();
+                            let is_current_board = CURRENT_BOARD.read().owner_key == Some(*owner_vk);
+                            if is_visible && is_current_board {
+                                mark_current_board_as_read();
                             }
                         }
 
@@ -160,8 +160,8 @@ impl RoomSynchronizer {
 
                         // Persist to delegate so state survives refresh
                         wasm_bindgen_futures::spawn_local(async {
-                            if let Err(e) = save_rooms_to_delegate().await {
-                                error!("Failed to save rooms to delegate after delta: {}", e);
+                            if let Err(e) = save_boards_to_delegate().await {
+                                error!("Failed to save boards to delegate after delta: {}", e);
                             }
                         });
                     }
@@ -170,25 +170,25 @@ impl RoomSynchronizer {
                     }
                 }
             } else {
-                warn!("Board not found in rooms map for apply_delta, ignoring delta");
-                // For now, we'll just ignore deltas for rooms we don't have
-                // The room should be created through a GET response, not a delta
+                warn!("Board not found in boards map for apply_delta, ignoring delta");
+                // For now, we'll just ignore deltas for boards we don't have
+                // The board should be created through a GET response, not a delta
             }
         });
     }
 }
 
-impl RoomSynchronizer {
+impl BoardSynchronizer {
     pub fn new() -> Self {
         Self {
             contract_sync_info: HashMap::new(),
         }
     }
 
-    /// Send updates to the network for any room that has changed locally
-    /// Should be called after modification detected to Signal<Rooms>
-    pub async fn process_rooms(&mut self) -> Result<(), SynchronizerError> {
-        info!("Processing rooms");
+    /// Send updates to the network for any board that has changed locally
+    /// Should be called after modification detected to Signal<Boards>
+    pub async fn process_boards(&mut self) -> Result<(), SynchronizerError> {
+        info!("Processing boards");
 
         // Check if WebAPI is available before processing invitations
         // This prevents updating status when we can't actually send requests
@@ -203,7 +203,7 @@ impl RoomSynchronizer {
                     .map
                     .iter()
                     .filter(|(_, join)| {
-                        matches!(join.status, PendingRoomStatus::Subscribing)
+                        matches!(join.status, PendingBoardStatus::Subscribing)
                             && join
                                 .subscribing_since
                                 .is_none_or(|since| now - since > INVITATION_TIMEOUT_MS as f64)
@@ -218,13 +218,13 @@ impl RoomSynchronizer {
                 );
                 PENDING_INVITES.with_mut(|pending| {
                     if let Some(join) = pending.map.get_mut(&vk) {
-                        join.status = PendingRoomStatus::PendingSubscription;
+                        join.status = PendingBoardStatus::PendingSubscription;
                         join.subscribing_since = None;
                     }
                 });
                 SYNC_INFO
                     .write()
-                    .update_sync_status(&vk, RoomSyncStatus::Disconnected);
+                    .update_sync_status(&vk, BoardSyncStatus::Disconnected);
             }
         }
 
@@ -235,7 +235,7 @@ impl RoomSynchronizer {
             pending_invites
                 .map
                 .iter()
-                .filter(|(_, join)| matches!(join.status, PendingRoomStatus::PendingSubscription))
+                .filter(|(_, join)| matches!(join.status, PendingBoardStatus::PendingSubscription))
                 .map(|(key, _)| *key)
                 .collect()
         } else {
@@ -251,31 +251,31 @@ impl RoomSynchronizer {
 
             for owner_vk in invites_to_subscribe {
                 info!(
-                    "Subscribing to room for invitation: {:?}",
+                    "Subscribing to board for invitation: {:?}",
                     MemberId::from(owner_vk)
                 );
 
                 let contract_key = owner_vk_to_contract_key(&owner_vk);
 
-                // Register the room in SYNC_INFO and update pending invite status atomically
+                // Register the board in SYNC_INFO and update pending invite status atomically
                 // This ensures the contract ID is associated with the owner_vk
                 // when the response comes back, and prevents re-processing on retry
                 info!(
-                    "Registering room in SYNC_INFO for owner: {:?}, contract ID: {}",
+                    "Registering board in SYNC_INFO for owner: {:?}, contract ID: {}",
                     MemberId::from(owner_vk),
                     contract_key.id()
                 );
 
                 // Use with_mut to scope the borrow properly and avoid AlreadyBorrowed errors
                 SYNC_INFO.with_mut(|sync_info| {
-                    sync_info.register_new_room(owner_vk);
-                    sync_info.update_sync_status(&owner_vk, RoomSyncStatus::Subscribing);
+                    sync_info.register_new_board(owner_vk);
+                    sync_info.update_sync_status(&owner_vk, BoardSyncStatus::Subscribing);
                 });
 
                 // Update pending invite status to prevent re-processing on concurrent calls
                 PENDING_INVITES.with_mut(|pending| {
                     if let Some(join) = pending.map.get_mut(&owner_vk) {
-                        join.status = PendingRoomStatus::Subscribing;
+                        join.status = PendingBoardStatus::Subscribing;
                         join.subscribing_since = Some(now_ms());
                     }
                 });
@@ -294,18 +294,18 @@ impl RoomSynchronizer {
                 if let Some(web_api) = WEB_API.write().as_mut() {
                     match web_api.send(client_request).await {
                         Ok(_) => {
-                            info!("Sent GetRequest for room {:?}", MemberId::from(owner_vk));
+                            info!("Sent GetRequest for board {:?}", MemberId::from(owner_vk));
                         }
                         Err(e) => {
                             error!(
-                                "Error sending GetRequest to room {:?}: {}",
+                                "Error sending GetRequest to board {:?}: {}",
                                 MemberId::from(owner_vk),
                                 e
                             );
                             // Update pending invite status to error
                             PENDING_INVITES.with_mut(|pending| {
                                 if let Some(join) = pending.map.get_mut(&owner_vk) {
-                                    join.status = PendingRoomStatus::Error(e.to_string());
+                                    join.status = PendingBoardStatus::Error(e.to_string());
                                 }
                             });
                         }
@@ -315,28 +315,28 @@ impl RoomSynchronizer {
                     warn!("WebAPI became unavailable during processing, resetting status");
                     PENDING_INVITES.with_mut(|pending| {
                         if let Some(join) = pending.map.get_mut(&owner_vk) {
-                            join.status = PendingRoomStatus::PendingSubscription;
+                            join.status = PendingBoardStatus::PendingSubscription;
                         }
                     });
                 }
             }
         }
 
-        info!("Checking for rooms that need to be subscribed");
+        info!("Checking for boards that need to be subscribed");
 
-        // Only check rooms_awaiting_subscription if WebAPI is available
-        let rooms_to_subscribe = if web_api_available {
-            SYNC_INFO.with_mut(|sync_info| sync_info.rooms_awaiting_subscription())
+        // Only check boards_awaiting_subscription if WebAPI is available
+        let boards_to_subscribe = if web_api_available {
+            SYNC_INFO.with_mut(|sync_info| sync_info.boards_awaiting_subscription())
         } else {
             std::collections::HashMap::new()
         };
 
-        if !rooms_to_subscribe.is_empty() {
-            for (owner_vk, state) in &rooms_to_subscribe {
-                info!("Subscribing to room: {:?}", MemberId::from(*owner_vk));
+        if !boards_to_subscribe.is_empty() {
+            for (owner_vk, state) in &boards_to_subscribe {
+                info!("Subscribing to board: {:?}", MemberId::from(*owner_vk));
 
-                let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
-                let parameters = ChatRoomParametersV1 { owner: *owner_vk };
+                let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
+                let parameters = ChatBoardParametersV1 { owner: *owner_vk };
                 let params_bytes = to_cbor_vec(&parameters);
                 let parameters = Parameters::from(params_bytes);
 
@@ -350,7 +350,7 @@ impl RoomSynchronizer {
                 let contract_key = owner_vk_to_contract_key(owner_vk);
                 let contract_id = contract_key.id();
                 info!(
-                    "Preparing PutRequest for room {:?} with contract ID: {}",
+                    "Preparing PutRequest for board {:?} with contract ID: {}",
                     MemberId::from(*owner_vk),
                     contract_id
                 );
@@ -366,7 +366,7 @@ impl RoomSynchronizer {
                 let client_request = ClientRequest::ContractOp(put_request);
 
                 info!(
-                    "Sending PutRequest for room {:?} with contract ID: {}",
+                    "Sending PutRequest for board {:?} with contract ID: {}",
                     MemberId::from(*owner_vk),
                     contract_id
                 );
@@ -374,16 +374,16 @@ impl RoomSynchronizer {
                 if let Some(web_api) = WEB_API.write().as_mut() {
                     match web_api.send(client_request).await {
                         Ok(_) => {
-                            info!("Sent PutRequest for room {:?}", MemberId::from(*owner_vk));
+                            info!("Sent PutRequest for board {:?}", MemberId::from(*owner_vk));
                             // Update the sync status to subscribing using with_mut
                             SYNC_INFO.with_mut(|sync_info| {
-                                sync_info.update_sync_status(owner_vk, RoomSyncStatus::Subscribing);
+                                sync_info.update_sync_status(owner_vk, BoardSyncStatus::Subscribing);
                             });
                         }
                         Err(e) => {
-                            // Don't fail the entire process if one room fails
+                            // Don't fail the entire process if one board fails
                             error!(
-                                "Error sending PutRequest to room {:?}: {}",
+                                "Error sending PutRequest to board {:?}: {}",
                                 MemberId::from(*owner_vk),
                                 e
                             );
@@ -391,7 +391,7 @@ impl RoomSynchronizer {
                             SYNC_INFO.with_mut(|sync_info| {
                                 sync_info.update_sync_status(
                                     owner_vk,
-                                    RoomSyncStatus::Error(e.to_string()),
+                                    BoardSyncStatus::Error(e.to_string()),
                                 );
                             });
                         }
@@ -403,14 +403,14 @@ impl RoomSynchronizer {
             }
         }
 
-        // Send upgrade pointers for migrated rooms (owner only)
+        // Send upgrade pointers for migrated boards (owner only)
         if web_api_available {
-            let migrated_rooms: Vec<(VerifyingKey, freenet_stdlib::prelude::ContractKey)> =
-                ROOMS.with_mut(|rooms| std::mem::take(&mut rooms.migrated_rooms));
+            let migrated_BOARDS: Vec<(VerifyingKey, freenet_stdlib::prelude::ContractKey)> =
+                BOARDS.with_mut(|boards| std::mem::take(&mut boards.migrated_boards));
 
-            for (owner_vk, old_contract_key) in &migrated_rooms {
-                // Only the room owner should send the upgrade pointer
-                let is_owner = ROOMS
+            for (owner_vk, old_contract_key) in &migrated_BOARDS {
+                // Only the board owner should send the upgrade pointer
+                let is_owner = BOARDS
                     .read()
                     .map
                     .get(owner_vk)
@@ -421,38 +421,38 @@ impl RoomSynchronizer {
                 }
 
                 info!(
-                    "Sending upgrade pointer for migrated room {:?} from old contract {} to new contract",
+                    "Sending upgrade pointer for migrated board {:?} from old contract {} to new contract",
                     MemberId::from(*owner_vk),
                     old_contract_key.id()
                 );
 
                 // Build the upgrade state
                 let (upgrade_state, _new_contract_key) = {
-                    let rooms = ROOMS.read();
-                    if let Some(room_data) = rooms.map.get(owner_vk) {
-                        use river_core::room_state::upgrade::{
+                    let boards = BOARDS.read();
+                    if let Some(board_data) = boards.map.get(owner_vk) {
+                        use river_core::board_state::upgrade::{
                             AuthorizedUpgradeV1, OptionalUpgradeV1, UpgradeV1,
                         };
 
-                        let new_contract_id = room_data.contract_key.id();
+                        let new_contract_id = board_data.contract_key.id();
                         let mut id_bytes = [0u8; 32];
                         id_bytes.copy_from_slice(new_contract_id.as_bytes());
                         let new_address = blake3::Hash::from(id_bytes);
                         let upgrade = UpgradeV1 {
-                            owner_member_id: room_data.owner_id(),
+                            owner_member_id: board_data.owner_id(),
                             version: 1,
-                            new_chatroom_address: new_address,
+                            new_chatboard_address: new_address,
                         };
                         let authorized_upgrade =
-                            AuthorizedUpgradeV1::new(upgrade, &room_data.self_sk);
+                            AuthorizedUpgradeV1::new(upgrade, &board_data.self_sk);
 
                         // Create a minimal state with just the upgrade field set
-                        let upgrade_state = ChatRoomStateV1 {
+                        let upgrade_state = ChatBoardStateV1 {
                             upgrade: OptionalUpgradeV1(Some(authorized_upgrade)),
                             ..Default::default()
                         };
 
-                        (upgrade_state, room_data.contract_key)
+                        (upgrade_state, board_data.contract_key)
                     } else {
                         continue;
                     }
@@ -469,14 +469,14 @@ impl RoomSynchronizer {
                     match web_api.send(client_request).await {
                         Ok(_) => {
                             info!(
-                                "Sent upgrade pointer for room {:?} to old contract {}",
+                                "Sent upgrade pointer for board {:?} to old contract {}",
                                 MemberId::from(*owner_vk),
                                 old_contract_key.id()
                             );
                         }
                         Err(e) => {
                             warn!(
-                                "Failed to send upgrade pointer for room {:?}: {}",
+                                "Failed to send upgrade pointer for board {:?}: {}",
                                 MemberId::from(*owner_vk),
                                 e
                             );
@@ -486,24 +486,24 @@ impl RoomSynchronizer {
             }
         }
 
-        info!("Checking for rooms to update");
+        info!("Checking for boards to update");
 
-        // Only check for rooms needing updates if WebAPI is available
-        let rooms_to_sync = if web_api_available {
+        // Only check for boards needing updates if WebAPI is available
+        let boards_to_sync = if web_api_available {
             SYNC_INFO.with_mut(|sync_info| sync_info.needs_to_send_update())
         } else {
             std::collections::HashMap::new()
         };
 
         info!(
-            "Found {} rooms that need synchronization",
-            rooms_to_sync.len()
+            "Found {} boards that need synchronization",
+            boards_to_sync.len()
         );
 
-        for (room_vk, state) in &rooms_to_sync {
-            info!("Processing room: {:?}", MemberId::from(*room_vk));
+        for (board_vk, state) in &boards_to_sync {
+            info!("Processing board: {:?}", MemberId::from(*board_vk));
 
-            let contract_key = owner_vk_to_contract_key(room_vk);
+            let contract_key = owner_vk_to_contract_key(board_vk);
 
             let update_request = ContractRequest::Update {
                 key: contract_key,
@@ -516,19 +516,19 @@ impl RoomSynchronizer {
                 match web_api.send(client_request).await {
                     Ok(_) => {
                         info!(
-                            "Successfully sent update for room: {:?}",
-                            MemberId::from(*room_vk)
+                            "Successfully sent update for board: {:?}",
+                            MemberId::from(*board_vk)
                         );
                         // Only update the last synced state after successfully sending the update
                         SYNC_INFO.with_mut(|sync_info| {
-                            sync_info.state_updated(room_vk, state.clone());
+                            sync_info.state_updated(board_vk, state.clone());
                         });
                     }
                     Err(e) => {
-                        // Don't fail the entire process if one room fails
+                        // Don't fail the entire process if one board fails
                         error!(
-                            "Failed to send update for room {:?}: {}",
-                            MemberId::from(*room_vk),
+                            "Failed to send update for board {:?}: {}",
+                            MemberId::from(*board_vk),
                             e
                         );
                     }
@@ -539,37 +539,37 @@ impl RoomSynchronizer {
             }
         }
 
-        info!("Finished processing all rooms");
+        info!("Finished processing all boards");
 
         Ok(())
     }
 
-    /// Updates the room state and last_sync_state, should be called after state update received from network
-    pub(crate) fn update_room_state(&self, room_owner_vk: &VerifyingKey, state: &ChatRoomStateV1) {
+    /// Updates the board state and last_sync_state, should be called after state update received from network
+    pub(crate) fn update_board_state(&self, board_owner_vk: &VerifyingKey, state: &ChatBoardStateV1) {
         // Capture data needed for notifications BEFORE the mutable borrow
-        let (old_message_ids, self_member_id, member_info_clone, room_secrets) = {
-            let rooms = ROOMS.read();
-            if let Some(room_data) = rooms.map.get(room_owner_vk) {
-                let old_ids: std::collections::HashSet<_> = room_data
-                    .room_state
+        let (old_message_ids, self_member_id, member_info_clone, board_secrets) = {
+            let boards = BOARDS.read();
+            if let Some(board_data) = boards.map.get(board_owner_vk) {
+                let old_ids: std::collections::HashSet<_> = board_data
+                    .board_state
                     .recent_messages
                     .messages
                     .iter()
                     .map(|m| m.id())
                     .collect();
                 info!(
-                    "update_room_state: Captured {} old message IDs for room {:?}",
+                    "update_board_state: Captured {} old message IDs for board {:?}",
                     old_ids.len(),
-                    MemberId::from(*room_owner_vk)
+                    MemberId::from(*board_owner_vk)
                 );
-                let self_id = MemberId::from(&room_data.self_sk.verifying_key());
-                let member_info = room_data.room_state.member_info.clone();
-                let secrets = room_data.secrets.clone();
+                let self_id = MemberId::from(&board_data.self_sk.verifying_key());
+                let member_info = board_data.board_state.member_info.clone();
+                let secrets = board_data.secrets.clone();
                 (Some(old_ids), Some(self_id), Some(member_info), secrets)
             } else {
                 info!(
-                    "update_room_state: Board {:?} not found in ROOMS when capturing old IDs",
-                    MemberId::from(*room_owner_vk)
+                    "update_board_state: Board {:?} not found in boards when capturing old IDs",
+                    MemberId::from(*board_owner_vk)
                 );
                 (None, None, None, HashMap::new())
             }
@@ -577,23 +577,23 @@ impl RoomSynchronizer {
 
         // Log incoming state message count
         info!(
-            "update_room_state: Incoming state has {} messages for room {:?}",
+            "update_board_state: Incoming state has {} messages for board {:?}",
             state.recent_messages.messages.len(),
-            MemberId::from(*room_owner_vk)
+            MemberId::from(*board_owner_vk)
         );
 
         // Will be populated inside with_mut if new messages are detected
         let mut pending_notification: Option<(Vec<_>, MemberId)> = None;
-        let room_owner_copy = *room_owner_vk;
+        let board_owner_copy = *board_owner_vk;
 
-        ROOMS.with_mut(|rooms| {
-            if let Some(room_data) = rooms.map.get_mut(room_owner_vk) {
+        BOARDS.with_mut(|boards| {
+            if let Some(board_data) = boards.map.get_mut(board_owner_vk) {
                 // Log member info versions before merge
                 info!(
                     "Before merge - Local member info versions ({} items):",
-                    room_data.room_state.member_info.member_info.len()
+                    board_data.board_state.member_info.member_info.len()
                 );
-                for info in &room_data.room_state.member_info.member_info {
+                for info in &board_data.board_state.member_info.member_info {
                     info!(
                         "  Member: {:?}, Version: {}, Nickname: {}",
                         info.member_info.member_id,
@@ -615,31 +615,31 @@ impl RoomSynchronizer {
                     );
                 }
 
-                // Update the room state by merging the new state with the existing one
-                match room_data.room_state.merge(
-                    &room_data.room_state.clone(),
-                    &ChatRoomParametersV1 {
-                        owner: *room_owner_vk,
+                // Update the board state by merging the new state with the existing one
+                match board_data.board_state.merge(
+                    &board_data.board_state.clone(),
+                    &ChatBoardParametersV1 {
+                        owner: *board_owner_vk,
                     },
                     state,
                 ) {
                     Ok(_) => {
-                        // For private rooms, rebuild actions_state with decrypted content
-                        let is_private = room_data.room_state.configuration.configuration.privacy_mode
+                        // For private boards, rebuild actions_state with decrypted content
+                        let is_private = board_data.board_state.configuration.configuration.privacy_mode
                             == PrivacyMode::Private;
                         if is_private {
                             // Decrypt all private action messages using version-aware lookup
-                            let decrypted_actions: HashMap<MessageId, Vec<u8>> = room_data
-                                .room_state
+                            let decrypted_actions: HashMap<MessageId, Vec<u8>> = board_data
+                                .board_state
                                 .recent_messages
                                 .messages
                                 .iter()
                                 .filter(|msg| msg.message.content.is_action())
                                 .filter_map(|msg| {
-                                    if let RoomMessageBody::Private { ciphertext, nonce, secret_version, .. } =
+                                    if let BoardMessageBody::Private { ciphertext, nonce, secret_version, .. } =
                                         &msg.message.content
                                     {
-                                        room_data.get_secret_for_version(*secret_version)
+                                        board_data.get_secret_for_version(*secret_version)
                                             .and_then(|secret| {
                                                 decrypt_with_symmetric_key(secret, ciphertext, nonce)
                                                     .ok()
@@ -651,8 +651,8 @@ impl RoomSynchronizer {
                                 })
                                 .collect();
 
-                            room_data
-                                .room_state
+                            board_data
+                                .board_state
                                 .recent_messages
                                 .rebuild_actions_state_with_decrypted(&decrypted_actions);
                         }
@@ -660,9 +660,9 @@ impl RoomSynchronizer {
                         // Log member info versions after merge
                         info!(
                             "After merge - Updated member info versions ({} items):",
-                            room_data.room_state.member_info.member_info.len()
+                            board_data.board_state.member_info.member_info.len()
                         );
-                        for info in &room_data.room_state.member_info.member_info {
+                        for info in &board_data.board_state.member_info.member_info {
                             info!(
                                 "  Member: {:?}, Version: {}, Nickname: {}",
                                 info.member_info.member_id,
@@ -672,27 +672,27 @@ impl RoomSynchronizer {
                         }
 
                         // Keep cached self membership data up to date
-                        let params = ChatRoomParametersV1 { owner: *room_owner_vk };
-                        room_data.capture_self_membership_data(&params);
+                        let params = ChatBoardParametersV1 { owner: *board_owner_vk };
+                        board_data.capture_self_membership_data(&params);
 
-                        // Make sure the room is registered in SYNC_INFO
+                        // Make sure the board is registered in SYNC_INFO
                         SYNC_INFO.with_mut(|sync_info| {
-                            sync_info.register_new_room(*room_owner_vk);
+                            sync_info.register_new_board(*board_owner_vk);
                             // We use the post-merged state to avoid some edge cases
                             sync_info
-                                .update_last_synced_state(room_owner_vk, &room_data.room_state);
+                                .update_last_synced_state(board_owner_vk, &board_data.board_state);
                         });
 
-                        // Mark initial sync complete for this room (enables notifications)
-                        mark_initial_sync_complete(room_owner_vk);
+                        // Mark initial sync complete for this board (enables notifications)
+                        mark_initial_sync_complete(board_owner_vk);
 
                         // Detect new messages - store for notification AFTER with_mut completes
-                        // (notify_new_messages calls ROOMS.read() internally, causing deadlock if called here)
+                        // (notify_new_messages calls boards.read() internally, causing deadlock if called here)
                         if let (Some(old_ids), Some(self_id), Some(_member_info)) =
                             (&old_message_ids, self_member_id, &member_info_clone)
                         {
-                            let new_messages: Vec<_> = room_data
-                                .room_state
+                            let new_messages: Vec<_> = board_data
+                                .board_state
                                 .recent_messages
                                 .messages
                                 .iter()
@@ -702,9 +702,9 @@ impl RoomSynchronizer {
 
                             if !new_messages.is_empty() {
                                 info!(
-                                    "Detected {} new messages in state update for room {:?}",
+                                    "Detected {} new messages in state update for board {:?}",
                                     new_messages.len(),
-                                    MemberId::from(*room_owner_vk)
+                                    MemberId::from(*board_owner_vk)
                                 );
 
                                 // Note: we do NOT record receive times here. Full state
@@ -717,90 +717,90 @@ impl RoomSynchronizer {
                                 pending_notification = Some((new_messages, self_id));
                             } else {
                                 info!(
-                                    "No new messages detected for room {:?} (old_ids: {}, post-merge: {})",
-                                    MemberId::from(*room_owner_vk),
+                                    "No new messages detected for board {:?} (old_ids: {}, post-merge: {})",
+                                    MemberId::from(*board_owner_vk),
                                     old_ids.len(),
-                                    room_data.room_state.recent_messages.messages.len()
+                                    board_data.board_state.recent_messages.messages.len()
                                 );
                             }
                         }
 
                         // Persist to delegate so state survives refresh
                         wasm_bindgen_futures::spawn_local(async {
-                            if let Err(e) = save_rooms_to_delegate().await {
-                                error!("Failed to save rooms to delegate after state update: {}", e);
+                            if let Err(e) = save_boards_to_delegate().await {
+                                error!("Failed to save boards to delegate after state update: {}", e);
                             }
                         });
                     }
                     Err(e) => {
-                        error!("Failed to merge room state: {}", e);
+                        error!("Failed to merge board state: {}", e);
                     }
                 }
             } else {
-                warn!("Board not found in rooms map for update_room_state. This can happen if we receive an update before the room is fully initialized.");
-                // We cannot create a room here because we don't have the self_sk (signing key)
+                warn!("Board not found in boards map for update_board_state. This can happen if we receive an update before the board is fully initialized.");
+                // We cannot create a board here because we don't have the self_sk (signing key)
                 // Instead, we should request the full state with a GET reques
-                // This is handled by registering the room in SYNC_INFO which will trigger a GET request in the next sync cycle
+                // This is handled by registering the board in SYNC_INFO which will trigger a GET request in the next sync cycle
 
-                // Register the room in SYNC_INFO to trigger a GET reques
+                // Register the board in SYNC_INFO to trigger a GET reques
                 SYNC_INFO.with_mut(|sync_info| {
-                    sync_info.register_new_room(*room_owner_vk);
-                    // Store the state temporarily so it can be merged when we get the full room data
-                    sync_info.update_last_synced_state(room_owner_vk, state);
+                    sync_info.register_new_board(*board_owner_vk);
+                    // Store the state temporarily so it can be merged when we get the full board data
+                    sync_info.update_last_synced_state(board_owner_vk, state);
                 });
 
-                info!("Registered room {:?} for GET request after receiving update without existing room data", MemberId::from(*room_owner_vk));
+                info!("Registered board {:?} for GET request after receiving update without existing board data", MemberId::from(*board_owner_vk));
             }
         });
 
-        // Update document title after ROOMS.with_mut completes (update_document_title calls ROOMS.read())
+        // Update document title after boards.with_mut completes (update_document_title calls boards.read())
         update_document_title();
 
-        // Now safe to call notify_new_messages (it calls ROOMS.read() internally)
+        // Now safe to call notify_new_messages (it calls boards.read() internally)
         if let (Some((new_messages, self_id)), Some(member_info)) =
             (pending_notification, member_info_clone)
         {
             notify_new_messages(
-                &room_owner_copy,
+                &board_owner_copy,
                 &new_messages,
                 self_id,
                 &member_info,
-                &room_secrets,
+                &board_secrets,
             );
 
-            // If user is viewing this room with tab visible, mark as read
+            // If user is viewing this board with tab visible, mark as read
             let is_visible = *DOCUMENT_VISIBLE.read();
-            let is_current_room = CURRENT_ROOM.read().owner_key == Some(room_owner_copy);
-            if is_visible && is_current_room {
-                mark_current_room_as_read();
+            let is_current_board = CURRENT_BOARD.read().owner_key == Some(board_owner_copy);
+            if is_visible && is_current_board {
+                mark_current_board_as_read();
             }
         }
     }
 
-    /// Refresh all room states by sending GET requests.
+    /// Refresh all board states by sending GET requests.
     /// This is used after PC suspension/wake to catch any updates that were missed
     /// while the page was hidden or the machine was suspended.
-    pub async fn refresh_all_rooms(&self) -> Result<(), SynchronizerError> {
-        info!("Refreshing all rooms to catch missed updates");
+    pub async fn refresh_all_boards(&self) -> Result<(), SynchronizerError> {
+        info!("Refreshing all boards to catch missed updates");
 
         // Check if WebAPI is available
         let web_api_available = WEB_API.read().is_some();
         if !web_api_available {
-            warn!("WebAPI not available, skipping room refresh");
+            warn!("WebAPI not available, skipping board refresh");
             return Err(SynchronizerError::ApiNotInitialized);
         }
 
-        // Collect all room owner keys that we're currently tracking
-        let room_owners: Vec<VerifyingKey> = ROOMS.read().map.keys().copied().collect();
+        // Collect all board owner keys that we're currently tracking
+        let board_owners: Vec<VerifyingKey> = BOARDS.read().map.keys().copied().collect();
 
-        if room_owners.is_empty() {
-            info!("No rooms to refresh");
+        if board_owners.is_empty() {
+            info!("No boards to refresh");
             return Ok(());
         }
 
-        info!("Refreshing {} rooms", room_owners.len());
+        info!("Refreshing {} boards", board_owners.len());
 
-        for owner_vk in room_owners {
+        for owner_vk in board_owners {
             let contract_key = owner_vk_to_contract_key(&owner_vk);
 
             // Send a GET request to fetch the current state
@@ -818,14 +818,14 @@ impl RoomSynchronizer {
                 match web_api.send(client_request).await {
                     Ok(_) => {
                         info!(
-                            "Sent refresh GET request for room {:?}",
+                            "Sent refresh GET request for board {:?}",
                             MemberId::from(owner_vk)
                         );
                     }
                     Err(e) => {
-                        // Don't fail the entire refresh if one room fails
+                        // Don't fail the entire refresh if one board fails
                         error!(
-                            "Error sending refresh GET for room {:?}: {}",
+                            "Error sending refresh GET for board {:?}: {}",
                             MemberId::from(owner_vk),
                             e
                         );
@@ -837,7 +837,7 @@ impl RoomSynchronizer {
             }
         }
 
-        info!("Finished sending refresh requests for all rooms");
+        info!("Finished sending refresh requests for all boards");
         Ok(())
     }
 

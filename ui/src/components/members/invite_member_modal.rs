@@ -1,12 +1,12 @@
-use crate::components::app::{CURRENT_ROOM, ROOMS};
+use crate::components::app::{CURRENT_BOARD, BOARDS};
 use crate::components::members::Invitation;
-use crate::room_data::RoomData;
+use crate::board_data::BoardData;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::{FaArrowsRotate, FaCopy, FaXmark};
 use dioxus_free_icons::Icon;
 use ed25519_dalek::SigningKey;
-use river_core::room_state::member::{AuthorizedMember, Member};
+use river_core::board_state::member::{AuthorizedMember, Member};
 use std::rc::Rc;
 use wasm_bindgen::JsCast;
 
@@ -41,12 +41,12 @@ pub fn InviteMemberModal(is_active: Signal<bool>) -> Element {
     // Add a signal to track when a new invitation is generated
     let regenerate_trigger = use_signal(|| 0);
 
-    let current_room_data_signal: Memo<Option<RoomData>> = use_memo(move || {
-        CURRENT_ROOM
+    let current_board_data_signal: Memo<Option<BoardData>> = use_memo(move || {
+        CURRENT_BOARD
             .read()
             .owner_key
             .as_ref()
-            .and_then(|key| ROOMS.read().map.get(key).cloned())
+            .and_then(|key| BOARDS.read().map.get(key).cloned())
     });
 
     let invitation_future = use_resource(move || {
@@ -56,16 +56,16 @@ pub fn InviteMemberModal(is_active: Signal<bool>) -> Element {
             if !*is_active.read() {
                 return Err("Modal closed".to_string());
             }
-            let room_data = current_room_data_signal();
-            if let Some(room_data) = room_data {
+            let board_data = current_board_data_signal();
+            if let Some(board_data) = board_data {
                 // Generate new signing key for invitee
                 let invitee_signing_key = SigningKey::generate(&mut rand::thread_rng());
                 let invitee_verifying_key = invitee_signing_key.verifying_key();
 
                 // Create member struct
                 let member = Member {
-                    owner_member_id: room_data.owner_vk.into(),
-                    invited_by: room_data.self_sk.verifying_key().into(),
+                    owner_member_id: board_data.owner_vk.into(),
+                    invited_by: board_data.self_sk.verifying_key().into(),
                     member_vk: invitee_verifying_key,
                 };
 
@@ -76,9 +76,9 @@ pub fn InviteMemberModal(is_active: Signal<bool>) -> Element {
 
                 // Sign using delegate with fallback to local signing
                 let signature = crate::signing::sign_member_with_fallback(
-                    room_data.room_key(),
+                    board_data.board_key(),
                     member_bytes,
-                    &room_data.self_sk,
+                    &board_data.self_sk,
                 )
                 .await;
 
@@ -87,14 +87,14 @@ pub fn InviteMemberModal(is_active: Signal<bool>) -> Element {
 
                 // Create invitation
                 let invitation = Invitation {
-                    room: room_data.owner_vk,
+                    board: board_data.owner_vk,
                     invitee_signing_key,
                     invitee: authorized_member,
                 };
 
                 Ok::<Invitation, String>(invitation)
             } else {
-                Err("No room selected".to_string())
+                Err("No board selected".to_string())
             }
         }
     });
@@ -130,29 +130,29 @@ pub fn InviteMemberModal(is_active: Signal<bool>) -> Element {
                 div { class: "px-6 py-4",
                     match &*invitation_future.read_unchecked() {
                         Some(Ok(invitation)) => {
-                            let room_name = current_room_data_signal()
+                            let board_name = current_board_data_signal()
                                 .map(|r| {
-                                    let sealed_name = &r.room_state.configuration.configuration.display.name;
+                                    let sealed_name = &r.board_state.configuration.configuration.display.name;
                                     match unseal_bytes_with_secrets(sealed_name, &r.secrets) {
                                         Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                                         Err(_) => sealed_name.to_string_lossy(),
                                     }
                                 })
-                                .unwrap_or_else(|| "this chat room".to_string());
+                                .unwrap_or_else(|| "this chat board".to_string());
 
                             let invite_code = invitation.to_encoded_string();
                             let base_url = get_invitation_base_url();
                             let invite_url = format!("{}#/invite/{}", base_url, invite_code);
 
                             let default_msg = format!(
-                                "You've been invited to join the chat room \"{}\"!\n\n\
+                                "You've been invited to join the chat board \"{}\"!\n\n\
                                 To join:\n\
                                 1. Install Freenet from https://freenet.org\n\
                                 2. Open this link:\n\
                                 {}\n\n\
                                 IMPORTANT: This invitation contains a unique identity key created just for you. \
                                 Do not share it with others.",
-                                room_name, invite_url
+                                board_name, invite_url
                             );
 
                             rsx! {

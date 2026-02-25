@@ -13,7 +13,7 @@ This is a command-line interface for River, a decentralized chat application bui
 
 ## The Bug
 
-River needs to store chat room data in Freenet's decentralized network. The issue:
+River needs to store chat board data in Freenet's decentralized network. The issue:
 1. PUT requests (storing data) timeout after 30 seconds
 2. GET requests (retrieving data) timeout after 30 seconds  
 3. WebSocket connection works fine - it's the contract operations that fail
@@ -37,10 +37,10 @@ River needs to store chat room data in Freenet's decentralized network. The issu
    river debug websocket
    
    # This times out after 30s - demonstrates PUT issue
-   river room create --name "Test" --nickname "Alice"
+   river board create --name "Test" --nickname "Alice"
    
-   # If you had a room, this would timeout too - demonstrates GET issue
-   river debug contract-get <room-owner-key>
+   # If you had a board, this would timeout too - demonstrates GET issue
+   river debug contract-get <board-owner-key>
    ```
 
 ## Architecture Notes

@@ -1,9 +1,9 @@
-use crate::room_state::member::MemberId;
-use crate::room_state::privacy::{PrivacyMode, SecretVersion};
-use crate::room_state::ChatRoomParametersV1;
+use crate::board_state::member::MemberId;
+use crate::board_state::privacy::{PrivacyMode, SecretVersion};
+use crate::board_state::ChatBoardParametersV1;
 use crate::util::sign_struct;
 use crate::util::{truncated_base64, verify_struct};
-use crate::ChatRoomStateV1;
+use crate::ChatBoardStateV1;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use freenet_scaffold::util::{fast_hash, FastHash};
 use freenet_scaffold::ComposableState;
@@ -33,10 +33,10 @@ pub struct MessagesV1 {
 }
 
 impl ComposableState for MessagesV1 {
-    type ParentState = ChatRoomStateV1;
+    type ParentState = ChatBoardStateV1;
     type Summary = Vec<MessageId>;
     type Delta = Vec<AuthorizedMessageV1>;
-    type Parameters = ChatRoomParametersV1;
+    type Parameters = ChatBoardParametersV1;
 
     fn verify(
         &self,
@@ -112,7 +112,7 @@ impl ComposableState for MessagesV1 {
                 let content = &msg.message.content;
 
                 match content {
-                    RoomMessageBody::Private { secret_version, .. } => {
+                    BoardMessageBody::Private { secret_version, .. } => {
                         // In private mode, verify secret version matches current
                         if *privacy_mode == PrivacyMode::Private
                             && *secret_version != current_secret_version
@@ -132,11 +132,11 @@ impl ComposableState for MessagesV1 {
                             );
                         }
                     }
-                    RoomMessageBody::Public { .. } => {
+                    BoardMessageBody::Public { .. } => {
                         // In private mode, reject ALL public messages including actions
-                        // Privacy is a layer - everything in a private room must be encrypted
+                        // Privacy is a layer - everything in a private board must be encrypted
                         if *privacy_mode == PrivacyMode::Private {
-                            return Err("Cannot send public messages in private room".to_string());
+                            return Err("Cannot send public messages in private board".to_string());
                         }
                     }
                 }
@@ -158,7 +158,7 @@ impl ComposableState for MessagesV1 {
         self.messages
             .retain(|m| m.message.content.content_len() <= max_message_size);
 
-        // Ensure all messages are signed by a valid member or the room owner, remove if not
+        // Ensure all messages are signed by a valid member or the board owner, remove if not
         let members_by_id = parent_state.members.members_by_member_id();
         let owner_id = MemberId::from(&parameters.owner);
         self.messages.retain(|m| {
@@ -190,7 +190,7 @@ impl ComposableState for MessagesV1 {
 impl MessagesV1 {
     /// Rebuild the computed actions state by scanning all action messages.
     ///
-    /// This method only processes PUBLIC action messages. For private rooms,
+    /// This method only processes PUBLIC action messages. For private boards,
     /// use `rebuild_actions_state_with_decrypted` and provide the decrypted
     /// content for each private action message.
     pub fn rebuild_actions_state(&mut self) {
@@ -199,7 +199,7 @@ impl MessagesV1 {
 
     /// Rebuild actions state with decrypted content for private action messages.
     ///
-    /// For private rooms, the caller should decrypt each private action message
+    /// For private boards, the caller should decrypt each private action message
     /// and provide the plaintext bytes in `decrypted_content`, keyed by message ID.
     ///
     /// # Arguments
@@ -209,7 +209,7 @@ impl MessagesV1 {
         &mut self,
         decrypted_content: &HashMap<MessageId, Vec<u8>>,
     ) {
-        use crate::room_state::content::{
+        use crate::board_state::content::{
             ActionContentV1, DecodedContent, ACTION_TYPE_DELETE, ACTION_TYPE_EDIT,
             ACTION_TYPE_REACTION, ACTION_TYPE_REMOVE_REACTION,
         };
@@ -236,14 +236,14 @@ impl MessagesV1 {
 
             // Decode the action content - either from public data or decrypted bytes
             let action = match &msg.message.content {
-                RoomMessageBody::Public { .. } => {
+                BoardMessageBody::Public { .. } => {
                     // Public action - decode directly
                     match msg.message.content.decode_content() {
                         Some(DecodedContent::Action(action)) => action,
                         _ => continue,
                     }
                 }
-                RoomMessageBody::Private { .. } => {
+                BoardMessageBody::Private { .. } => {
                     // Private action - use provided decrypted content
                     let msg_id = msg.id();
                     if let Some(plaintext) = decrypted_content.get(&msg_id) {
@@ -380,7 +380,7 @@ impl MessagesV1 {
 /// - New fields: Add to content structs (old clients ignore unknown fields)
 /// - Breaking changes: Bump content_version
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub enum RoomMessageBody {
+pub enum BoardMessageBody {
     /// Public (unencrypted) message
     Public {
         /// Content type identifier (see content module for constants)
@@ -400,15 +400,15 @@ pub enum RoomMessageBody {
         ciphertext: Vec<u8>,
         /// Nonce used for encryption
         nonce: [u8; 12],
-        /// Version of the room secret used for encryption
+        /// Version of the board secret used for encryption
         secret_version: SecretVersion,
     },
 }
 
-impl RoomMessageBody {
+impl BoardMessageBody {
     /// Create a new public text message
     pub fn public(title: String, content: String) -> Self {
-        use crate::room_state::content::{TextContentV1, CONTENT_TYPE_TEXT, TEXT_CONTENT_VERSION};
+        use crate::board_state::content::{TextContentV1, CONTENT_TYPE_TEXT, TEXT_CONTENT_VERSION};
         let text_content = TextContentV1::new(title, content);
         Self::Public {
             content_type: CONTENT_TYPE_TEXT,
@@ -449,7 +449,7 @@ impl RoomMessageBody {
         nonce: [u8; 12],
         secret_version: SecretVersion,
     ) -> Self {
-        use crate::room_state::content::{CONTENT_TYPE_TEXT, TEXT_CONTENT_VERSION};
+        use crate::board_state::content::{CONTENT_TYPE_TEXT, TEXT_CONTENT_VERSION};
         Self::Private {
             content_type: CONTENT_TYPE_TEXT,
             content_version: TEXT_CONTENT_VERSION,
@@ -461,7 +461,7 @@ impl RoomMessageBody {
 
     /// Create an edit action (public)
     pub fn edit(target: MessageId, new_title: String, new_text: String) -> Self {
-        use crate::room_state::content::{
+        use crate::board_state::content::{
             ActionContentV1, ACTION_CONTENT_VERSION, CONTENT_TYPE_ACTION,
         };
         let action = ActionContentV1::edit(target, new_title, new_text);
@@ -474,7 +474,7 @@ impl RoomMessageBody {
 
     /// Create a delete action (public)
     pub fn delete(target: MessageId) -> Self {
-        use crate::room_state::content::{
+        use crate::board_state::content::{
             ActionContentV1, ACTION_CONTENT_VERSION, CONTENT_TYPE_ACTION,
         };
         let action = ActionContentV1::delete(target);
@@ -487,7 +487,7 @@ impl RoomMessageBody {
 
     /// Create a reaction action (public)
     pub fn reaction(target: MessageId, emoji: String) -> Self {
-        use crate::room_state::content::{
+        use crate::board_state::content::{
             ActionContentV1, ACTION_CONTENT_VERSION, CONTENT_TYPE_ACTION,
         };
         let action = ActionContentV1::reaction(target, emoji);
@@ -500,7 +500,7 @@ impl RoomMessageBody {
 
     /// Create a remove reaction action (public)
     pub fn remove_reaction(target: MessageId, emoji: String) -> Self {
-        use crate::room_state::content::{
+        use crate::board_state::content::{
             ActionContentV1, ACTION_CONTENT_VERSION, CONTENT_TYPE_ACTION,
         };
         let action = ActionContentV1::remove_reaction(target, emoji);
@@ -519,7 +519,7 @@ impl RoomMessageBody {
         target_author_name: String,
         target_content_preview: String,
     ) -> Self {
-        use crate::room_state::content::{
+        use crate::board_state::content::{
             ReplyContentV1, CONTENT_TYPE_REPLY, REPLY_CONTENT_VERSION,
         };
         let reply = ReplyContentV1::new(
@@ -538,18 +538,18 @@ impl RoomMessageBody {
 
     /// Create a private action message (encrypted)
     ///
-    /// Use this for any action (edit, delete, reaction, remove_reaction) in a private room.
+    /// Use this for any action (edit, delete, reaction, remove_reaction) in a private board.
     /// The caller should:
     /// 1. Create the ActionContentV1 (e.g., `ActionContentV1::edit(target, new_text)`)
     /// 2. Encode it: `action.encode()`
-    /// 3. Encrypt the bytes with the room secret
+    /// 3. Encrypt the bytes with the board secret
     /// 4. Pass the ciphertext here
     pub fn private_action(
         ciphertext: Vec<u8>,
         nonce: [u8; 12],
         secret_version: SecretVersion,
     ) -> Self {
-        use crate::room_state::content::{ACTION_CONTENT_VERSION, CONTENT_TYPE_ACTION};
+        use crate::board_state::content::{ACTION_CONTENT_VERSION, CONTENT_TYPE_ACTION};
         Self::Private {
             content_type: CONTENT_TYPE_ACTION,
             content_version: ACTION_CONTENT_VERSION,
@@ -590,14 +590,14 @@ impl RoomMessageBody {
 
     /// Check if this is an action message (content_type = ACTION)
     pub fn is_action(&self) -> bool {
-        use crate::room_state::content::CONTENT_TYPE_ACTION;
+        use crate::board_state::content::CONTENT_TYPE_ACTION;
         self.content_type() == CONTENT_TYPE_ACTION
     }
 
     /// Decode the content (for public messages only)
     /// Returns None for private messages - decrypt first
-    pub fn decode_content(&self) -> Option<crate::room_state::content::DecodedContent> {
-        use crate::room_state::content::{
+    pub fn decode_content(&self) -> Option<crate::board_state::content::DecodedContent> {
+        use crate::board_state::content::{
             ActionContentV1, DecodedContent, ReplyContentV1, TextContentV1, CONTENT_TYPE_ACTION,
             CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
         };
@@ -623,7 +623,7 @@ impl RoomMessageBody {
 
     /// Get the target message ID if this is an action
     pub fn target_id(&self) -> Option<MessageId> {
-        use crate::room_state::content::{ActionContentV1, CONTENT_TYPE_ACTION};
+        use crate::board_state::content::{ActionContentV1, CONTENT_TYPE_ACTION};
         match self {
             Self::Public {
                 content_type, data, ..
@@ -681,7 +681,7 @@ impl RoomMessageBody {
     }
 }
 
-impl fmt::Display for RoomMessageBody {
+impl fmt::Display for BoardMessageBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_string_lossy())
     }
@@ -689,19 +689,19 @@ impl fmt::Display for RoomMessageBody {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct MessageV1 {
-    pub room_owner: MemberId,
+    pub board_owner: MemberId,
     pub author: MemberId,
     pub time: SystemTime,
-    pub content: RoomMessageBody,
+    pub content: BoardMessageBody,
 }
 
 impl Default for MessageV1 {
     fn default() -> Self {
         Self {
-            room_owner: MemberId(FastHash(0)),
+            board_owner: MemberId(FastHash(0)),
             author: MemberId(FastHash(0)),
             time: SystemTime::UNIX_EPOCH,
-            content: RoomMessageBody::public(String::new(), String::new()),
+            content: BoardMessageBody::public(String::new(), String::new()),
         }
     }
 }
@@ -768,10 +768,10 @@ mod tests {
 
     fn create_test_message(owner_id: MemberId, author_id: MemberId) -> MessageV1 {
         MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: author_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public(String::new(), "Test message".to_string()),
+            content: BoardMessageBody::public(String::new(), "Test message".to_string()),
         }
     }
 
@@ -815,7 +815,7 @@ mod tests {
 
         // Test with tampered message
         let mut tampered_message = authorized_message.clone();
-        tampered_message.message.content = RoomMessageBody::public(String::new(), "Tampered content".to_string());
+        tampered_message.message.content = BoardMessageBody::public(String::new(), "Tampered content".to_string());
         assert!(tampered_message.validate(&verifying_key).is_err());
     }
 
@@ -861,19 +861,19 @@ mod tests {
             ..Default::default()
         };
 
-        // Set up a parent room_state (ChatRoomState) with the author as a member
-        let mut parent_state = ChatRoomStateV1::default();
-        let author_member = crate::room_state::member::Member {
+        // Set up a parent board_state (ChatBoardState) with the author as a member
+        let mut parent_state = ChatBoardStateV1::default();
+        let author_member = crate::board_state::member::Member {
             owner_member_id: owner_id,
             invited_by: owner_id,
             member_vk: author_verifying_key,
         };
         let authorized_author =
-            crate::room_state::member::AuthorizedMember::new(author_member, &owner_signing_key);
+            crate::board_state::member::AuthorizedMember::new(author_member, &owner_signing_key);
         parent_state.members.members = vec![authorized_author];
 
         // Set up parameters for verification
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -925,8 +925,8 @@ mod tests {
             ..Default::default()
         };
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: signing_key.verifying_key(),
         };
 
@@ -964,8 +964,8 @@ mod tests {
             ..Default::default()
         };
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: signing_key.verifying_key(),
         };
 
@@ -1006,11 +1006,11 @@ mod tests {
         let author_verifying_key = author_signing_key.verifying_key();
         let author_id = MemberId::from(&author_verifying_key);
 
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.configuration.configuration.max_recent_messages = 3;
         parent_state.configuration.configuration.max_message_size = 100;
-        parent_state.members.members = vec![crate::room_state::member::AuthorizedMember {
-            member: crate::room_state::member::Member {
+        parent_state.members.members = vec![crate::board_state::member::AuthorizedMember {
+            member: crate::board_state::member::Member {
                 owner_member_id: owner_id,
                 invited_by: owner_id,
                 member_vk: author_verifying_key,
@@ -1018,17 +1018,17 @@ mod tests {
             signature: owner_signing_key.try_sign(&[0; 32]).unwrap(),
         }];
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
         // Create messages
         let create_message = |time: SystemTime| {
             let message = MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: author_id,
                 time,
-                content: RoomMessageBody::public(String::new(), "Test message".to_string()),
+                content: BoardMessageBody::public(String::new(), "Test message".to_string()),
             };
             AuthorizedMessageV1::new(message, &author_signing_key)
         };
@@ -1039,7 +1039,7 @@ mod tests {
         let message3 = create_message(now - Duration::from_secs(1));
         let message4 = create_message(now);
 
-        // Initial room_state with 2 messages
+        // Initial board_state with 2 messages
         let mut messages = MessagesV1 {
             messages: vec![message1.clone(), message2.clone()],
             ..Default::default()
@@ -1122,16 +1122,16 @@ mod tests {
 
         // Create messages from different users
         let msg1 = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: user1_id,
-            content: RoomMessageBody::public(String::new(), "Message from user1".to_string()),
+            content: BoardMessageBody::public(String::new(), "Message from user1".to_string()),
             time: SystemTime::now(),
         };
 
         let msg2 = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: user2_id,
-            content: RoomMessageBody::public(String::new(), "Message from user2".to_string()),
+            content: BoardMessageBody::public(String::new(), "Message from user2".to_string()),
             time: SystemTime::now() + Duration::from_secs(1),
         };
 
@@ -1186,20 +1186,20 @@ mod tests {
 
         // Create original message
         let original_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: author_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public(String::new(), "Original content".to_string()),
+            content: BoardMessageBody::public(String::new(), "Original content".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &signing_key);
         let original_id = auth_original.id();
 
         // Create edit action
         let edit_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: author_id,
             time: SystemTime::now() + Duration::from_secs(1),
-            content: RoomMessageBody::edit(original_id.clone(), "Edited content".to_string()),
+            content: BoardMessageBody::edit(original_id.clone(), "Edited content".to_string()),
         };
         let auth_edit = AuthorizedMessageV1::new(edit_msg, &signing_key);
 
@@ -1231,20 +1231,20 @@ mod tests {
 
         // Create message by owner
         let original_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public(String::new(), "Original content".to_string()),
+            content: BoardMessageBody::public(String::new(), "Original content".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &owner_sk);
         let original_id = auth_original.id();
 
         // Create edit action by OTHER user (should be ignored)
         let edit_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: other_id,
             time: SystemTime::now() + Duration::from_secs(1),
-            content: RoomMessageBody::edit(original_id.clone(), "Hacked content".to_string()),
+            content: BoardMessageBody::edit(original_id.clone(), "Hacked content".to_string()),
         };
         let auth_edit = AuthorizedMessageV1::new(edit_msg, &other_sk);
 
@@ -1268,20 +1268,20 @@ mod tests {
 
         // Create original message
         let original_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public(String::new(), "Will be deleted".to_string()),
+            content: BoardMessageBody::public(String::new(), "Will be deleted".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &signing_key);
         let original_id = auth_original.id();
 
         // Create delete action
         let delete_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now() + Duration::from_secs(1),
-            content: RoomMessageBody::delete(original_id.clone()),
+            content: BoardMessageBody::delete(original_id.clone()),
         };
         let auth_delete = AuthorizedMessageV1::new(delete_msg, &signing_key);
 
@@ -1311,29 +1311,29 @@ mod tests {
 
         // Create original message
         let original_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: user1_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public(String::new(), "React to me!".to_string()),
+            content: BoardMessageBody::public(String::new(), "React to me!".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &user1_sk);
         let original_id = auth_original.id();
 
         // Create reaction from user2
         let reaction_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: user2_id,
             time: SystemTime::now() + Duration::from_secs(1),
-            content: RoomMessageBody::reaction(original_id.clone(), "👍".to_string()),
+            content: BoardMessageBody::reaction(original_id.clone(), "👍".to_string()),
         };
         let auth_reaction = AuthorizedMessageV1::new(reaction_msg, &user2_sk);
 
         // Create another reaction from user1
         let reaction_msg2 = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: user1_id,
             time: SystemTime::now() + Duration::from_secs(2),
-            content: RoomMessageBody::reaction(original_id.clone(), "👍".to_string()),
+            content: BoardMessageBody::reaction(original_id.clone(), "👍".to_string()),
         };
         let auth_reaction2 = AuthorizedMessageV1::new(reaction_msg2, &user1_sk);
 
@@ -1359,29 +1359,29 @@ mod tests {
 
         // Create original message
         let original_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: user_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public(String::new(), "Test message".to_string()),
+            content: BoardMessageBody::public(String::new(), "Test message".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &user_sk);
         let original_id = auth_original.id();
 
         // Add reaction
         let reaction_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: user_id,
             time: SystemTime::now() + Duration::from_secs(1),
-            content: RoomMessageBody::reaction(original_id.clone(), "❤️".to_string()),
+            content: BoardMessageBody::reaction(original_id.clone(), "❤️".to_string()),
         };
         let auth_reaction = AuthorizedMessageV1::new(reaction_msg, &user_sk);
 
         // Remove reaction
         let remove_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: user_id,
             time: SystemTime::now() + Duration::from_secs(2),
-            content: RoomMessageBody::remove_reaction(original_id.clone(), "❤️".to_string()),
+            content: BoardMessageBody::remove_reaction(original_id.clone(), "❤️".to_string()),
         };
         let auth_remove = AuthorizedMessageV1::new(remove_msg, &user_sk);
 
@@ -1403,29 +1403,29 @@ mod tests {
 
         // Create original message
         let original_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public(String::new(), "Will be deleted".to_string()),
+            content: BoardMessageBody::public(String::new(), "Will be deleted".to_string()),
         };
         let auth_original = AuthorizedMessageV1::new(original_msg, &signing_key);
         let original_id = auth_original.id();
 
         // Delete it
         let delete_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now() + Duration::from_secs(1),
-            content: RoomMessageBody::delete(original_id.clone()),
+            content: BoardMessageBody::delete(original_id.clone()),
         };
         let auth_delete = AuthorizedMessageV1::new(delete_msg, &signing_key);
 
         // Try to edit deleted message (should be ignored)
         let edit_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now() + Duration::from_secs(2),
-            content: RoomMessageBody::edit(original_id.clone(), "Too late!".to_string()),
+            content: BoardMessageBody::edit(original_id.clone(), "Too late!".to_string()),
         };
         let auth_edit = AuthorizedMessageV1::new(edit_msg, &signing_key);
 
@@ -1448,29 +1448,29 @@ mod tests {
 
         // Create regular message
         let msg1 = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public(String::new(), "Hello".to_string()),
+            content: BoardMessageBody::public(String::new(), "Hello".to_string()),
         };
         let auth_msg1 = AuthorizedMessageV1::new(msg1, &signing_key);
         let msg1_id = auth_msg1.id();
 
         // Create reaction (action message)
         let reaction_msg = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now() + Duration::from_secs(1),
-            content: RoomMessageBody::reaction(msg1_id, "👍".to_string()),
+            content: BoardMessageBody::reaction(msg1_id, "👍".to_string()),
         };
         let auth_reaction = AuthorizedMessageV1::new(reaction_msg, &signing_key);
 
         // Create another regular message
         let msg2 = MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now() + Duration::from_secs(2),
-            content: RoomMessageBody::public(String::new(), "World".to_string()),
+            content: BoardMessageBody::public(String::new(), "World".to_string()),
         };
         let auth_msg2 = AuthorizedMessageV1::new(msg2, &signing_key);
 

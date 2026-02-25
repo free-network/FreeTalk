@@ -1,27 +1,27 @@
-use super::room_name_field::RoomNameField;
-use crate::components::app::chat_delegate::save_rooms_to_delegate;
-use crate::components::app::{CURRENT_ROOM, EDIT_ROOM_MODAL, NEEDS_SYNC, ROOMS};
+use super::board_name_field::BoardNameField;
+use crate::components::app::chat_delegate::save_boards_to_delegate;
+use crate::components::app::{CURRENT_BOARD, EDIT_BOARD_MODAL, NEEDS_SYNC, BOARDS};
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::FaRotate;
 use dioxus_free_icons::Icon;
 use freenet_scaffold::ComposableState;
-use river_core::room_state::configuration::{AuthorizedConfigurationV1, Configuration};
-use river_core::room_state::privacy::PrivacyMode;
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1Delta};
+use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
+use river_core::board_state::privacy::PrivacyMode;
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1Delta};
 use std::ops::Deref;
 
 #[component]
-pub fn EditRoomModal() -> Element {
+pub fn EditBoardModal() -> Element {
     // State for leave confirmation
     let mut show_leave_confirmation = use_signal(|| false);
 
-    // Memoize the room being edited
-    let editing_room = use_memo(move || {
-        EDIT_ROOM_MODAL.read().room.and_then(|editing_room_vk| {
-            ROOMS.read().map.iter().find_map(|(room_vk, room_data)| {
-                if &editing_room_vk == room_vk {
-                    Some(room_data.clone())
+    // Memoize the board being edited
+    let editing_board = use_memo(move || {
+        EDIT_BOARD_MODAL.read().board.and_then(|editing_board_vk| {
+            BOARDS.read().map.iter().find_map(|(board_vk, board_data)| {
+                if &editing_board_vk == board_vk {
+                    Some(board_data.clone())
                 } else {
                     None
                 }
@@ -29,25 +29,25 @@ pub fn EditRoomModal() -> Element {
         })
     });
 
-    // Memoize the room configuration
-    let room_config = use_memo(move || {
-        editing_room
+    // Memoize the board configuration
+    let board_config = use_memo(move || {
+        editing_board
             .read()
             .as_ref()
-            .map(|room_data| room_data.room_state.configuration.configuration.clone())
+            .map(|board_data| board_data.board_state.configuration.configuration.clone())
     });
 
-    // Memoize if the current user is the owner of the room being edited
+    // Memoize if the current user is the owner of the board being edited
     let user_is_owner = use_memo(move || {
-        editing_room.read().as_ref().is_some_and(|room_data| {
-            let user_vk = room_data.self_sk.verifying_key();
-            let room_vk = EDIT_ROOM_MODAL.read().room.unwrap();
-            user_vk == room_vk
+        editing_board.read().as_ref().is_some_and(|board_data| {
+            let user_vk = board_data.self_sk.verifying_key();
+            let board_vk = EDIT_BOARD_MODAL.read().board.unwrap();
+            user_vk == board_vk
         })
     });
 
-    // Render the modal if room configuration is available
-    if let Some(config) = room_config.clone().read().deref() {
+    // Render the modal if board configuration is available
+    if let Some(config) = board_config.clone().read().deref() {
         rsx! {
             // Modal backdrop
             div {
@@ -56,7 +56,7 @@ pub fn EditRoomModal() -> Element {
                 div {
                     class: "absolute inset-0 bg-black/50",
                     onclick: move |_| {
-                        EDIT_ROOM_MODAL.write().room = None;
+                        EDIT_BOARD_MODAL.write().board = None;
                     }
                 }
                 // Modal content
@@ -66,15 +66,15 @@ pub fn EditRoomModal() -> Element {
                         class: "p-6",
                         h1 { class: "text-xl font-semibold text-text mb-4", "Board Details" }
 
-                        RoomNameField {
+                        BoardNameField {
                             config: config.clone(),
                             is_owner: *user_is_owner.read()
                         }
 
                         // Member capacity
-                        if let Some(room_data) = editing_room.read().as_ref() {
+                        if let Some(board_data) = editing_board.read().as_ref() {
                             {
-                                let member_count = room_data.room_state.members.members.len();
+                                let member_count = board_data.board_state.members.members.len();
                                 let max_members = config.max_members;
                                 let is_full = member_count >= max_members;
                                 rsx! {
@@ -89,8 +89,8 @@ pub fn EditRoomModal() -> Element {
                             }
                         }
 
-                        // Read-only room info
-                        if let Some(room_data) = editing_room.read().as_ref() {
+                        // Read-only board info
+                        if let Some(board_data) = editing_board.read().as_ref() {
                             // Board Public Key
                             div {
                                 class: "mt-4",
@@ -104,7 +104,7 @@ pub fn EditRoomModal() -> Element {
                                     readonly: true,
                                     title: "Ed25519 public key (Curve25519 elliptic curve)",
                                     class: "w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-muted text-sm font-mono cursor-text select-all",
-                                    value: "{bs58::encode(room_data.owner_vk.as_bytes()).into_string()}"
+                                    value: "{bs58::encode(board_data.owner_vk.as_bytes()).into_string()}"
                                 }
                             }
                             // Contract ID
@@ -118,15 +118,15 @@ pub fn EditRoomModal() -> Element {
                                     r#type: "text",
                                     readonly: true,
                                     class: "w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-muted text-sm font-mono cursor-text select-all",
-                                    value: "{room_data.contract_key.id()}"
+                                    value: "{board_data.contract_key.id()}"
                                 }
                             }
 
-                            // Secret Version (only for private rooms)
+                            // Secret Version (only for private boards)
                             {
-                                let is_private = room_data.room_state.configuration.configuration.privacy_mode == PrivacyMode::Private;
-                                let is_owner = room_data.owner_vk == room_data.self_sk.verifying_key();
-                                let secret_version = room_data.room_state.secrets.current_version;
+                                let is_private = board_data.board_state.configuration.configuration.privacy_mode == PrivacyMode::Private;
+                                let is_owner = board_data.owner_vk == board_data.self_sk.verifying_key();
+                                let secret_version = board_data.board_state.secrets.current_version;
 
                                 if is_private {
                                     Some(rsx! {
@@ -149,28 +149,28 @@ pub fn EditRoomModal() -> Element {
                                                         Some(rsx! {
                                                             button {
                                                                 class: "px-3 py-2 bg-surface hover:bg-surface-hover border border-border rounded-lg text-text-muted hover:text-text transition-colors flex items-center gap-2",
-                                                                title: "Rotate room secret - generates a new encryption key for future messages",
+                                                                title: "Rotate board secret - generates a new encryption key for future messages",
                                                                 onclick: move |_| {
-                                                                    if let Some(current_room) = EDIT_ROOM_MODAL.read().room {
-                                                                        info!("Rotating secret for room");
-                                                                        ROOMS.with_mut(|rooms| {
-                                                                            if let Some(room_data) = rooms.map.get_mut(&current_room) {
-                                                                                match room_data.rotate_secret() {
+                                                                    if let Some(current_board) = EDIT_BOARD_MODAL.read().board {
+                                                                        info!("Rotating secret for board");
+                                                                        BOARDS.with_mut(|boards| {
+                                                                            if let Some(board_data) = boards.map.get_mut(&current_board) {
+                                                                                match board_data.rotate_secret() {
                                                                                     Ok(secrets_delta) => {
                                                                                         info!("Secret rotated successfully");
-                                                                                        let current_state = room_data.room_state.clone();
-                                                                                        let delta = ChatRoomStateV1Delta {
+                                                                                        let current_state = board_data.board_state.clone();
+                                                                                        let delta = ChatBoardStateV1Delta {
                                                                                             secrets: Some(secrets_delta),
                                                                                             ..Default::default()
                                                                                         };
-                                                                                        if let Err(e) = room_data.room_state.apply_delta(
+                                                                                        if let Err(e) = board_data.board_state.apply_delta(
                                                                                             &current_state,
-                                                                                            &ChatRoomParametersV1 { owner: current_room },
+                                                                                            &ChatBoardParametersV1 { owner: current_board },
                                                                                             &Some(delta),
                                                                                         ) {
                                                                                             error!("Failed to apply rotation delta: {}", e);
                                                                                         } else {
-                                                                                            NEEDS_SYNC.write().insert(current_room);
+                                                                                            NEEDS_SYNC.write().insert(current_board);
                                                                                         }
                                                                                     }
                                                                                     Err(e) => error!("Failed to rotate secret: {}", e),
@@ -203,9 +203,9 @@ pub fn EditRoomModal() -> Element {
                                 p {
                                     class: "text-yellow-400 mb-3",
                                     if *user_is_owner.read() {
-                                        "Warning: You are the owner of this room. Leaving will permanently delete it for you. Other members might retain access if they have the contract key, but coordination will be lost."
+                                        "Warning: You are the owner of this board. Leaving will permanently delete it for you. Other members might retain access if they have the contract key, but coordination will be lost."
                                     } else {
-                                        "Are you sure you want to leave this room? This action cannot be undone."
+                                        "Are you sure you want to leave this board? This action cannot be undone."
                                     }
                                 }
                                 div {
@@ -213,26 +213,26 @@ pub fn EditRoomModal() -> Element {
                                     button {
                                         class: "px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg transition-colors",
                                         onclick: move |_| {
-                                            // Read the room_vk first and drop the read borrow
-                                            let room_vk_to_remove = EDIT_ROOM_MODAL.read().room;
+                                            // Read the board_vk first and drop the read borrow
+                                            let board_vk_to_remove = EDIT_BOARD_MODAL.read().board;
 
-                                            if let Some(room_vk) = room_vk_to_remove {
+                                            if let Some(board_vk) = board_vk_to_remove {
                                                 // Perform writes *after* the read borrow is dropped
-                                                ROOMS.write().map.remove(&room_vk);
+                                                BOARDS.write().map.remove(&board_vk);
 
-                                                // Check and potentially clear CURRENT_ROOM
-                                                if CURRENT_ROOM.read().owner_key == Some(room_vk) {
-                                                    CURRENT_ROOM.write().owner_key = None;
+                                                // Check and potentially clear CURRENT_BOARD
+                                                if CURRENT_BOARD.read().owner_key == Some(board_vk) {
+                                                    CURRENT_BOARD.write().owner_key = None;
                                                 }
 
                                                 // Close the modal *last*
-                                                EDIT_ROOM_MODAL.write().room = None;
+                                                EDIT_BOARD_MODAL.write().board = None;
 
-                                                // Save updated rooms to delegate storage
+                                                // Save updated boards to delegate storage
                                                 info!("Board removed, saving to delegate");
                                                 spawn(async move {
-                                                    if let Err(e) = save_rooms_to_delegate().await {
-                                                        error!("Failed to save rooms after removal: {}", e);
+                                                    if let Err(e) = save_boards_to_delegate().await {
+                                                        error!("Failed to save boards after removal: {}", e);
                                                     }
                                                 });
                                             }
@@ -264,7 +264,7 @@ pub fn EditRoomModal() -> Element {
                     button {
                         class: "absolute top-3 right-3 p-1 text-text-muted hover:text-text transition-colors",
                         onclick: move |_| {
-                            EDIT_ROOM_MODAL.write().room = None;
+                            EDIT_BOARD_MODAL.write().board = None;
                         },
                         "✕"
                     }
@@ -302,19 +302,19 @@ fn MaxMembersField(
 
         info!("Updating max_members to {new_max}");
 
-        let owner_key = CURRENT_ROOM.read().owner_key.expect("No owner key");
+        let owner_key = CURRENT_BOARD.read().owner_key.expect("No owner key");
 
-        let signing_data = ROOMS.with(|rooms| {
-            rooms.map.get(&owner_key).map(|room_data| {
+        let signing_data = BOARDS.with(|boards| {
+            boards.map.get(&owner_key).map(|board_data| {
                 (
-                    room_data.room_key(),
-                    room_data.self_sk.clone(),
-                    room_data.room_state.clone(),
+                    board_data.board_key(),
+                    board_data.self_sk.clone(),
+                    board_data.board_state.clone(),
                 )
             })
         });
 
-        let Some((room_key, self_sk, room_state_clone)) = signing_data else {
+        let Some((board_key, self_sk, board_state_clone)) = signing_data else {
             return;
         };
 
@@ -330,22 +330,22 @@ fn MaxMembersField(
             }
 
             let signature =
-                crate::signing::sign_config_with_fallback(room_key, config_bytes, &self_sk).await;
+                crate::signing::sign_config_with_fallback(board_key, config_bytes, &self_sk).await;
 
             let new_authorized_config =
                 AuthorizedConfigurationV1::with_signature(new_config, signature);
 
-            let delta = ChatRoomStateV1Delta {
+            let delta = ChatBoardStateV1Delta {
                 configuration: Some(new_authorized_config),
                 ..Default::default()
             };
 
-            ROOMS.with_mut(|rooms| {
-                if let Some(room_data) = rooms.map.get_mut(&owner_key) {
+            BOARDS.with_mut(|boards| {
+                if let Some(board_data) = boards.map.get_mut(&owner_key) {
                     match ComposableState::apply_delta(
-                        &mut room_data.room_state,
-                        &room_state_clone,
-                        &ChatRoomParametersV1 { owner: owner_key },
+                        &mut board_data.board_state,
+                        &board_state_clone,
+                        &ChatBoardParametersV1 { owner: owner_key },
                         &Some(delta),
                     ) {
                         Ok(_) => {

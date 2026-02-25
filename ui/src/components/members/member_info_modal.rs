@@ -2,36 +2,36 @@ mod ban_button;
 mod invited_by_field;
 mod nickname_field;
 
-use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
+use crate::components::app::{CURRENT_BOARD, MEMBER_INFO_MODAL, BOARDS};
 use crate::components::members::member_info_modal::ban_button::BanButton;
 use crate::components::members::member_info_modal::invited_by_field::InvitedByField;
 use crate::components::members::member_info_modal::nickname_field::NicknameField;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::logger::tracing::*;
 use dioxus::prelude::*;
-use river_core::room_state::member::MemberId;
-use river_core::room_state::ChatRoomParametersV1;
+use river_core::board_state::member::MemberId;
+use river_core::board_state::ChatBoardParametersV1;
 
 #[component]
 pub fn MemberInfoModal() -> Element {
     // Memos
-    let current_room_data_signal = use_memo(move || {
-        CURRENT_ROOM
+    let current_board_data_signal = use_memo(move || {
+        CURRENT_BOARD
             .read()
             .owner_key
             .as_ref()
-            .and_then(|key| ROOMS.read().map.get(key).cloned())
+            .and_then(|key| BOARDS.read().map.get(key).cloned())
     });
     let self_member_id: Memo<Option<MemberId>> = use_memo(move || {
-        ROOMS
+        BOARDS
             .read()
             .map
-            .get(&CURRENT_ROOM.read().owner_key?)
+            .get(&CURRENT_BOARD.read().owner_key?)
             .map(|r| MemberId::from(&r.self_sk.verifying_key()))
     });
 
     // Memoized values
-    let owner_key_signal = use_memo(move || CURRENT_ROOM.read().owner_key);
+    let owner_key_signal = use_memo(move || CURRENT_BOARD.read().owner_key);
 
     // Effect to handle closing the modal based on a specific condition
 
@@ -45,8 +45,8 @@ pub fn MemberInfoModal() -> Element {
     };
 
     // Board state - create a longer-lived binding
-    let current_room_data = current_room_data_signal.read();
-    let room_state = match current_room_data.as_ref() {
+    let current_board_data = current_board_data_signal.read();
+    let board_state = match current_board_data.as_ref() {
         Some(state) => state,
         None => {
             return rsx! { div { "Board state not available" } };
@@ -54,8 +54,8 @@ pub fn MemberInfoModal() -> Element {
     };
 
     // Extract member info and members list
-    let member_info_list = &room_state.room_state.member_info.member_info;
-    let members_list = &room_state.room_state.members.members;
+    let member_info_list = &board_state.board_state.member_info.member_info;
+    let members_list = &board_state.board_state.members.members;
 
     let modal_content = if let Some(member_id) = MEMBER_INFO_MODAL.read().member {
         // Find the AuthorizedMemberInfo for the given member_id
@@ -78,7 +78,7 @@ pub fn MemberInfoModal() -> Element {
         // Try to find the AuthorizedMember for the given member_id
         let member = members_list.iter().find(|m| m.member.id() == member_id);
 
-        // Determine if the member is the room owner
+        // Determine if the member is the board owner
         let is_owner = owner_key_signal
             .as_ref()
             .is_some_and(|k| MemberId::from(&*k) == member_id);
@@ -89,7 +89,7 @@ pub fn MemberInfoModal() -> Element {
             return rsx! {
                 div {
                     class: "p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400",
-                    "Member not found in room members list"
+                    "Member not found in board members list"
                 }
             };
         }
@@ -98,9 +98,9 @@ pub fn MemberInfoModal() -> Element {
         let is_downstream = member
             .and_then(|m| {
                 owner_key_signal.as_ref().map(|owner| {
-                    let params = ChatRoomParametersV1 { owner: *owner };
+                    let params = ChatBoardParametersV1 { owner: *owner };
                     // Get the invite chain for this member
-                    let invite_chain = room_state.room_state.members.get_invite_chain(m, &params);
+                    let invite_chain = board_state.board_state.members.get_invite_chain(m, &params);
 
                     let self_member_id =
                         self_member_id().expect("Self member ID should be available");
@@ -108,7 +108,7 @@ pub fn MemberInfoModal() -> Element {
                     // 1. Current user is owner (owner can ban anyone), or
                     // 2. Current user appears in their invite chain (upstream of target)
                     invite_chain.is_ok_and(|chain| {
-                        self_member_id == CURRENT_ROOM.read().owner_id().unwrap()
+                        self_member_id == CURRENT_BOARD.read().owner_id().unwrap()
                             || chain.iter().any(|m| m.member.id() == self_member_id)
                     })
                 })
@@ -131,7 +131,7 @@ pub fn MemberInfoModal() -> Element {
                     .map(|mi| {
                         match unseal_bytes_with_secrets(
                             &mi.member_info.preferred_nickname,
-                            &room_state.secrets,
+                            &board_state.secrets,
                         ) {
                             Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                             Err(_) => mi.member_info.preferred_nickname.to_string_lossy(),
@@ -226,7 +226,7 @@ pub fn MemberInfoModal() -> Element {
                             // Check if member is downstream of current user
                             {
                                 let _current_user_id = {
-                                    current_room_data_signal.read().as_ref()
+                                    current_board_data_signal.read().as_ref()
                                         .map(|r| r.self_sk.verifying_key())
                                         .map(|k| MemberId::from(&k))
                                 };

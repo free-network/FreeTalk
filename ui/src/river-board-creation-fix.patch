@@ -1,0 +1,23 @@
+--- a/src/components/board_list/create_board_modal.rs
++++ b/src/components/board_list/create_board_modal.rs
+@@ -1,4 +1,5 @@
+-use crate::components::app::{create_board_modal, current_board, boards};
++use crate::components::app::{create_board_modal, current_board, boards, synchronizer};
++use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
+ use dioxus::prelude::*;
+ use ed25519_dalek::SigningKey;
+ 
+@@ -32,6 +33,13 @@ pub fn CreateBoardModal() -> Element {
+         create_board_modal.with_mut(|modal| {
+             modal.show = false;
+         });
++        
++        // Trigger synchronization to send PUT request to Freenet
++        let synchronizer = synchronizer.read();
++        let message_sender = synchronizer.get_message_sender();
++        if let Err(e) = message_sender.unbounded_send(SynchronizerMessage::Processboards) {
++            dioxus::logger::tracing::error!("Failed to send Processboards message: {}", e);
++        }
+     };
+ 
+     rsx! {

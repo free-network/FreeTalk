@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use identicon_rs::Identicon;
-use river_core::room_state::member::MemberId;
+use river_core::board_state::member::MemberId;
 
 /// Generate an avatar as a base64-encoded PNG data URL from a MemberId.
 /// The avatar is generated using the identicon-rs crate based on the member's ID bytes.

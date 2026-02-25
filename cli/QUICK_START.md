@@ -15,14 +15,14 @@ riverctl debug websocket
 
 ### 2. Create a Board
 ```bash
-riverctl room create --name "My Board" --nickname "YourName"
+riverctl board create --name "My Board" --nickname "YourName"
 ```
 
-This will output a room owner key (save this for later commands).
+This will output a board owner key (save this for later commands).
 
 ### 3. Create an Invitation
 ```bash
-riverctl invite create <room-owner-key>
+riverctl invite create <board-owner-key>
 ```
 
 This generates an invitation code to share.
@@ -34,11 +34,11 @@ riverctl invite accept <invitation-code>
 
 ### 5. Debug Commands
 ```bash
-# Show contract key for a room
-riverctl debug contract-key <room-owner-key>
+# Show contract key for a board
+riverctl debug contract-key <board-owner-key>
 
 # Perform raw GET operation
-riverctl debug contract-get <room-owner-key>
+riverctl debug contract-get <board-owner-key>
 ```
 
 ## Output Formats
@@ -60,5 +60,5 @@ riverctl -f json <command>
 
 Example:
 ```bash
-RUST_LOG=debug riverctl -d room create --name "Test" --nickname "User"
+RUST_LOG=debug riverctl -d board create --name "Test" --nickname "User"
 ```

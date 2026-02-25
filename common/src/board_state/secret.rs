@@ -1,8 +1,8 @@
-use crate::room_state::member::MemberId;
-use crate::room_state::privacy::{RoomCipherSpec, SecretVersion};
-use crate::room_state::ChatRoomParametersV1;
+use crate::board_state::member::MemberId;
+use crate::board_state::privacy::{BoardCipherSpec, SecretVersion};
+use crate::board_state::ChatBoardParametersV1;
 use crate::util::{sign_struct, verify_struct};
-use crate::ChatRoomStateV1;
+use crate::ChatBoardStateV1;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use freenet_scaffold::ComposableState;
 use serde::{Deserialize, Serialize};
@@ -11,17 +11,17 @@ use std::time::SystemTime;
 
 /// Board secrets state managing encrypted secret distribution
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
-pub struct RoomSecretsV1 {
+pub struct BoardSecretsV1 {
     pub current_version: SecretVersion,
     pub versions: Vec<AuthorizedSecretVersionRecord>,
     pub encrypted_secrets: Vec<AuthorizedEncryptedSecretForMember>,
 }
 
-impl ComposableState for RoomSecretsV1 {
-    type ParentState = ChatRoomStateV1;
+impl ComposableState for BoardSecretsV1 {
+    type ParentState = ChatBoardStateV1;
     type Summary = SecretsSummary;
     type Delta = SecretsDelta;
-    type Parameters = ChatRoomParametersV1;
+    type Parameters = ChatBoardParametersV1;
 
     fn verify(
         &self,
@@ -228,7 +228,7 @@ impl ComposableState for RoomSecretsV1 {
     }
 }
 
-/// Summary of room secrets state for delta calculation
+/// Summary of board secrets state for delta calculation
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SecretsSummary {
     pub current_version: SecretVersion,
@@ -236,7 +236,7 @@ pub struct SecretsSummary {
     pub member_secrets: HashSet<(SecretVersion, MemberId)>,
 }
 
-/// Delta for room secrets state
+/// Delta for board secrets state
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SecretsDelta {
     pub current_version: Option<SecretVersion>,
@@ -248,11 +248,11 @@ pub struct SecretsDelta {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct SecretVersionRecordV1 {
     pub version: SecretVersion,
-    pub cipher_spec: RoomCipherSpec,
+    pub cipher_spec: BoardCipherSpec,
     pub created_at: SystemTime,
 }
 
-/// Authorized secret version record signed by room owner
+/// Authorized secret version record signed by board owner
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct AuthorizedSecretVersionRecord {
     pub record: SecretVersionRecordV1,
@@ -294,7 +294,7 @@ pub struct EncryptedSecretForMemberV1 {
     pub provider: MemberId,
 }
 
-/// Authorized encrypted secret signed by room owner
+/// Authorized encrypted secret signed by board owner
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct AuthorizedEncryptedSecretForMember {
     pub secret: EncryptedSecretForMemberV1,
@@ -325,11 +325,11 @@ impl AuthorizedEncryptedSecretForMember {
     }
 }
 
-impl RoomSecretsV1 {
+impl BoardSecretsV1 {
     /// Check if all current members have encrypted blobs for the current version
     pub fn has_complete_distribution(
         &self,
-        members: &HashMap<MemberId, &crate::room_state::member::AuthorizedMember>,
+        members: &HashMap<MemberId, &crate::board_state::member::AuthorizedMember>,
     ) -> bool {
         if self.current_version == 0 {
             return true; // No secrets yet
@@ -351,16 +351,16 @@ impl RoomSecretsV1 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::room_state::member::{AuthorizedMember, Member};
+    use crate::board_state::member::{AuthorizedMember, Member};
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
 
-    fn create_test_state_and_params() -> (ChatRoomStateV1, ChatRoomParametersV1, SigningKey) {
+    fn create_test_state_and_params() -> (ChatBoardStateV1, ChatBoardParametersV1, SigningKey) {
         let owner_signing_key = SigningKey::generate(&mut OsRng);
         let owner_verifying_key = owner_signing_key.verifying_key();
 
-        let state = ChatRoomStateV1::default();
-        let params = ChatRoomParametersV1 {
+        let state = ChatBoardStateV1::default();
+        let params = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -373,7 +373,7 @@ mod tests {
     ) -> AuthorizedSecretVersionRecord {
         let record = SecretVersionRecordV1 {
             version,
-            cipher_spec: RoomCipherSpec::Aes256Gcm,
+            cipher_spec: BoardCipherSpec::Aes256Gcm,
             created_at: SystemTime::now(),
         };
         AuthorizedSecretVersionRecord::new(record, owner_sk)
@@ -396,8 +396,8 @@ mod tests {
     }
 
     #[test]
-    fn test_room_secrets_v1_default() {
-        let secrets = RoomSecretsV1::default();
+    fn test_board_secrets_v1_default() {
+        let secrets = BoardSecretsV1::default();
         assert_eq!(secrets.current_version, 0);
         assert!(secrets.versions.is_empty());
         assert!(secrets.encrypted_secrets.is_empty());
@@ -410,7 +410,7 @@ mod tests {
 
         let record = SecretVersionRecordV1 {
             version: 1,
-            cipher_spec: RoomCipherSpec::Aes256Gcm,
+            cipher_spec: BoardCipherSpec::Aes256Gcm,
             created_at: SystemTime::now(),
         };
 
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn test_verify_empty_state() {
         let (state, params, _) = create_test_state_and_params();
-        let secrets = RoomSecretsV1::default();
+        let secrets = BoardSecretsV1::default();
 
         assert!(secrets.verify(&state, &params).is_ok());
     }
@@ -472,7 +472,7 @@ mod tests {
         let (state, params, owner_sk) = create_test_state_and_params();
         let owner_id = params.owner_id();
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -489,7 +489,7 @@ mod tests {
         let (state, params, _owner_sk) = create_test_state_and_params();
         let wrong_sk = SigningKey::generate(&mut OsRng);
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -508,7 +508,7 @@ mod tests {
         let owner_id = params.owner_id();
         let wrong_sk = SigningKey::generate(&mut OsRng);
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -528,7 +528,7 @@ mod tests {
     fn test_verify_fails_with_mismatched_current_version() {
         let (state, params, owner_sk) = create_test_state_and_params();
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 2,
             ..Default::default()
         }; // Mismatch!
@@ -545,7 +545,7 @@ mod tests {
     fn test_verify_fails_with_nonzero_current_but_no_versions() {
         let (state, params, _) = create_test_state_and_params();
 
-        let secrets = RoomSecretsV1 {
+        let secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn test_summarize_empty_state() {
         let (state, params, _) = create_test_state_and_params();
-        let secrets = RoomSecretsV1::default();
+        let secrets = BoardSecretsV1::default();
 
         let summary = secrets.summarize(&state, &params);
         assert_eq!(summary.current_version, 0);
@@ -572,7 +572,7 @@ mod tests {
         let (state, params, owner_sk) = create_test_state_and_params();
         let owner_id = params.owner_id();
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 2,
             ..Default::default()
         };
@@ -598,7 +598,7 @@ mod tests {
     #[test]
     fn test_delta_no_changes() {
         let (state, params, _) = create_test_state_and_params();
-        let secrets = RoomSecretsV1::default();
+        let secrets = BoardSecretsV1::default();
         let summary = secrets.summarize(&state, &params);
 
         let delta = secrets.delta(&state, &params, &summary);
@@ -610,7 +610,7 @@ mod tests {
         let (state, params, owner_sk) = create_test_state_and_params();
         let owner_id = params.owner_id();
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -636,7 +636,7 @@ mod tests {
         let (state, params, owner_sk) = create_test_state_and_params();
         let owner_id = params.owner_id();
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 2,
             ..Default::default()
         };
@@ -670,7 +670,7 @@ mod tests {
         let (state, params, owner_sk) = create_test_state_and_params();
         let owner_id = params.owner_id();
 
-        let mut secrets = RoomSecretsV1::default();
+        let mut secrets = BoardSecretsV1::default();
 
         let delta = SecretsDelta {
             current_version: Some(1),
@@ -689,7 +689,7 @@ mod tests {
     fn test_apply_delta_rejects_duplicate_version() {
         let (state, params, owner_sk) = create_test_state_and_params();
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -711,7 +711,7 @@ mod tests {
         let (state, params, owner_sk) = create_test_state_and_params();
         let fake_member_id = MemberId::from(&SigningKey::generate(&mut OsRng).verifying_key());
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -745,7 +745,7 @@ mod tests {
         let (state, params, owner_sk) = create_test_state_and_params();
         let owner_id = params.owner_id();
 
-        let mut secrets = RoomSecretsV1::default();
+        let mut secrets = BoardSecretsV1::default();
 
         let delta = SecretsDelta {
             current_version: None,
@@ -763,7 +763,7 @@ mod tests {
         let (state, params, owner_sk) = create_test_state_and_params();
         let owner_id = params.owner_id();
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -787,7 +787,7 @@ mod tests {
     fn test_apply_delta_rejects_invalid_version_transition() {
         let (state, params, owner_sk) = create_test_state_and_params();
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 2,
             ..Default::default()
         };
@@ -811,7 +811,7 @@ mod tests {
     fn test_apply_delta_rejects_nonexistent_current_version() {
         let (state, params, _owner_sk) = create_test_state_and_params();
 
-        let mut secrets = RoomSecretsV1::default();
+        let mut secrets = BoardSecretsV1::default();
 
         let delta = SecretsDelta {
             current_version: Some(99), // Version 99 doesn't exist!
@@ -843,7 +843,7 @@ mod tests {
         state.members.members.push(auth_member);
 
         // Set up secrets with both owner and member
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -877,7 +877,7 @@ mod tests {
 
     #[test]
     fn test_has_complete_distribution_empty() {
-        let secrets = RoomSecretsV1::default();
+        let secrets = BoardSecretsV1::default();
         let members = HashMap::new();
 
         assert!(secrets.has_complete_distribution(&members));
@@ -888,7 +888,7 @@ mod tests {
         let (_state, params, owner_sk) = create_test_state_and_params();
         let owner_id = params.owner_id();
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -919,7 +919,7 @@ mod tests {
         let member_vk = member_sk.verifying_key();
         let member_id = MemberId::from(&member_vk);
 
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };
@@ -964,7 +964,7 @@ mod tests {
         state.members.members.push(auth_member);
 
         // Set up initial secrets with version 1
-        let mut secrets = RoomSecretsV1 {
+        let mut secrets = BoardSecretsV1 {
             current_version: 1,
             ..Default::default()
         };

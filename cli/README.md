@@ -1,10 +1,10 @@
 # River CLI
 
-Command-line interface for River decentralized chat on Freenet. This tool allows you to interact with River chat rooms without using the web interface, making it ideal for automation, testing, and server deployments.
+Command-line interface for River decentralized chat on Freenet. This tool allows you to interact with River chat boards without using the web interface, making it ideal for automation, testing, and server deployments.
 
 ## Features
 
-- Create and manage chat rooms
+- Create and manage chat boards
 - Generate and accept invitations
 - Debug contract operations
 - Support for both human-readable and JSON output
@@ -27,7 +27,7 @@ See [QUICK_START.md](QUICK_START.md) for basic usage examples and getting starte
 
 The integration test at `tests/message_flow.rs` uses the `freenet-test-network`
 crate to launch a local Freenet gateway plus two peers, then drives the River CLI
-to create a room, exchange invitations, and send messages between two users.
+to create a board, exchange invitations, and send messages between two users.
 
 Run it manually (it is ignored by default) from `river/main/cli`:
 
@@ -44,7 +44,7 @@ Prerequisites:
 Expect the test to fail today with the current contract serialization bug; it
 exists to reproduce and debug the issue.
 
-> **Heads up:** When you change the room contract or shared River types, rebuild
+> **Heads up:** When you change the board contract or shared River types, rebuild
 > the WASM and refresh the bundled copy with `cargo make sync-cli-wasm`. The CLI
 > build now double-checks and will panic if the bundled file drifts from the most
 > recently built artifact.
@@ -59,11 +59,11 @@ exists to reproduce and debug the issue.
 The CLI uses core components from the River ecosystem:
 - `river-core` - Core protocol and data structures
 - `freenet-stdlib` - WebSocket client for Freenet communication
-- Pre-built room contract WASM included in the package
+- Pre-built board contract WASM included in the package
 
 ## Commands
 
-- `riverctl room` - Board management (create, list, info)
+- `riverctl board` - Board management (create, list, info)
 - `riverctl invite` - Invitation handling (create, accept)
 - `riverctl debug` - Debugging tools for contract operations
 - `riverctl message` - Messaging (coming soon)

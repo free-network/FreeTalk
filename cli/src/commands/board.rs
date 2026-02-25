@@ -5,42 +5,42 @@ use clap::Subcommand;
 use colored::Colorize;
 
 #[derive(Subcommand)]
-pub enum RoomCommands {
-    /// Create a new room
+pub enum BoardCommands {
+    /// Create a new board
     Create {
         /// Board name
         #[arg(short, long)]
         name: String,
 
-        /// Your nickname in the room
+        /// Your nickname in the board
         #[arg(short = 'N', long)]
         nickname: Option<String>,
     },
-    /// List all rooms
+    /// List all boards
     List,
-    /// Join a room
+    /// Join a board
     Join {
         /// Board ID
-        room_id: String,
+        board_id: String,
     },
-    /// Leave a room
+    /// Leave a board
     Leave {
         /// Board ID
-        room_id: String,
+        board_id: String,
     },
-    /// Republish a room to the network
+    /// Republish a board to the network
     ///
-    /// Re-PUTs the room contract with its current state, making this node
-    /// seed it again. Use when the room exists locally but isn't being
+    /// Re-PUTs the board contract with its current state, making this node
+    /// seed it again. Use when the board exists locally but isn't being
     /// served on the network.
     Republish {
         /// Board owner key (base58)
-        room_id: String,
+        board_id: String,
     },
-    /// Update room configuration (owner only)
+    /// Update board configuration (owner only)
     Config {
         /// Board owner key (base58)
-        room_id: String,
+        board_id: String,
 
         /// Set maximum number of user bans remembered
         #[arg(long)]
@@ -56,9 +56,9 @@ pub enum RoomCommands {
     },
 }
 
-pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat) -> Result<()> {
+pub async fn execute(command: BoardCommands, api: ApiClient, format: OutputFormat) -> Result<()> {
     match command {
-        RoomCommands::Create { name, nickname } => {
+        BoardCommands::Create { name, nickname } => {
             // Ask for nickname if not provided
             let nickname = match nickname {
                 Some(n) => n,
@@ -75,13 +75,13 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
             };
 
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Creating room '{}' with nickname '{}'...", name, nickname);
+                eprintln!("Creating board '{}' with nickname '{}'...", name, nickname);
             }
 
-            match api.create_room(name.clone(), nickname).await {
+            match api.create_board(name.clone(), nickname).await {
                 Ok((owner_key, contract_key)) => {
-                    let result = CreateRoomResult {
-                        room_name: name,
+                    let result = CreateBoardResult {
+                        board_name: name,
                         owner_key: bs58::encode(owner_key.as_bytes()).into_string(),
                         contract_key: contract_key.id().to_string(),
                     };
@@ -106,17 +106,17 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                 }
             }
         }
-        RoomCommands::List => {
+        BoardCommands::List => {
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Listing rooms...");
+                eprintln!("Listing boards...");
             }
 
-            match api.list_rooms().await {
-                Ok(rooms) => {
-                    if rooms.is_empty() {
+            match api.list_boards().await {
+                Ok(boards) => {
+                    if boards.is_empty() {
                         match format {
                             OutputFormat::Human => {
-                                println!("No rooms found. Use 'riverctl room create' to create a new room.");
+                                println!("No boards found. Use 'riverctl board create' to create a new board.");
                             }
                             OutputFormat::Json => {
                                 println!("[]");
@@ -125,8 +125,8 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                     } else {
                         match format {
                             OutputFormat::Human => {
-                                println!("\n{} room(s) found:\n", rooms.len());
-                                for (owner_key, name, contract_key) in rooms {
+                                println!("\n{} board(s) found:\n", boards.len());
+                                for (owner_key, name, contract_key) in boards {
                                     println!("Board: {}", name.green());
                                     println!("  Owner key: {}", owner_key);
                                     println!("  Contract key: {}", contract_key);
@@ -134,7 +134,7 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                                 }
                             }
                             OutputFormat::Json => {
-                                let json_rooms: Vec<_> = rooms
+                                let json_boards: Vec<_> = boards
                                     .into_iter()
                                     .map(|(owner_key, name, contract_key)| {
                                         serde_json::json!({
@@ -144,7 +144,7 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                                         })
                                     })
                                     .collect();
-                                println!("{}", serde_json::to_string_pretty(&json_rooms)?);
+                                println!("{}", serde_json::to_string_pretty(&json_boards)?);
                             }
                         }
                     }
@@ -156,41 +156,41 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                 }
             }
         }
-        RoomCommands::Join { room_id } => {
+        BoardCommands::Join { board_id } => {
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Joining room: {}", room_id);
-                eprintln!("To join a room, you need an invitation. Use 'riverctl invite accept <invitation-code>'");
+                eprintln!("Joining board: {}", board_id);
+                eprintln!("To join a board, you need an invitation. Use 'riverctl invite accept <invitation-code>'");
             }
             Ok(())
         }
-        RoomCommands::Leave { room_id } => {
+        BoardCommands::Leave { board_id } => {
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Leaving room: {}", room_id);
+                eprintln!("Leaving board: {}", board_id);
             }
-            // TODO: Implement room leaving
+            // TODO: Implement board leaving
             Ok(())
         }
-        RoomCommands::Config {
-            room_id,
+        BoardCommands::Config {
+            board_id,
             max_bans,
             max_messages,
             max_members,
         } => {
             if max_bans.is_none() && max_messages.is_none() && max_members.is_none() {
                 // No changes requested, just show current config
-                let owner_bytes = bs58::decode(&room_id)
+                let owner_bytes = bs58::decode(&board_id)
                     .into_vec()
-                    .map_err(|e| anyhow::anyhow!("Invalid room ID: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Invalid board ID: {}", e))?;
                 let owner_key = ed25519_dalek::VerifyingKey::from_bytes(
                     owner_bytes
                         .as_slice()
                         .try_into()
-                        .map_err(|_| anyhow::anyhow!("Invalid room ID length"))?,
+                        .map_err(|_| anyhow::anyhow!("Invalid board ID length"))?,
                 )
-                .map_err(|e| anyhow::anyhow!("Invalid room owner key: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Invalid board owner key: {}", e))?;
 
-                let room_state = api.get_room(&owner_key, false).await?;
-                let cfg = &room_state.configuration.configuration;
+                let board_state = api.get_board(&owner_key, false).await?;
+                let cfg = &board_state.configuration.configuration;
                 println!("Current configuration:");
                 println!("  max_user_bans: {}", cfg.max_user_bans);
                 println!("  max_recent_messages: {}", cfg.max_recent_messages);
@@ -198,19 +198,19 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                 return Ok(());
             }
 
-            let owner_bytes = bs58::decode(&room_id)
+            let owner_bytes = bs58::decode(&board_id)
                 .into_vec()
-                .map_err(|e| anyhow::anyhow!("Invalid room ID: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Invalid board ID: {}", e))?;
             let owner_key = ed25519_dalek::VerifyingKey::from_bytes(
                 owner_bytes
                     .as_slice()
                     .try_into()
-                    .map_err(|_| anyhow::anyhow!("Invalid room ID length"))?,
+                    .map_err(|_| anyhow::anyhow!("Invalid board ID length"))?,
             )
-            .map_err(|e| anyhow::anyhow!("Invalid room owner key: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid board owner key: {}", e))?;
 
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Updating room configuration...");
+                eprintln!("Updating board configuration...");
             }
 
             match api
@@ -246,7 +246,7 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                                 "{}",
                                 serde_json::json!({
                                     "status": "success",
-                                    "room_id": room_id,
+                                    "board_id": board_id,
                                 })
                             );
                         }
@@ -259,36 +259,36 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
                 }
             }
         }
-        RoomCommands::Republish { room_id } => {
-            // Parse the room owner key
-            let owner_bytes = bs58::decode(&room_id)
+        BoardCommands::Republish { board_id } => {
+            // Parse the board owner key
+            let owner_bytes = bs58::decode(&board_id)
                 .into_vec()
-                .map_err(|e| anyhow::anyhow!("Invalid room ID: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Invalid board ID: {}", e))?;
             let owner_key = ed25519_dalek::VerifyingKey::from_bytes(
                 owner_bytes
                     .as_slice()
                     .try_into()
-                    .map_err(|_| anyhow::anyhow!("Invalid room ID length"))?,
+                    .map_err(|_| anyhow::anyhow!("Invalid board ID length"))?,
             )
-            .map_err(|e| anyhow::anyhow!("Invalid room owner key: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid board owner key: {}", e))?;
 
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Republishing room: {}", room_id);
+                eprintln!("Republishing board: {}", board_id);
             }
 
-            match api.republish_room(&owner_key).await {
+            match api.republish_board(&owner_key).await {
                 Ok(()) => {
                     match format {
                         OutputFormat::Human => {
                             println!("{}", "Board republished successfully!".green());
-                            println!("The room contract is now being seeded on the network.");
+                            println!("The board contract is now being seeded on the network.");
                         }
                         OutputFormat::Json => {
                             println!(
                                 "{}",
                                 serde_json::json!({
                                     "status": "success",
-                                    "room_id": room_id,
+                                    "board_id": board_id,
                                 })
                             );
                         }
@@ -305,8 +305,8 @@ pub async fn execute(command: RoomCommands, api: ApiClient, format: OutputFormat
 }
 
 #[derive(serde::Serialize)]
-struct CreateRoomResult {
-    room_name: String,
+struct CreateBoardResult {
+    board_name: String,
     owner_key: String,
     contract_key: String,
 }

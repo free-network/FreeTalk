@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 
 use riverctl::{
     api,
-    commands::{debug, invite, member, message, room},
+    commands::{debug, invite, member, message, board},
     config, output,
 };
 
@@ -32,7 +32,7 @@ struct Cli {
     )]
     node_url: String,
 
-    /// Configuration directory for storing room data
+    /// Configuration directory for storing board data
     #[arg(long, global = true)]
     config_dir: Option<String>,
 
@@ -50,7 +50,7 @@ enum Commands {
     /// Board management commands
     Board {
         #[command(subcommand)]
-        command: room::RoomCommands,
+        command: board::BoardCommands,
     },
     /// Message commands
     Message {
@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Commands::Board { command } => room::execute(command, api_client, cli.format).await?,
+        Commands::Board { command } => board::execute(command, api_client, cli.format).await?,
         Commands::Message { command } => message::execute(command, api_client, cli.format).await?,
         Commands::Member { command } => member::execute(command, api_client, cli.format).await?,
         Commands::Invite { command } => invite::execute(command, api_client, cli.format).await?,

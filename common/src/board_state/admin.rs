@@ -1,7 +1,7 @@
-use crate::room_state::ban::BansV1;
-use crate::room_state::ChatRoomParametersV1;
+use crate::board_state::ban::BansV1;
+use crate::board_state::ChatBoardParametersV1;
 use crate::util::{sign_struct, truncated_base32, verify_struct};
-use crate::ChatRoomStateV1;
+use crate::ChatBoardStateV1;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use freenet_scaffold::util::{fast_hash, FastHash};
 use freenet_scaffold::ComposableState;
@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
-use crate::room_state::member::MemberId;
+use crate::board_state::member::MemberId;
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Clone, Debug, Default)]
 pub struct AdminsV1 {
@@ -18,10 +18,10 @@ pub struct AdminsV1 {
 }
 
 impl ComposableState for AdminsV1 {
-    type ParentState = ChatRoomStateV1;
+    type ParentState = ChatBoardStateV1;
     type Summary = HashSet<MemberId>;
     type Delta = AdminsDelta;
-    type Parameters = ChatRoomParametersV1;
+    type Parameters = ChatBoardParametersV1;
 
     fn verify(
         &self,
@@ -142,12 +142,12 @@ impl AdminsV1 {
     }
 
     /* /// Checks if there are any banned admins or admins downstream of banned admins in the invite chain
-    pub fn has_banned_admins(&self, bans_v1: &BansV1, parameters: &ChatRoomParametersV1) -> bool {
+    pub fn has_banned_admins(&self, bans_v1: &BansV1, parameters: &ChatBoardParametersV1) -> bool {
         self.check_banned_admins(bans_v1, parameters).is_some()
     }
 
     /// Removes banned admins or admins downstream of banned admins in the invite chain
-    fn remove_banned_admins(&mut self, bans_v1: &BansV1, _parameters: &ChatRoomParametersV1) {
+    fn remove_banned_admins(&mut self, bans_v1: &BansV1, _parameters: &ChatBoardParametersV1) {
         let mut banned_ids = HashSet::new();
         for ban in &bans_v1.0 {
             banned_ids.insert(ban.ban.banned_user);
@@ -163,7 +163,7 @@ impl AdminsV1 {
     fn check_banned_admins(
         &self,
         bans_v1: &BansV1,
-        parameters: &ChatRoomParametersV1,
+        parameters: &ChatBoardParametersV1,
     ) -> Option<HashSet<MemberId>> {
         let banned_user_ids: HashSet<MemberId> =
             bans_v1.0.iter().map(|b| b.ban.banned_user).collect();

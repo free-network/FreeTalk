@@ -15,7 +15,7 @@ All notable changes to riverctl will be documented in this file.
 - Fixed architectural issue with GET operations using `subscribe: true`
   - GET operations now use `subscribe: false` followed by separate SUBSCRIBE operations
   - This fixes compatibility with Freenet's current architecture
-  - Both `get_room()` and `accept_invitation()` methods updated
+  - Both `get_board()` and `accept_invitation()` methods updated
 - This fix enables multi-user messaging to work properly
 
 ### Technical Details
@@ -29,7 +29,7 @@ All notable changes to riverctl will be documented in this file.
   - Board state is now properly initialized when accepting invitations
   - Invited users are correctly added to the members list
   - Member info with nickname is properly created
-- Added validation to ensure room state initialization is correct
+- Added validation to ensure board state initialization is correct
 
 ### Added
 - Comprehensive unit tests for invitation flow

@@ -7,17 +7,17 @@ use ed25519_dalek::VerifyingKey;
 
 #[derive(Subcommand)]
 pub enum InviteCommands {
-    /// Create an invitation for a room
+    /// Create an invitation for a board
     Create {
         /// Board owner key (base58 encoded)
-        room_owner_key: String,
+        board_owner_key: String,
     },
     /// Accept an invitation
     Accept {
         /// Invitation code
         invitation_code: String,
 
-        /// Your nickname in the room
+        /// Your nickname in the board
         #[arg(short = 'N', long)]
         nickname: Option<String>,
     },
@@ -25,15 +25,15 @@ pub enum InviteCommands {
 
 pub async fn execute(command: InviteCommands, api: ApiClient, format: OutputFormat) -> Result<()> {
     match command {
-        InviteCommands::Create { room_owner_key } => {
-            // Decode the room owner key from base58
-            let decoded = bs58::decode(&room_owner_key)
+        InviteCommands::Create { board_owner_key } => {
+            // Decode the board owner key from base58
+            let decoded = bs58::decode(&board_owner_key)
                 .into_vec()
-                .map_err(|e| anyhow!("Failed to decode room owner key: {}", e))?;
+                .map_err(|e| anyhow!("Failed to decode board owner key: {}", e))?;
 
             if decoded.len() != 32 {
                 return Err(anyhow!(
-                    "Invalid room owner key length: expected 32 bytes, got {}",
+                    "Invalid board owner key length: expected 32 bytes, got {}",
                     decoded.len()
                 ));
             }
@@ -44,7 +44,7 @@ pub async fn execute(command: InviteCommands, api: ApiClient, format: OutputForm
                 .map_err(|e| anyhow!("Invalid verifying key: {}", e))?;
 
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Creating invitation for room owned by: {}", room_owner_key);
+                eprintln!("Creating invitation for board owned by: {}", board_owner_key);
             }
 
             match api.create_invitation(&owner_vk).await {
@@ -54,7 +54,7 @@ pub async fn execute(command: InviteCommands, api: ApiClient, format: OutputForm
                             println!("{}", "Invitation created successfully!".green());
                             println!("\nInvitation code:");
                             println!("{}", invitation_code.bright_yellow());
-                            println!("\nShare this code with someone to invite them to the room.");
+                            println!("\nShare this code with someone to invite them to the board.");
                             println!("They can accept it with:");
                             println!("  riverctl invite accept {}", invitation_code);
                         }
@@ -97,8 +97,8 @@ pub async fn execute(command: InviteCommands, api: ApiClient, format: OutputForm
             }
 
             match api.accept_invitation(&invitation_code, &nickname).await {
-                Ok((room_owner_vk, contract_key)) => {
-                    let owner_key_str = bs58::encode(room_owner_vk.as_bytes()).into_string();
+                Ok((board_owner_vk, contract_key)) => {
+                    let owner_key_str = bs58::encode(board_owner_vk.as_bytes()).into_string();
 
                     match format {
                         OutputFormat::Human => {
@@ -114,7 +114,7 @@ pub async fn execute(command: InviteCommands, api: ApiClient, format: OutputForm
                         }
                         OutputFormat::Json => {
                             println!(
-                                r#"{{"status": "success", "room_owner_key": "{}", "contract_key": "{}"}}"#,
+                                r#"{{"status": "success", "board_owner_key": "{}", "contract_key": "{}"}}"#,
                                 owner_key_str,
                                 contract_key.id()
                             );

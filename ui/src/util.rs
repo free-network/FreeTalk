@@ -8,7 +8,7 @@ pub mod messaging;
 
 use ed25519_dalek::VerifyingKey;
 use freenet_stdlib::prelude::{ContractCode, ContractKey, Parameters};
-use river_core::room_state::member::MemberId;
+use river_core::board_state::member::MemberId;
 use std::time::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -126,8 +126,8 @@ mod name_gen;
 #[cfg(feature = "example-data")]
 pub use name_gen::random_full_name;
 
-use crate::constants::ROOM_CONTRACT_WASM;
-use river_core::room_state::ChatRoomParametersV1;
+use crate::constants::BOARD_CONTRACT_WASM;
+use river_core::board_state::ChatBoardParametersV1;
 
 pub fn to_cbor_vec<T: serde::Serialize>(value: &T) -> Vec<u8> {
     let mut buffer = Vec::new();
@@ -140,10 +140,10 @@ pub fn from_cbor_slice<T: serde::de::DeserializeOwned>(data: &[u8]) -> T {
 }
 
 pub fn owner_vk_to_contract_key(owner_vk: &VerifyingKey) -> ContractKey {
-    let params = ChatRoomParametersV1 { owner: *owner_vk };
+    let params = ChatBoardParametersV1 { owner: *owner_vk };
     let params_bytes = to_cbor_vec(&params);
     let parameters = Parameters::from(params_bytes);
-    let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+    let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
     // Use the full ContractKey constructor that includes the code hash
     ContractKey::from_params_and_code(parameters, &contract_code)
 }

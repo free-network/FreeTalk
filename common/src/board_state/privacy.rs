@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Version identifier for room secrets
+/// Version identifier for board secrets
 pub type SecretVersion = u32;
 
-/// Privacy mode for a chat room
+/// Privacy mode for a chat board
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub enum PrivacyMode {
     /// Board content is visible to all network participants
@@ -14,9 +14,9 @@ pub enum PrivacyMode {
     Private,
 }
 
-/// Cipher specification for encrypted room content
+/// Cipher specification for encrypted board content
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub enum RoomCipherSpec {
+pub enum BoardCipherSpec {
     /// AES-256-GCM with 12-byte nonce
     Aes256Gcm,
 }
@@ -24,7 +24,7 @@ pub enum RoomCipherSpec {
 /// A value that may be public or encrypted
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub enum SealedBytes {
-    /// Plaintext value (only for public rooms)
+    /// Plaintext value (only for public boards)
     Public { value: Vec<u8> },
     /// Encrypted value with metadata
     Private {
@@ -117,14 +117,14 @@ impl fmt::Display for SealedBytes {
     }
 }
 
-/// Display metadata for a room (name and optional description)
+/// Display metadata for a board (name and optional description)
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub struct RoomDisplayMetadata {
+pub struct BoardDisplayMetadata {
     pub name: SealedBytes,
     pub description: Option<SealedBytes>,
 }
 
-impl RoomDisplayMetadata {
+impl BoardDisplayMetadata {
     /// Create public display metadata
     pub fn public(name: String, description: Option<String>) -> Self {
         Self {
@@ -165,7 +165,7 @@ impl RoomDisplayMetadata {
     }
 }
 
-impl Default for RoomDisplayMetadata {
+impl Default for BoardDisplayMetadata {
     fn default() -> Self {
         Self::public("Default Board Name".to_string(), None)
     }

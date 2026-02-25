@@ -6,15 +6,15 @@
 //! - Board is not currently active
 //! - Permission has been granted
 
-use crate::components::app::{CURRENT_ROOM, ROOMS};
-use crate::room_data::CurrentRoom;
+use crate::components::app::{CURRENT_BOARD, BOARDS};
+use crate::board_data::CurrentBoard;
 use crate::util::ecies::{decrypt_with_symmetric_key, unseal_bytes_with_secrets};
 use dioxus::logger::tracing::{debug, info, warn};
 use dioxus::prelude::*;
 use ed25519_dalek::VerifyingKey;
-use river_core::room_state::member::MemberId;
-use river_core::room_state::member_info::MemberInfoV1;
-use river_core::room_state::message::{AuthorizedMessageV1, RoomMessageBody};
+use river_core::board_state::member::MemberId;
+use river_core::board_state::member_info::MemberInfoV1;
+use river_core::board_state::message::{AuthorizedMessageV1, BoardMessageBody};
 use std::collections::HashSet;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -76,7 +76,7 @@ pub fn river_test_notification() {
     }
 }
 
-/// Tracks which rooms have completed initial sync (don't notify for initial message load)
+/// Tracks which boards have completed initial sync (don't notify for initial message load)
 pub static INITIAL_SYNC_COMPLETE: GlobalSignal<HashSet<VerifyingKey>> = Global::new(HashSet::new);
 
 /// Check if the document is currently visible and focused
@@ -182,24 +182,24 @@ pub fn request_permission_on_first_message() {
     });
 }
 
-/// Show a notification for new messages in a room
+/// Show a notification for new messages in a board
 ///
 /// # Arguments
-/// * `room_key` - The room's owner verifying key
-/// * `room_name` - Display name of the room
+/// * `board_key` - The board's owner verifying key
+/// * `board_name` - Display name of the board
 /// * `sender_name` - Name of the message sender
 /// * `message_preview` - Truncated message content
 pub fn show_notification(
-    room_key: VerifyingKey,
-    room_name: &str,
+    board_key: VerifyingKey,
+    board_name: &str,
     sender_name: &str,
     message_preview: &str,
 ) {
     // Check permission
     let permission = get_permission();
     info!(
-        "show_notification called for room '{}', permission: {:?}",
-        room_name, permission
+        "show_notification called for board '{}', permission: {:?}",
+        board_name, permission
     );
 
     if permission == NotificationPermission::Denied {
@@ -209,57 +209,57 @@ pub fn show_notification(
 
     // If permission is default (not yet asked), request it first
     if permission == NotificationPermission::Default {
-        let room_name = room_name.to_string();
+        let board_name = board_name.to_string();
         let sender_name = sender_name.to_string();
         let message_preview = message_preview.to_string();
         wasm_bindgen_futures::spawn_local(async move {
             let granted = request_permission().await;
             if granted {
                 // Try again after permission granted
-                create_notification_internal(room_key, &room_name, &sender_name, &message_preview);
+                create_notification_internal(board_key, &board_name, &sender_name, &message_preview);
             }
         });
         return;
     }
 
     // Permission is granted, show notification
-    create_notification_internal(room_key, room_name, sender_name, message_preview);
+    create_notification_internal(board_key, board_name, sender_name, message_preview);
 }
 
 fn create_notification_internal(
-    room_key: VerifyingKey,
-    room_name: &str,
+    board_key: VerifyingKey,
+    board_name: &str,
     sender_name: &str,
     message_preview: &str,
 ) {
     let body = format!("{}: {}", sender_name, message_preview);
     info!(
         "Creating notification - title: '{}', body: '{}'",
-        room_name, body
+        board_name, body
     );
 
     // Log to browser console for debugging
-    let console_msg = format!("[River] Creating notification: {} - {}", room_name, body);
+    let console_msg = format!("[River] Creating notification: {} - {}", board_name, body);
     web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&console_msg));
 
     let options = NotificationOptions::new();
     options.set_body(&body);
     // Could add icon here: options.icon("/assets/river_logo.svg");
 
-    match Notification::new_with_options(room_name, &options) {
+    match Notification::new_with_options(board_name, &options) {
         Ok(notification) => {
             // Log to browser console for confirmation
             web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
                 "[River] Notification object created successfully",
             ));
 
-            // Set up click handler to focus window and switch to room
+            // Set up click handler to focus window and switch to board
             let onclick = Closure::wrap(Box::new(move || {
-                info!("Notification clicked, switching to room");
+                info!("Notification clicked, switching to board");
 
-                // Switch to the room
-                *CURRENT_ROOM.write() = CurrentRoom {
-                    owner_key: Some(room_key),
+                // Switch to the board
+                *CURRENT_BOARD.write() = CurrentBoard {
+                    owner_key: Some(board_key),
                 };
 
                 // Focus the window
@@ -274,8 +274,8 @@ fn create_notification_internal(
             onclick.forget();
 
             info!(
-                "Notification created for room: {} (check browser console)",
-                room_name
+                "Notification created for board: {} (check browser console)",
+                board_name
             );
         }
         Err(e) => {
@@ -291,41 +291,41 @@ fn create_notification_internal(
 /// Called from apply_delta when new messages are received
 ///
 /// # Arguments
-/// * `room_key` - The room's owner verifying key
+/// * `board_key` - The board's owner verifying key
 /// * `new_messages` - New messages from the delta
 /// * `self_member_id` - The current user's member ID (to filter out own messages)
 /// * `member_info` - Member info for looking up sender names
-/// * `room_secrets` - Map of secret_version -> decrypted secret for version-aware decryption
+/// * `board_secrets` - Map of secret_version -> decrypted secret for version-aware decryption
 pub fn notify_new_messages(
-    room_key: &VerifyingKey,
+    board_key: &VerifyingKey,
     new_messages: &[AuthorizedMessageV1],
     self_member_id: MemberId,
     member_info: &MemberInfoV1,
-    room_secrets: &std::collections::HashMap<u32, [u8; 32]>,
+    board_secrets: &std::collections::HashMap<u32, [u8; 32]>,
 ) {
-    // Skip if this room hasn't completed initial sync
-    if !INITIAL_SYNC_COMPLETE.read().contains(room_key) {
+    // Skip if this board hasn't completed initial sync
+    if !INITIAL_SYNC_COMPLETE.read().contains(board_key) {
         info!(
-            "Initial sync not complete for room {:?}, skipping notification",
-            MemberId::from(*room_key)
+            "Initial sync not complete for board {:?}, skipping notification",
+            MemberId::from(*board_key)
         );
         return;
     }
     info!(
-        "notify_new_messages called for room {:?} with {} messages",
-        MemberId::from(*room_key),
+        "notify_new_messages called for board {:?} with {} messages",
+        MemberId::from(*board_key),
         new_messages.len()
     );
 
-    // Skip if this is the currently active room AND document is visible
-    // (user is looking at this room right now)
+    // Skip if this is the currently active board AND document is visible
+    // (user is looking at this board right now)
     let doc_visible = is_document_visible();
     if doc_visible {
-        if let Some(current_key) = CURRENT_ROOM.read().owner_key {
-            if current_key == *room_key {
+        if let Some(current_key) = CURRENT_BOARD.read().owner_key {
+            if current_key == *board_key {
                 info!(
                     "Board {:?} is currently active and visible, skipping notification",
-                    MemberId::from(*room_key)
+                    MemberId::from(*board_key)
                 );
                 return;
             }
@@ -336,10 +336,10 @@ pub fn notify_new_messages(
         doc_visible
     );
 
-    // Skip if document is visible and focused AND we're in a different room
+    // Skip if document is visible and focused AND we're in a different board
     // This prevents notifications while actively using River, but allows them
     // when the app is in background (minimized, different tab, etc.)
-    // Note: We still notify for other rooms because users want to know about
+    // Note: We still notify for other boards because users want to know about
     // activity in other conversations even while using the app.
     // Uncomment this block to suppress ALL notifications while app is focused:
     // if is_document_visible() {
@@ -365,14 +365,14 @@ pub fn notify_new_messages(
         return;
     }
 
-    // Get room name (decrypt if private)
-    let room_name = ROOMS
+    // Get board name (decrypt if private)
+    let board_name = BOARDS
         .read()
         .map
-        .get(room_key)
+        .get(board_key)
         .map(|rd| {
-            let sealed_name = &rd.room_state.configuration.configuration.display.name;
-            match unseal_bytes_with_secrets(sealed_name, room_secrets) {
+            let sealed_name = &rd.board_state.configuration.configuration.display.name;
+            match unseal_bytes_with_secrets(sealed_name, board_secrets) {
                 Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                 Err(_) => sealed_name.to_string_lossy(),
             }
@@ -382,8 +382,8 @@ pub fn notify_new_messages(
     // For multiple messages, show a summary
     if external_messages.len() > 1 {
         show_notification(
-            *room_key,
-            &room_name,
+            *board_key,
+            &board_name,
             "",
             &format!("{} new messages", external_messages.len()),
         );
@@ -399,7 +399,7 @@ pub fn notify_new_messages(
         .iter()
         .find(|ami| ami.member_info.member_id == msg.message.author)
         .map(|ami| {
-            match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, room_secrets) {
+            match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, board_secrets) {
                 Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                 Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
             }
@@ -407,24 +407,24 @@ pub fn notify_new_messages(
         .unwrap_or_else(|| "Someone".to_string());
 
     // Get message preview (decrypt if needed)
-    let preview = get_message_preview(&msg.message.content, room_secrets);
+    let preview = get_message_preview(&msg.message.content, board_secrets);
 
-    show_notification(*room_key, &room_name, &sender_name, &preview);
+    show_notification(*board_key, &board_name, &sender_name, &preview);
 }
 
 /// Extract a preview from message content, decrypting if necessary
 fn get_message_preview(
-    content: &RoomMessageBody,
-    room_secrets: &std::collections::HashMap<u32, [u8; 32]>,
+    content: &BoardMessageBody,
+    board_secrets: &std::collections::HashMap<u32, [u8; 32]>,
 ) -> String {
-    use river_core::room_state::content::{
+    use river_core::board_state::content::{
         ActionContentV1, ReplyContentV1, TextContentV1, ACTION_TYPE_DELETE, ACTION_TYPE_EDIT,
         ACTION_TYPE_REACTION, ACTION_TYPE_REMOVE_REACTION, CONTENT_TYPE_ACTION, CONTENT_TYPE_REPLY,
         CONTENT_TYPE_TEXT,
     };
 
     let text = match content {
-        RoomMessageBody::Public {
+        BoardMessageBody::Public {
             content_type, data, ..
         } => {
             if *content_type == CONTENT_TYPE_TEXT {
@@ -453,7 +453,7 @@ fn get_message_preview(
                 "[Unknown message type]".to_string()
             }
         }
-        RoomMessageBody::Private {
+        BoardMessageBody::Private {
             content_type,
             ciphertext,
             nonce,
@@ -461,7 +461,7 @@ fn get_message_preview(
             ..
         } => {
             // Look up the secret for this message's version
-            if let Some(secret) = room_secrets.get(secret_version) {
+            if let Some(secret) = board_secrets.get(secret_version) {
                 decrypt_with_symmetric_key(secret, ciphertext.as_slice(), nonce)
                     .map(|bytes| {
                         if *content_type == CONTENT_TYPE_TEXT {
@@ -491,12 +491,12 @@ fn get_message_preview(
     }
 }
 
-/// Mark a room as having completed initial sync
+/// Mark a board as having completed initial sync
 /// Should be called after first successful state load
-pub fn mark_initial_sync_complete(room_key: &VerifyingKey) {
-    INITIAL_SYNC_COMPLETE.write().insert(*room_key);
+pub fn mark_initial_sync_complete(board_key: &VerifyingKey) {
+    INITIAL_SYNC_COMPLETE.write().insert(*board_key);
     info!(
-        "Marked initial sync complete for room: {:?}",
-        MemberId::from(*room_key)
+        "Marked initial sync complete for board: {:?}",
+        MemberId::from(*board_key)
     );
 }

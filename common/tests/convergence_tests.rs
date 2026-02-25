@@ -13,12 +13,12 @@
 use ed25519_dalek::SigningKey;
 use freenet_scaffold::ComposableState;
 use rand::rngs::OsRng;
-use river_core::room_state::ban::{AuthorizedUserBan, BansV1, UserBan};
-use river_core::room_state::member::{AuthorizedMember, Member, MemberId, MembersDelta, MembersV1};
-use river_core::room_state::message::{
-    AuthorizedMessageV1, MessageId, MessageV1, MessagesV1, RoomMessageBody,
+use river_core::board_state::ban::{AuthorizedUserBan, BansV1, UserBan};
+use river_core::board_state::member::{AuthorizedMember, Member, MemberId, MembersDelta, MembersV1};
+use river_core::board_state::message::{
+    AuthorizedMessageV1, MessageId, MessageV1, MessagesV1, BoardMessageBody,
 };
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1};
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1};
 use std::time::SystemTime;
 
 /// Helper to create a test member that's invited by a given inviter
@@ -48,10 +48,10 @@ fn create_test_msg(
 ) -> AuthorizedMessageV1 {
     AuthorizedMessageV1::new(
         MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: author_id,
             time: SystemTime::now() + std::time::Duration::from_secs(time_offset_secs),
-            content: RoomMessageBody::public(format!("msg from {:?}", author_id)),
+            content: BoardMessageBody::public(format!("msg from {:?}", author_id)),
         },
         author_sk,
     )
@@ -97,11 +97,11 @@ fn test_member_add_order_convergence() {
     let auth_member_a = create_authorized_member(member_a.clone(), &owner_signing_key);
     let auth_member_b = create_authorized_member(member_b.clone(), &owner_signing_key);
 
-    // Create parent state with max_members = 1 (only room for one new member)
-    let mut parent_state = ChatRoomStateV1::default();
+    // Create parent state with max_members = 1 (only board for one new member)
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 1;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -219,10 +219,10 @@ fn test_member_removal_tiebreak_convergence() {
     let auth_member_c = create_authorized_member(member_c.clone(), &owner_signing_key);
 
     // Create parent state with max_members = 2 (need to remove 1 of 3)
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 2;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -342,13 +342,13 @@ fn test_ban_excess_order_convergence() {
     );
 
     // Create parent state with max_user_bans = 2 (need to reject 1 of 3)
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_user_bans = 2;
     parent_state.members = MembersV1 {
         members: vec![auth_member_a, auth_member_b, auth_member_c],
     };
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -418,40 +418,40 @@ fn test_message_prune_order_convergence() {
     // Create three messages with identical timestamps
     let msg_a = AuthorizedMessageV1::new(
         MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: same_time,
-            content: RoomMessageBody::public("Message A".to_string()),
+            content: BoardMessageBody::public("Message A".to_string()),
         },
         &owner_signing_key,
     );
 
     let msg_b = AuthorizedMessageV1::new(
         MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: same_time,
-            content: RoomMessageBody::public("Message B".to_string()),
+            content: BoardMessageBody::public("Message B".to_string()),
         },
         &owner_signing_key,
     );
 
     let msg_c = AuthorizedMessageV1::new(
         MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: same_time,
-            content: RoomMessageBody::public("Message C".to_string()),
+            content: BoardMessageBody::public("Message C".to_string()),
         },
         &owner_signing_key,
     );
 
     // Create parent state with max_recent_messages = 2 (need to remove 1 of 3)
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_recent_messages = 2;
     parent_state.configuration.configuration.max_message_size = 1000;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -507,10 +507,10 @@ fn test_member_delta_idempotency() {
     let (member_a, _) = create_test_member(owner_id, owner_id);
     let auth_member_a = create_authorized_member(member_a.clone(), &owner_signing_key);
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 10;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -559,19 +559,19 @@ fn test_message_delta_idempotency() {
 
     let msg = AuthorizedMessageV1::new(
         MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: SystemTime::now(),
-            content: RoomMessageBody::public("Test message".to_string()),
+            content: BoardMessageBody::public("Test message".to_string()),
         },
         &owner_signing_key,
     );
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_recent_messages = 100;
     parent_state.configuration.configuration.max_message_size = 1000;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -616,10 +616,10 @@ fn test_member_interleaved_deltas_convergence() {
     let auth_c = create_authorized_member(member_c.clone(), &owner_signing_key);
     let auth_d = create_authorized_member(member_d.clone(), &owner_signing_key);
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 2;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -712,10 +712,10 @@ fn test_member_convergence_stress_50_members() {
     assert_eq!(all_members.len(), 50);
 
     // Set max_members to 30 (need to remove 20)
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 30;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -788,10 +788,10 @@ fn test_message_convergence_stress_100_messages() {
 
         let msg = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: owner_id,
                 time,
-                content: RoomMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(format!("Message {}", i)),
             },
             &owner_signing_key,
         );
@@ -799,11 +799,11 @@ fn test_message_convergence_stress_100_messages() {
     }
 
     // Set max_recent_messages to 50
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_recent_messages = 50;
     parent_state.configuration.configuration.max_message_size = 1000;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -897,13 +897,13 @@ fn test_ban_convergence_stress_same_timestamps() {
     }
 
     // Set max_user_bans to 10 (need to reject 5)
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_user_bans = 10;
     parent_state.members = MembersV1 {
         members: members.clone(),
     };
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -972,10 +972,10 @@ fn test_member_permutation_convergence() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 5;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1047,10 +1047,10 @@ fn test_random_operation_sequence_convergence() {
         member_pool.push((auth_member, signing_key));
     }
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 8;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1107,23 +1107,23 @@ fn test_message_varying_limits_convergence() {
     for i in 0..30 {
         let msg = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: owner_id,
                 time: base_time + std::time::Duration::from_secs(i as u64),
-                content: RoomMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(format!("Message {}", i)),
             },
             &owner_signing_key,
         );
         messages.push(msg);
     }
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
     // Test with different max_recent_messages limits
     for max_messages in [5, 10, 15, 20, 25] {
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.configuration.configuration.max_recent_messages = max_messages;
         parent_state.configuration.configuration.max_message_size = 1000;
 
@@ -1190,10 +1190,10 @@ fn test_member_exactly_at_capacity() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 5;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1240,10 +1240,10 @@ fn test_member_one_over_capacity() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 5;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1292,21 +1292,21 @@ fn test_messages_all_identical_timestamps() {
     for i in 0..10 {
         let msg = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: owner_id,
                 time: same_time,
-                content: RoomMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(format!("Message {}", i)),
             },
             &owner_signing_key,
         );
         messages.push(msg);
     }
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_recent_messages = 5;
     parent_state.configuration.configuration.max_message_size = 1000;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1388,10 +1388,10 @@ fn test_deep_invite_chains() {
     all_members.extend(depth_0_members);
 
     // Set max_members to 10 (need to remove 5)
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 10;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1471,12 +1471,12 @@ fn test_concurrent_adds_and_bans() {
         ),
     ]);
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 5;
     parent_state.configuration.configuration.max_user_bans = 10;
     parent_state.bans = bans;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1533,10 +1533,10 @@ fn test_regression_member_truncation_order_dependent() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 2;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1607,10 +1607,10 @@ fn test_regression_member_excess_removal_tiebreak() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 5;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1696,13 +1696,13 @@ fn test_regression_ban_excess_identification() {
         bans.push(ban);
     }
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_user_bans = 5;
     parent_state.members = MembersV1 {
         members: members.clone(),
     };
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1766,21 +1766,21 @@ fn test_regression_message_pruning_order() {
         let time = base_time + std::time::Duration::from_secs(time_offset);
         let msg = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: owner_id,
                 time,
-                content: RoomMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(format!("Message {}", i)),
             },
             &owner_signing_key,
         );
         messages.push(msg);
     }
 
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_recent_messages = 10;
     parent_state.configuration.configuration.max_message_size = 1000;
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1830,7 +1830,7 @@ fn test_regression_message_pruning_order() {
 // This is the ultimate convergence test: two peers starting from different initial
 // states must produce identical serialized output after merging the other's state.
 
-use river_core::room_state::member_info::{AuthorizedMemberInfo, MemberInfo};
+use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
 
 #[test]
 fn test_full_state_merge_commutativity() {
@@ -1838,7 +1838,7 @@ fn test_full_state_merge_commutativity() {
     let owner_verifying_key = owner_signing_key.verifying_key();
     let owner_id: MemberId = owner_verifying_key.into();
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -1872,34 +1872,34 @@ fn test_full_state_merge_commutativity() {
 
     let msg_1 = AuthorizedMessageV1::new(
         MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: owner_id,
             time: time_1,
-            content: RoomMessageBody::public("Hello from owner".to_string()),
+            content: BoardMessageBody::public("Hello from owner".to_string()),
         },
         &owner_signing_key,
     );
     let msg_2 = AuthorizedMessageV1::new(
         MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: member_a.id(),
             time: time_2,
-            content: RoomMessageBody::public("Hello from Alice".to_string()),
+            content: BoardMessageBody::public("Hello from Alice".to_string()),
         },
         &member_a_sk,
     );
     let msg_3 = AuthorizedMessageV1::new(
         MessageV1 {
-            room_owner: owner_id,
+            board_owner: owner_id,
             author: member_b.id(),
             time: time_3,
-            content: RoomMessageBody::public("Hello from Bob".to_string()),
+            content: BoardMessageBody::public("Hello from Bob".to_string()),
         },
         &member_b_sk,
     );
 
     // ---- State A: has members [A, C], messages [1, 2], info [owner, A] ----
-    let mut state_a = ChatRoomStateV1::default();
+    let mut state_a = ChatBoardStateV1::default();
     state_a.configuration.configuration.max_members = 10;
     state_a.configuration.configuration.max_recent_messages = 100;
     state_a.configuration.configuration.max_message_size = 1000;
@@ -1911,7 +1911,7 @@ fn test_full_state_merge_commutativity() {
     state_a.member_info.member_info.push(info_a.clone());
 
     // ---- State B: has members [B, C], messages [1, 3], info [owner, B] ----
-    let mut state_b = ChatRoomStateV1::default();
+    let mut state_b = ChatBoardStateV1::default();
     state_b.configuration.configuration.max_members = 10;
     state_b.configuration.configuration.max_recent_messages = 100;
     state_b.configuration.configuration.max_message_size = 1000;
@@ -2002,7 +2002,7 @@ fn test_regression_combined_scenario() {
     let owner_verifying_key = owner_signing_key.verifying_key();
     let owner_id: MemberId = owner_verifying_key.into();
 
-    // Create a realistic room state with:
+    // Create a realistic board state with:
     // - 30 members with varying invite depths
     // - 50 messages with some having same timestamps
     // - 8 bans with some having same timestamps
@@ -2046,10 +2046,10 @@ fn test_regression_combined_scenario() {
         let author_idx = i % members.len();
         let msg = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: members[author_idx].0.member.id(),
                 time,
-                content: RoomMessageBody::public(format!("Message {}", i)),
+                content: BoardMessageBody::public(format!("Message {}", i)),
             },
             &members[author_idx].1,
         );
@@ -2073,14 +2073,14 @@ fn test_regression_combined_scenario() {
     }
 
     // Set up parent state with limits
-    let mut parent_state = ChatRoomStateV1::default();
+    let mut parent_state = ChatBoardStateV1::default();
     parent_state.configuration.configuration.max_members = 20;
     parent_state.configuration.configuration.max_recent_messages = 30;
     parent_state.configuration.configuration.max_message_size = 1000;
     parent_state.configuration.configuration.max_user_bans = 10;
     parent_state.bans = BansV1(bans);
 
-    let parameters = ChatRoomParametersV1 {
+    let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
@@ -2176,7 +2176,7 @@ fn test_regression_combined_scenario() {
 // list during merge. clean_orphaned_bans post-hook removes invalid bans after
 // all fields are applied.
 
-use river_core::room_state::configuration::{AuthorizedConfigurationV1, Configuration};
+use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
 
 /// Helper to create a signed configuration for tests
 fn create_test_config(owner_sk: &SigningKey) -> AuthorizedConfigurationV1 {
@@ -2207,7 +2207,7 @@ fn test_merge_with_bans_from_member_not_in_other_state() {
     let owner_vk = owner_sk.verifying_key();
     let owner_id: MemberId = owner_vk.into();
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
     let config = create_test_config(&owner_sk);
 
     // Member X (invited by owner)
@@ -2239,7 +2239,7 @@ fn test_merge_with_bans_from_member_not_in_other_state() {
     let msg_z = create_test_msg(owner_id, member_z.id(), &member_z_sk, 1);
 
     // ---- State A (stale): has Z only, no bans, never saw X or Y ----
-    let state_a = ChatRoomStateV1 {
+    let state_a = ChatBoardStateV1 {
         configuration: config.clone(),
         members: MembersV1 {
             members: vec![auth_member_z.clone()],
@@ -2252,7 +2252,7 @@ fn test_merge_with_bans_from_member_not_in_other_state() {
     };
 
     // ---- State B (current): has X and Z; Y already removed by ban ----
-    let state_b = ChatRoomStateV1 {
+    let state_b = ChatBoardStateV1 {
         configuration: config,
         members: MembersV1 {
             members: vec![auth_member_x.clone(), auth_member_z.clone()],
@@ -2316,7 +2316,7 @@ fn test_merge_commutativity_with_owner_bans() {
     let owner_vk = owner_sk.verifying_key();
     let owner_id: MemberId = owner_vk.into();
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
     let config = create_test_config(&owner_sk);
 
     // All members invited by owner
@@ -2363,7 +2363,7 @@ fn test_merge_commutativity_with_owner_bans() {
     let msg_d = create_test_msg(owner_id, member_d_id, &member_d_sk, 3);
 
     // ---- State 1: has A, B, C; owner banned D (D removed) ----
-    let state_1 = ChatRoomStateV1 {
+    let state_1 = ChatBoardStateV1 {
         configuration: config.clone(),
         members: MembersV1 {
             members: vec![
@@ -2381,7 +2381,7 @@ fn test_merge_commutativity_with_owner_bans() {
     };
 
     // ---- State 2: has B, C, D; owner banned A (A removed) ----
-    let state_2 = ChatRoomStateV1 {
+    let state_2 = ChatBoardStateV1 {
         configuration: config,
         members: MembersV1 {
             members: vec![
@@ -2478,7 +2478,7 @@ fn test_merge_cascade_ban_cleanup() {
     let owner_vk = owner_sk.verifying_key();
     let owner_id: MemberId = owner_vk.into();
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
     let config = create_test_config(&owner_sk);
 
     // A (invited by owner), B (invited by A)
@@ -2522,7 +2522,7 @@ fn test_merge_cascade_ban_cleanup() {
     let msg_c = create_test_msg(owner_id, member_c.id(), &member_c_sk, 2);
 
     // ---- State old: A, B, C present, A banned B ----
-    let state_old = ChatRoomStateV1 {
+    let state_old = ChatBoardStateV1 {
         configuration: config.clone(),
         members: MembersV1 {
             members: vec![
@@ -2540,7 +2540,7 @@ fn test_merge_cascade_ban_cleanup() {
     };
 
     // ---- State new: same members but owner also bans A ----
-    let state_new = ChatRoomStateV1 {
+    let state_new = ChatBoardStateV1 {
         configuration: config,
         members: MembersV1 {
             members: vec![
@@ -2617,7 +2617,7 @@ fn test_merge_cascade_ban_commutativity() {
     let owner_vk = owner_sk.verifying_key();
     let owner_id: MemberId = owner_vk.into();
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
     let config = create_test_config(&owner_sk);
 
     // A (invited by owner), B (invited by A), C (invited by owner)
@@ -2655,7 +2655,7 @@ fn test_merge_cascade_ban_commutativity() {
     );
 
     // ---- State S1: has A, B, C; A banned B ----
-    let state_s1 = ChatRoomStateV1 {
+    let state_s1 = ChatBoardStateV1 {
         configuration: config.clone(),
         members: MembersV1 {
             members: vec![
@@ -2669,7 +2669,7 @@ fn test_merge_cascade_ban_commutativity() {
     };
 
     // ---- State S2: has C only; owner banned A (B cascade-removed, A's ban orphaned) ----
-    let state_s2 = ChatRoomStateV1 {
+    let state_s2 = ChatBoardStateV1 {
         configuration: config,
         members: MembersV1 {
             members: vec![auth_member_c.clone()],
@@ -2751,7 +2751,7 @@ fn test_merge_owner_ban_across_diverged_states() {
     let owner_vk = owner_sk.verifying_key();
     let owner_id: MemberId = owner_vk.into();
 
-    let parameters = ChatRoomParametersV1 { owner: owner_vk };
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
     let config = create_test_config(&owner_sk);
 
     let (member_a, member_a_sk) = create_test_member(owner_id, owner_id);
@@ -2777,7 +2777,7 @@ fn test_merge_owner_ban_across_diverged_states() {
     let msg_b = create_test_msg(owner_id, member_b.id(), &member_b_sk, 1);
 
     // State 1: has A and B (hasn't seen ban yet)
-    let state_1 = ChatRoomStateV1 {
+    let state_1 = ChatBoardStateV1 {
         configuration: config.clone(),
         members: MembersV1 {
             members: vec![auth_member_a.clone(), auth_member_b.clone()],
@@ -2790,7 +2790,7 @@ fn test_merge_owner_ban_across_diverged_states() {
     };
 
     // State 2: has B only, owner banned A (A already removed)
-    let state_2 = ChatRoomStateV1 {
+    let state_2 = ChatBoardStateV1 {
         configuration: config,
         members: MembersV1 {
             members: vec![auth_member_b.clone()],

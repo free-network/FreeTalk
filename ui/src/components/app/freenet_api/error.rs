@@ -19,7 +19,7 @@ pub enum SynchronizerError {
     ApiNotInitialized,
 
     #[error("Board data not found for key: {0}")]
-    RoomNotFound(String),
+    BoardNotFound(String),
 
     #[error("Contract info not found for key: {0}")]
     ContractInfoNotFound(String),
@@ -27,10 +27,10 @@ pub enum SynchronizerError {
     #[error("Failed to send message: {0}")]
     MessageSendError(String),
 
-    #[error("Failed to merge room state: {0}")]
+    #[error("Failed to merge board state: {0}")]
     StateMergeError(String),
 
-    #[error("Failed to apply delta to room state: {0}")]
+    #[error("Failed to apply delta to board state: {0}")]
     DeltaApplyError(String),
 
     #[error("Failed to put contract state: {0}")]

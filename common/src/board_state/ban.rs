@@ -1,7 +1,7 @@
-use crate::room_state::member::{AuthorizedMember, MemberId};
-use crate::room_state::ChatRoomParametersV1;
+use crate::board_state::member::{AuthorizedMember, MemberId};
+use crate::board_state::ChatBoardParametersV1;
 use crate::util::{sign_struct, verify_struct};
-use crate::ChatRoomStateV1;
+use crate::ChatBoardStateV1;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use freenet_scaffold::util::{fast_hash, FastHash};
 use freenet_scaffold::ComposableState;
@@ -11,11 +11,11 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::time::SystemTime;
 
-/// Represents a collection of user bans in a chat room
+/// Represents a collection of user bans in a chat board
 ///
 /// This structure maintains a list of authorized bans and provides methods
 /// to verify, summarize, and apply changes to the ban list while ensuring
-/// all bans are valid according to room rules.
+/// all bans are valid according to board rules.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct BansV1(pub Vec<AuthorizedUserBan>);
 
@@ -78,8 +78,8 @@ impl BansV1 {
     /// - If the number of bans exceeds the maximum allowed
     fn get_invalid_bans(
         &self,
-        parent_state: &ChatRoomStateV1,
-        parameters: &ChatRoomParametersV1,
+        parent_state: &ChatBoardStateV1,
+        parameters: &ChatBoardParametersV1,
     ) -> HashMap<BanId, BanValidationError> {
         let member_map = parent_state.members.members_by_member_id();
         let mut invalid_bans = HashMap::new();
@@ -107,7 +107,7 @@ impl BansV1 {
         &self,
         ban: &AuthorizedUserBan,
         member_map: &HashMap<MemberId, &AuthorizedMember>,
-        parameters: &ChatRoomParametersV1,
+        parameters: &ChatBoardParametersV1,
         invalid_bans: &mut HashMap<BanId, BanValidationError>,
         banned_user_ids: &HashSet<MemberId>,
     ) {
@@ -124,7 +124,7 @@ impl BansV1 {
             }
         };
 
-        // Skip banning member verification if banner is room owner
+        // Skip banning member verification if banner is board owner
         if ban.banned_by != parameters.owner_id() {
             // Check if banning member exists
             let banning_member = match member_map.get(&ban.banned_by) {
@@ -205,7 +205,7 @@ impl BansV1 {
     /// for deterministic ordering (CRDT convergence requirement).
     fn identify_excess_bans(
         &self,
-        parent_state: &ChatRoomStateV1,
+        parent_state: &ChatBoardStateV1,
         invalid_bans: &mut HashMap<BanId, BanValidationError>,
     ) {
         let max_bans = parent_state.configuration.configuration.max_user_bans;
@@ -233,10 +233,10 @@ impl BansV1 {
 }
 
 impl ComposableState for BansV1 {
-    type ParentState = ChatRoomStateV1;
+    type ParentState = ChatBoardStateV1;
     type Summary = HashSet<BanId>;
     type Delta = Vec<AuthorizedUserBan>;
-    type Parameters = ChatRoomParametersV1;
+    type Parameters = ChatBoardParametersV1;
 
     /// Verifies that all bans in the collection are valid
     ///
@@ -374,12 +374,12 @@ impl ComposableState for BansV1 {
                 temp_bans.0.drain(0..to_remove);
             }
 
-            // Verify the temporary room_state (excluding the max_bans check since we just enforced it)
+            // Verify the temporary board_state (excluding the max_bans check since we just enforced it)
             if let Err(e) = temp_bans.verify(parent_state, parameters) {
                 return Err(format!("Invalid delta: {}", e));
             }
 
-            // If verification passes, update the actual room_state
+            // If verification passes, update the actual board_state
             self.0 = temp_bans.0;
         }
 
@@ -460,7 +460,7 @@ impl AuthorizedUserBan {
 
 /// Contains the core information about a user ban
 ///
-/// Includes the room owner's ID, the time of the ban, and the ID of the banned user
+/// Includes the board owner's ID, the time of the ban, and the ID of the banned user
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct UserBan {
     pub owner_member_id: MemberId,
@@ -477,14 +477,14 @@ pub struct BanId(pub FastHash);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::room_state::configuration::AuthorizedConfigurationV1;
-    use crate::room_state::member::{AuthorizedMember, Member, MembersV1};
+    use crate::board_state::configuration::AuthorizedConfigurationV1;
+    use crate::board_state::member::{AuthorizedMember, Member, MembersV1};
     use ed25519_dalek::SigningKey;
     use std::time::Duration;
 
-    fn create_test_chat_room_state() -> ChatRoomStateV1 {
-        // Create a minimal ChatRoomStateV1 for testing
-        ChatRoomStateV1 {
+    fn create_test_chat_board_state() -> ChatBoardStateV1 {
+        // Create a minimal ChatBoardStateV1 for testing
+        ChatBoardStateV1 {
             configuration: AuthorizedConfigurationV1::default(),
             bans: Default::default(),
             members: MembersV1::default(),
@@ -496,17 +496,17 @@ mod tests {
         }
     }
 
-    fn create_test_parameters() -> ChatRoomParametersV1 {
-        // Create minimal ChatRoomParametersV1 for testing
+    fn create_test_parameters() -> ChatBoardParametersV1 {
+        // Create minimal ChatBoardParametersV1 for testing
         let owner_key = SigningKey::generate(&mut rand::thread_rng());
-        ChatRoomParametersV1 {
+        ChatBoardParametersV1 {
             owner: owner_key.verifying_key(),
         }
     }
 
     #[test]
     fn test_bans_verify() {
-        let mut state = create_test_chat_room_state();
+        let mut state = create_test_chat_board_state();
         let params = create_test_parameters();
 
         // Create some test members
@@ -517,7 +517,7 @@ mod tests {
         let member2_key = SigningKey::generate(&mut rand::thread_rng());
         let member2_id: MemberId = member2_key.verifying_key().into();
 
-        // Add members to the room_state
+        // Add members to the board_state
         state.members.members.push(AuthorizedMember::new(
             Member {
                 owner_member_id: owner_id,
@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_bans_summarize() {
-        let state = create_test_chat_room_state();
+        let state = create_test_chat_board_state();
         let params = create_test_parameters();
 
         let key = SigningKey::generate(&mut rand::thread_rng());
@@ -689,7 +689,7 @@ mod tests {
 
     #[test]
     fn test_bans_delta() {
-        let state = create_test_chat_room_state();
+        let state = create_test_chat_board_state();
         let params = create_test_parameters();
 
         let key = SigningKey::generate(&mut rand::thread_rng());
@@ -735,7 +735,7 @@ mod tests {
 
     #[test]
     fn test_bans_apply_delta() {
-        let mut state = create_test_chat_room_state();
+        let mut state = create_test_chat_board_state();
         let params = create_test_parameters();
 
         let owner_key = SigningKey::generate(&mut rand::thread_rng());
@@ -743,7 +743,7 @@ mod tests {
         let member_key = SigningKey::generate(&mut rand::thread_rng());
         let member_id: MemberId = member_key.verifying_key().into();
 
-        // Add members to the room_state
+        // Add members to the board_state
         state.members.members.push(AuthorizedMember::new(
             Member {
                 owner_member_id: owner_id,

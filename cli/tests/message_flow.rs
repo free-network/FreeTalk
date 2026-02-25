@@ -18,21 +18,21 @@ use freenet_stdlib::client_api::{
 use freenet_stdlib::prelude::{ContractCode, ContractKey, Parameters};
 use freenet_test_network::{Backend, BuildProfile, DockerNatConfig, FreenetBinary, TestNetwork};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use river_core::room_state::ChatRoomParametersV1;
+use river_core::board_state::ChatBoardParametersV1;
 use serde::Deserialize;
 use serde_json::Value;
 use tempfile::TempDir;
 use tokio::time::sleep;
 use tokio_tungstenite::connect_async;
 
-// Load the room contract WASM for reconstructing ContractKey
+// Load the board contract WASM for reconstructing ContractKey
 // IMPORTANT: Use the canonical source from ui/public/contracts/ to match what
 // build.rs copies to OUT_DIR for the main riverctl binary. Using the copy at
-// ../contracts/room_contract.wasm can cause contract key mismatches if that
+// ../contracts/board_contract.wasm can cause contract key mismatches if that
 // file becomes stale (different WASM = different contract key hash).
-const ROOM_CONTRACT_WASM: &[u8] = include_bytes!("../../ui/public/contracts/room_contract.wasm");
+const BOARD_CONTRACT_WASM: &[u8] = include_bytes!("../../ui/public/contracts/board_contract.wasm");
 
-/// Reconstruct ContractKey from owner key string using room contract code
+/// Reconstruct ContractKey from owner key string using board contract code
 fn owner_key_to_contract_key(owner_key_str: &str) -> Result<ContractKey> {
     let owner_bytes: [u8; 32] = bs58::decode(owner_key_str)
         .into_vec()
@@ -41,13 +41,13 @@ fn owner_key_to_contract_key(owner_key_str: &str) -> Result<ContractKey> {
         .map_err(|_| anyhow!("Owner key must be 32 bytes"))?;
     let owner_vk = VerifyingKey::from_bytes(&owner_bytes).context("Invalid owner verifying key")?;
 
-    let params = ChatRoomParametersV1 { owner: owner_vk };
+    let params = ChatBoardParametersV1 { owner: owner_vk };
     let params_bytes = {
         let mut buf = Vec::new();
         ciborium::ser::into_writer(&params, &mut buf).context("Failed to serialize parameters")?;
         buf
     };
-    let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+    let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
     Ok(ContractKey::from_params_and_code(
         Parameters::from(params_bytes),
         &contract_code,
@@ -55,7 +55,7 @@ fn owner_key_to_contract_key(owner_key_str: &str) -> Result<ContractKey> {
 }
 
 #[derive(Deserialize)]
-struct CreateRoomOutput {
+struct CreateBoardOutput {
     owner_key: String,
     #[serde(rename = "contract_key")]
     _contract_key: String,
@@ -68,7 +68,7 @@ struct InviteCreateOutput {
 
 #[derive(Deserialize)]
 struct InviteAcceptOutput {
-    room_owner_key: String,
+    board_owner_key: String,
     #[serde(rename = "contract_key")]
     _contract_key: String,
 }
@@ -76,8 +76,8 @@ struct InviteAcceptOutput {
 #[derive(Clone)]
 struct ScenarioOptions {
     peer_count: usize,
-    room_count: usize,
-    users_per_room: usize,
+    board_count: usize,
+    users_per_board: usize,
     rounds: usize,
     rng_seed: u64,
 }
@@ -85,18 +85,18 @@ struct ScenarioOptions {
 impl ScenarioOptions {
     fn from_env(default_peers: usize, default_rounds: usize) -> Result<Self> {
         let peer_count = read_env_usize("RIVER_TEST_PEER_COUNT")?.unwrap_or(default_peers);
-        let room_count = read_env_usize("RIVER_TEST_ROOM_COUNT")?.unwrap_or(1);
-        let users_per_room = read_env_usize("RIVER_TEST_USERS_PER_ROOM")?.unwrap_or(2);
+        let board_count = read_env_usize("RIVER_TEST_board_COUNT")?.unwrap_or(1);
+        let users_per_board = read_env_usize("RIVER_TEST_USERS_PER_board")?.unwrap_or(2);
         let rounds = read_env_usize("RIVER_TEST_ROUNDS")?.unwrap_or(default_rounds);
         let rng_seed = read_env_u64("RIVER_TEST_SCENARIO_SEED")?.unwrap_or(42);
 
         anyhow::ensure!(
-            room_count > 0,
-            "RIVER_TEST_ROOM_COUNT must be greater than zero"
+            board_count > 0,
+            "RIVER_TEST_board_COUNT must be greater than zero"
         );
         anyhow::ensure!(
-            users_per_room >= 2,
-            "RIVER_TEST_USERS_PER_ROOM must be at least 2"
+            users_per_board >= 2,
+            "RIVER_TEST_USERS_PER_board must be at least 2"
         );
         anyhow::ensure!(peer_count >= 2, "peer count must be at least 2");
 
@@ -104,8 +104,8 @@ impl ScenarioOptions {
 
         Ok(Self {
             peer_count,
-            room_count,
-            users_per_room,
+            board_count,
+            users_per_board,
             rounds,
             rng_seed,
         })
@@ -156,7 +156,7 @@ struct UserClient {
     config_dir: TempDir,
 }
 
-struct RoomContext {
+struct BoardContext {
     id: usize,
     users: Vec<UserClient>,
     owner_key: Option<String>,
@@ -164,17 +164,17 @@ struct RoomContext {
     expected_messages: Vec<String>,
 }
 
-impl RoomContext {
+impl BoardContext {
     fn owner_key(&self) -> &str {
         self.owner_key
             .as_deref()
-            .expect("room owner key should be initialized")
+            .expect("board owner key should be initialized")
     }
 
     fn contract_key(&self) -> &ContractKey {
         self.contract_key
             .as_ref()
-            .expect("room contract key should be initialized")
+            .expect("board contract key should be initialized")
     }
 }
 
@@ -1103,14 +1103,14 @@ async fn run_message_flow_test(peer_count: usize, rounds: usize) -> Result<()> {
     // Assert mesh topology when using Docker NAT - this validates NAT hole punching is working
     assert_mesh_topology(&network).await?;
 
-    let mut rooms = plan_rooms(&network, &scenario)?;
+    let mut boards = plan_boards(&network, &scenario)?;
     let mut subscription_handles: Vec<(usize, WebApi)> = Vec::new();
     let mut latency_tracker = LatencyTracker::default();
     let mut total_messages = 0usize;
 
-    for room in rooms.iter_mut() {
-        total_messages += setup_room_and_exchange_messages(
-            room,
+    for board in boards.iter_mut() {
+        total_messages += setup_board_and_exchange_messages(
+            board,
             &network,
             &scenario,
             &mut subscription_handles,
@@ -1138,8 +1138,8 @@ async fn run_message_flow_test(peer_count: usize, rounds: usize) -> Result<()> {
 
     println!("--- Scenario Metrics ---");
     println!(
-        "peers={}, rooms={}, users_per_room={}, rounds={}",
-        scenario.peer_count, scenario.room_count, scenario.users_per_room, scenario.rounds
+        "peers={}, boards={}, users_per_board={}, rounds={}",
+        scenario.peer_count, scenario.board_count, scenario.users_per_board, scenario.rounds
     );
     println!(
         "network_startup_seconds={:.2}",
@@ -1161,7 +1161,7 @@ async fn run_message_flow_test(peer_count: usize, rounds: usize) -> Result<()> {
     Ok(())
 }
 
-fn plan_rooms(network: &TestNetwork, scenario: &ScenarioOptions) -> Result<Vec<RoomContext>> {
+fn plan_boards(network: &TestNetwork, scenario: &ScenarioOptions) -> Result<Vec<BoardContext>> {
     let peer_count = network.peer_ws_urls().len();
     anyhow::ensure!(
         peer_count >= 2,
@@ -1169,12 +1169,12 @@ fn plan_rooms(network: &TestNetwork, scenario: &ScenarioOptions) -> Result<Vec<R
         peer_count
     );
     let mut rng = StdRng::seed_from_u64(scenario.rng_seed);
-    let mut rooms = Vec::with_capacity(scenario.room_count);
-    for room_id in 0..scenario.room_count {
-        let mut users = Vec::with_capacity(scenario.users_per_room);
-        for user_idx in 0..scenario.users_per_room {
+    let mut boards = Vec::with_capacity(scenario.board_count);
+    for board_id in 0..scenario.board_count {
+        let mut users = Vec::with_capacity(scenario.users_per_board);
+        for user_idx in 0..scenario.users_per_board {
             let peer_index = rng.gen_range(0..peer_count);
-            let label = format!("room{}-user{}", room_id + 1, user_idx + 1);
+            let label = format!("board{}-user{}", board_id + 1, user_idx + 1);
             let config_dir = TempDir::new()
                 .with_context(|| format!("Failed to create config dir for {label}"))?;
             users.push(UserClient {
@@ -1183,26 +1183,26 @@ fn plan_rooms(network: &TestNetwork, scenario: &ScenarioOptions) -> Result<Vec<R
                 config_dir,
             });
         }
-        rooms.push(RoomContext {
-            id: room_id,
+        boards.push(BoardContext {
+            id: board_id,
             users,
             owner_key: None,
             contract_key: None,
             expected_messages: Vec::new(),
         });
     }
-    Ok(rooms)
+    Ok(boards)
 }
 
-async fn setup_room_and_exchange_messages(
-    room: &mut RoomContext,
+async fn setup_board_and_exchange_messages(
+    board: &mut BoardContext,
     network: &TestNetwork,
     scenario: &ScenarioOptions,
     subscription_handles: &mut Vec<(usize, WebApi)>,
     latency_tracker: &mut LatencyTracker,
 ) -> Result<usize> {
-    println!("--- setting up room {} ---", room.id + 1);
-    let owner = &room.users[0];
+    println!("--- setting up board {} ---", board.id + 1);
+    let owner = &board.users[0];
     let owner_peer = network.peer(owner.peer_index);
     let owner_url = node_url(owner_peer);
 
@@ -1214,10 +1214,10 @@ async fn setup_room_and_exchange_messages(
             owner.config_dir.path(),
             &owner_url,
             &[
-                "room",
+                "board",
                 "create",
                 "--name",
-                &format!("River Board {}", room.id + 1),
+                &format!("River Board {}", board.id + 1),
                 "--nickname",
                 &owner.label,
             ],
@@ -1226,40 +1226,40 @@ async fn setup_room_and_exchange_messages(
         {
             Ok(output) => {
                 println!(
-                    "riverctl room create succeeded in {:.2?} (attempt {create_attempts})",
+                    "riverctl board create succeeded in {:.2?} (attempt {create_attempts})",
                     start.elapsed()
                 );
                 break output;
             }
             Err(err) => {
                 println!(
-                    "riverctl room create failed after {:.2?} (attempt {create_attempts}): {err}",
+                    "riverctl board create failed after {:.2?} (attempt {create_attempts}): {err}",
                     start.elapsed()
                 );
                 let timed_out = err.to_string().contains("Timeout waiting for PUT response");
                 if timed_out && create_attempts == 1 {
-                    println!("Retrying room create once after timeout...");
+                    println!("Retrying board create once after timeout...");
                     sleep(Duration::from_secs(3)).await;
                     continue;
                 }
                 dump_full_network_state(network).await;
-                return Err(anyhow!("riverctl room create failed: {}", err));
+                return Err(anyhow!("riverctl board create failed: {}", err));
             }
         }
     };
-    let create_output: CreateRoomOutput =
-        serde_json::from_str(&create_stdout).context("Failed to parse room create output")?;
+    let create_output: CreateBoardOutput =
+        serde_json::from_str(&create_stdout).context("Failed to parse board create output")?;
     let contract_key = owner_key_to_contract_key(&create_output.owner_key)
         .context("Failed to reconstruct contract key from owner key")?;
-    room.owner_key = Some(create_output.owner_key.clone());
-    room.contract_key = Some(contract_key);
+    board.owner_key = Some(create_output.owner_key.clone());
+    board.contract_key = Some(contract_key);
 
-    for user in room.users.iter().skip(1) {
+    for user in board.users.iter().skip(1) {
         let invite_stdout = run_riverctl_checked(
             network,
             owner.config_dir.path(),
             &owner_url,
-            &["invite", "create", room.owner_key()],
+            &["invite", "create", board.owner_key()],
             "riverctl invite create",
         )
         .await?;
@@ -1311,27 +1311,27 @@ async fn setup_room_and_exchange_messages(
         let accept_output: InviteAcceptOutput =
             serde_json::from_str(&accept_stdout).context("Failed to parse invite accept output")?;
 
-        let contract_key_accept = owner_key_to_contract_key(&accept_output.room_owner_key)
+        let contract_key_accept = owner_key_to_contract_key(&accept_output.board_owner_key)
             .context("Failed to reconstruct contract key from owner key")?;
         anyhow::ensure!(
-            accept_output.room_owner_key == create_output.owner_key,
-            "Invite acceptance should reference the same room owner key"
+            accept_output.board_owner_key == create_output.owner_key,
+            "Invite acceptance should reference the same board owner key"
         );
         anyhow::ensure!(
             contract_key_accept == contract_key,
-            "Contract key from invite accept must match room create"
+            "Contract key from invite accept must match board create"
         );
     }
 
     let mut unique_peer_indices = HashSet::new();
-    for user in &room.users {
+    for user in &board.users {
         if unique_peer_indices.insert(user.peer_index) {
             let peer = network.peer(user.peer_index);
             // Retry subscribe up to 3 times - CI can have transient network issues
             let mut subscribe_attempts = 0;
             let handle = loop {
                 subscribe_attempts += 1;
-                match subscribe_peer_to_contract(peer, room.contract_key()).await {
+                match subscribe_peer_to_contract(peer, board.contract_key()).await {
                     Ok(handle) => break handle,
                     Err(err) => {
                         if subscribe_attempts >= 3 {
@@ -1359,7 +1359,7 @@ async fn setup_room_and_exchange_messages(
     for peer_idx in &unique_peer_indices {
         wait_for_peer_subscription(
             network.peer(*peer_idx),
-            room.contract_key(),
+            board.contract_key(),
             Duration::from_secs(10),
             Duration::from_millis(200),
         )
@@ -1389,9 +1389,9 @@ async fn setup_room_and_exchange_messages(
     // during message sending or back-pressure blocks the WebSocket read loop.
     let drain_deadline = Instant::now()
         + Duration::from_secs(
-            (scenario.rounds * scenario.users_per_room) as u64 + 60, // message time + buffer
+            (scenario.rounds * scenario.users_per_board) as u64 + 60, // message time + buffer
         );
-    let contract_key_for_drain = *room.contract_key();
+    let contract_key_for_drain = *board.contract_key();
     let handles = std::mem::take(subscription_handles);
     let drain_tasks: Vec<_> = handles
         .into_iter()
@@ -1402,12 +1402,12 @@ async fn setup_room_and_exchange_messages(
         })
         .collect();
 
-    room.expected_messages.clear();
+    board.expected_messages.clear();
     for round in 0..scenario.rounds {
-        for user in &room.users {
+        for user in &board.users {
             let message = format!(
-                "[room {}][round {}][{}] Hello from {}!",
-                room.id + 1,
+                "[board {}][round {}][{}] Hello from {}!",
+                board.id + 1,
                 round + 1,
                 user.label,
                 user.label
@@ -1418,45 +1418,45 @@ async fn setup_room_and_exchange_messages(
                 network,
                 &user.config_dir,
                 &node_url,
-                room.owner_key(),
+                board.owner_key(),
                 &message,
                 &user.label,
-                room.contract_key(),
+                board.contract_key(),
             )
             .await?;
             latency_tracker.record_send(&message);
-            room.expected_messages.push(message.clone());
+            board.expected_messages.push(message.clone());
             sleep(Duration::from_millis(200)).await;
         }
     }
 
-    for user in &room.users {
+    for user in &board.users {
         let peer = network.peer(user.peer_index);
         let node_url = node_url(peer);
         wait_for_expected_messages(
             network,
             &user.config_dir,
             &node_url,
-            room.owner_key(),
-            &room.expected_messages,
+            board.owner_key(),
+            &board.expected_messages,
             &user.label,
-            room.contract_key(),
+            board.contract_key(),
             latency_tracker,
         )
         .await?;
     }
 
     // Collect drain task results and assert notifications were received.
-    println!("--- UpdateNotification results (room {}) ---", room.id + 1);
+    println!("--- UpdateNotification results (board {}) ---", board.id + 1);
     let mut any_failed = false;
     for task in drain_tasks {
         match tokio::time::timeout(Duration::from_secs(70), task).await {
             Ok(Ok((peer_idx, count, client))) => {
                 println!(
-                    "peer {} received {} UpdateNotification(s) for room {}",
+                    "peer {} received {} UpdateNotification(s) for board {}",
                     peer_idx,
                     count,
-                    room.id + 1
+                    board.id + 1
                 );
                 subscription_handles.push((peer_idx, client));
                 if count == 0 {
@@ -1481,13 +1481,13 @@ async fn setup_room_and_exchange_messages(
 
     anyhow::ensure!(
         !any_failed,
-        "One or more subscribed peers received zero UpdateNotifications for room {}. \
+        "One or more subscribed peers received zero UpdateNotifications for board {}. \
          This indicates Freenet's subscription push mechanism is not delivering events \
          to subscribed clients. See freenet/freenet-core#2494 for context.",
-        room.id + 1
+        board.id + 1
     );
 
-    Ok(room.expected_messages.len())
+    Ok(board.expected_messages.len())
 }
 
 async fn run_riverctl_checked(
@@ -1544,7 +1544,7 @@ async fn river_message_flow_over_freenet_six_peers_five_rounds() -> Result<()> {
 /// a key mismatch in the contract store.
 ///
 /// The scenario:
-/// 1. Peer A creates a room and sends initial messages
+/// 1. Peer A creates a board and sends initial messages
 /// 2. Peer B joins late via invite accept (triggers GET to fetch contract)
 /// 3. Peer A sends messages AFTER Peer B joins
 /// 4. Verify Peer B receives the post-join messages
@@ -1585,7 +1585,7 @@ async fn run_late_joiner_test() -> Result<()> {
         Backend::Local
     };
 
-    // Use 3 peers: peer 0 creates room, peer 1 joins immediately, peer 2 joins late
+    // Use 3 peers: peer 0 creates board, peer 1 joins immediately, peer 2 joins late
     let network = TestNetwork::builder()
         .gateways(1)
         .peers(3)
@@ -1618,16 +1618,16 @@ async fn run_late_joiner_test() -> Result<()> {
     let early_joiner_config = TempDir::new().context("Failed to create early joiner config dir")?;
     let late_joiner_config = TempDir::new().context("Failed to create late joiner config dir")?;
 
-    // Peer 0 creates the room
+    // Peer 0 creates the board
     let owner_peer = network.peer(0);
     let owner_url = node_url(owner_peer);
-    println!("Step 1: Owner (peer 0) creates room");
+    println!("Step 1: Owner (peer 0) creates board");
 
     let create_stdout = run_riverctl(
         owner_config.path(),
         &owner_url,
         &[
-            "room",
+            "board",
             "create",
             "--name",
             "Late Joiner Test Board",
@@ -1636,10 +1636,10 @@ async fn run_late_joiner_test() -> Result<()> {
         ],
     )
     .await
-    .context("Failed to create room")?;
+    .context("Failed to create board")?;
 
-    let create_output: CreateRoomOutput =
-        serde_json::from_str(&create_stdout).context("Failed to parse room create output")?;
+    let create_output: CreateBoardOutput =
+        serde_json::from_str(&create_stdout).context("Failed to parse board create output")?;
     let contract_key = owner_key_to_contract_key(&create_output.owner_key)
         .context("Failed to reconstruct contract key from owner key")?;
     let owner_key = create_output.owner_key.clone();

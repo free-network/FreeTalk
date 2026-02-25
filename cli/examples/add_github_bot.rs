@@ -1,4 +1,4 @@
-//! Add GitHub bot to Freenet Official room
+//! Add GitHub bot to Freenet Official board
 //!
 //! Run with: cargo run --example add_github_bot
 
@@ -8,16 +8,16 @@ use freenet_stdlib::client_api::{
     ClientRequest, ContractRequest, ContractResponse, HostResponse, WebApi,
 };
 use freenet_stdlib::prelude::*;
-use river_core::room_state::member::{AuthorizedMember, Member, MemberId, MembersDelta};
-use river_core::room_state::member_info::{AuthorizedMemberInfo, MemberInfo};
-use river_core::room_state::privacy::SealedBytes;
-use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1, ChatRoomStateV1Delta};
+use river_core::board_state::member::{AuthorizedMember, Member, MemberId, MembersDelta};
+use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
+use river_core::board_state::privacy::SealedBytes;
+use river_core::board_state::{ChatBboardParametersV1, ChatBboardStateV1, ChatBboardStateV1Delta};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_tungstenite::connect_async;
 
 // Board contract WASM bytes (bundled)
-const ROOM_CONTRACT_WASM: &[u8] = include_bytes!("../contracts/room_contract.wasm");
+const BOARD_CONTRACT_WASM: &[u8] = include_bytes!("../contracts/board_contract.wasm");
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -25,13 +25,13 @@ async fn main() -> Result<()> {
     let node_url = "ws://127.0.0.1:7509/v1/contract/command?encodingProtocol=native";
 
     // Board owner verifying key
-    let room_owner_vk_bytes: [u8; 32] =
+    let board_owner_vk_bytes: [u8; 32] =
         bs58::decode("69Ht4YjZsT884MndR2uWhQYe1wb9b2x77HRq7Dgq7wYE")
             .into_vec()?
             .try_into()
-            .map_err(|_| anyhow!("Invalid room owner key"))?;
-    let room_owner_vk = VerifyingKey::from_bytes(&room_owner_vk_bytes)?;
-    let room_owner_id = MemberId::from(&room_owner_vk);
+            .map_err(|_| anyhow!("Invalid board owner key"))?;
+    let board_owner_vk = VerifyingKey::from_bytes(&board_owner_vk_bytes)?;
+    let board_owner_id = MemberId::from(&board_owner_vk);
 
     // Invite bot signing key (existing member who can invite)
     let invite_bot_sk_bytes: [u8; 32] =
@@ -65,23 +65,23 @@ async fn main() -> Result<()> {
     let web_api = WebApi::start(ws_stream);
     let web_api = Arc::new(Mutex::new(web_api));
 
-    // Create contract key from room owner
-    let params = ChatRoomParametersV1 {
-        owner: room_owner_vk,
+    // Create contract key from board owner
+    let params = ChatBboardParametersV1 {
+        owner: board_owner_vk,
     };
     let params_bytes = {
         let mut buf = Vec::new();
         ciborium::ser::into_writer(&params, &mut buf)?;
         buf
     };
-    let contract_code = ContractCode::from(ROOM_CONTRACT_WASM);
+    let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
     let contract_key =
         ContractKey::from_params_and_code(Parameters::from(params_bytes), &contract_code);
 
     println!("Contract key: {}", contract_key.id());
 
-    // Fetch current room state
-    println!("Fetching room state...");
+    // Fetch current board state
+    println!("Fetching board state...");
     let get_request = ContractRequest::Get {
         key: *contract_key.id(),
         return_contract_code: false,
@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
         tokio::time::timeout(std::time::Duration::from_secs(30), api.recv()).await??
     };
 
-    let mut room_state: ChatRoomStateV1 = match response {
+    let mut board_state: ChatBboardStateV1 = match response {
         HostResponse::ContractResponse(ContractResponse::GetResponse { state, .. }) => {
             ciborium::de::from_reader(&state[..])?
         }
@@ -107,24 +107,24 @@ async fn main() -> Result<()> {
     };
 
     // Rebuild actions state
-    room_state.recent_messages.rebuild_actions_state();
+    board_state.recent_messages.rebuild_actions_state();
 
     println!(
         "Board name: {}",
-        room_state
+        board_state
             .configuration
             .configuration
             .display
             .name
             .to_string_lossy()
     );
-    println!("Current members: {}", room_state.members.members.len());
+    println!("Current members: {}", board_state.members.members.len());
 
     // List all members with their nicknames
     println!("\nMember list:");
-    for am in &room_state.members.members {
+    for am in &board_state.members.members {
         let member_id = MemberId::from(&am.member.member_vk);
-        let nickname = room_state
+        let nickname = board_state
             .member_info
             .member_info
             .iter()
@@ -137,7 +137,7 @@ async fn main() -> Result<()> {
     println!();
 
     // Check if GitHub bot is already a member
-    let already_member = room_state
+    let already_member = board_state
         .members
         .members
         .iter()
@@ -150,7 +150,7 @@ async fn main() -> Result<()> {
     // Create new member entry (invited by invite bot)
     println!("Creating member entry for GitHub bot...");
     let member = Member {
-        owner_member_id: room_owner_id,
+        owner_member_id: board_owner_id,
         invited_by: invite_bot_id,
         member_vk: github_bot_vk,
     };
@@ -165,7 +165,7 @@ async fn main() -> Result<()> {
     let authorized_member_info = AuthorizedMemberInfo::new(member_info, &github_bot_sk);
 
     // Create delta with new member
-    let delta = ChatRoomStateV1Delta {
+    let delta = ChatBboardStateV1Delta {
         members: Some(MembersDelta::new(vec![authorized_member])),
         member_info: Some(vec![authorized_member_info]),
         ..Default::default()

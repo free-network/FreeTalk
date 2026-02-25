@@ -1,7 +1,7 @@
-use crate::room_state::member::MemberId;
-use crate::room_state::privacy::SealedBytes;
-use crate::room_state::ChatRoomParametersV1;
-use crate::room_state::ChatRoomStateV1;
+use crate::board_state::member::MemberId;
+use crate::board_state::privacy::SealedBytes;
+use crate::board_state::ChatBoardParametersV1;
+use crate::board_state::ChatBoardStateV1;
 use crate::util::{sign_struct, verify_struct};
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use freenet_scaffold::ComposableState;
@@ -14,10 +14,10 @@ pub struct MemberInfoV1 {
 }
 
 impl ComposableState for MemberInfoV1 {
-    type ParentState = ChatRoomStateV1;
+    type ParentState = ChatBoardStateV1;
     type Summary = HashMap<MemberId, u32>;
     type Delta = Vec<AuthorizedMemberInfo>;
-    type Parameters = ChatRoomParametersV1;
+    type Parameters = ChatBoardParametersV1;
 
     fn verify(
         &self,
@@ -103,9 +103,9 @@ impl ComposableState for MemberInfoV1 {
                     ));
                 }
 
-                // Check if this is the room owner
+                // Check if this is the board owner
                 if *member_id == parameters.owner_id() {
-                    // If it's the owner, verify against the room owner's key
+                    // If it's the owner, verify against the board owner's key
                     member_info.verify_signature(parameters)?;
                 } else {
                     // For non-owners, verify they exist and check their signature.
@@ -180,7 +180,7 @@ impl AuthorizedMemberInfo {
         }
     }
 
-    pub fn verify_signature(&self, parameters: &ChatRoomParametersV1) -> Result<(), String> {
+    pub fn verify_signature(&self, parameters: &ChatBoardParametersV1) -> Result<(), String> {
         self.verify_signature_with_key(&parameters.owner)
     }
 
@@ -239,7 +239,7 @@ impl MemberInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::room_state::member::{AuthorizedMember, Member};
+    use crate::board_state::member::{AuthorizedMember, Member};
     use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
 
@@ -271,7 +271,7 @@ mod tests {
             .member_info
             .push(authorized_member_info.clone());
 
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         let member = Member {
             owner_member_id: owner_id,
             invited_by: owner_id,
@@ -280,7 +280,7 @@ mod tests {
         let authorized_member = AuthorizedMember::new(member, &owner_signing_key);
         parent_state.members.members.push(authorized_member);
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -344,8 +344,8 @@ mod tests {
         let mut member_info_v1 = MemberInfoV1::default();
         member_info_v1.member_info.push(authorized_member_info);
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: owner_signing_key.verifying_key(),
         };
 
@@ -371,8 +371,8 @@ mod tests {
         member_info_v1.member_info.push(authorized_member_info1);
         member_info_v1.member_info.push(authorized_member_info2);
 
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: owner_signing_key.verifying_key(),
         };
 
@@ -405,7 +405,7 @@ mod tests {
         let mut member_info_v1 = MemberInfoV1::default();
         let delta = vec![authorized_member_info.clone()];
 
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.members.members.push(AuthorizedMember {
             member: Member {
                 owner_member_id: owner_id,
@@ -418,7 +418,7 @@ mod tests {
                 .into(),
         });
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -543,7 +543,7 @@ mod tests {
         let authorized_member_info =
             AuthorizedMemberInfo::new(member_info.clone(), &owner_signing_key);
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_signing_key.verifying_key(),
         };
 
@@ -551,7 +551,7 @@ mod tests {
 
         // Test with wrong key
         let wrong_key = SigningKey::generate(&mut OsRng).verifying_key();
-        let wrong_parameters = ChatRoomParametersV1 { owner: wrong_key };
+        let wrong_parameters = ChatBoardParametersV1 { owner: wrong_key };
         assert!(authorized_member_info
             .verify_signature(&wrong_parameters)
             .is_err());
@@ -563,8 +563,8 @@ mod tests {
         let owner_verifying_key = owner_signing_key.verifying_key();
 
         let mut member_info_v1 = MemberInfoV1::default();
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -634,7 +634,7 @@ mod tests {
             .push(authorized_member_info_v1.clone());
 
         // Create parent state with the member
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         let member = Member {
             owner_member_id: owner_id,
             invited_by: owner_id,
@@ -643,7 +643,7 @@ mod tests {
         let authorized_member = AuthorizedMember::new(member, &owner_signing_key);
         parent_state.members.members.push(authorized_member);
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -677,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn test_room_owner_member_info() {
+    fn test_board_owner_member_info() {
         let owner_signing_key = SigningKey::generate(&mut OsRng);
         let owner_verifying_key = owner_signing_key.verifying_key();
         let owner_id = owner_verifying_key.into();
@@ -689,7 +689,7 @@ mod tests {
         let mut member_info_v1 = MemberInfoV1::default();
         member_info_v1.member_info.push(authorized_owner_info);
 
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.members.members.push(AuthorizedMember {
             member: Member {
                 owner_member_id: owner_id,
@@ -702,7 +702,7 @@ mod tests {
                 .into(),
         });
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -743,7 +743,7 @@ mod tests {
             .push(authorized_member_info.clone());
 
         // Set up parent state with only the regular member
-        let mut parent_state = ChatRoomStateV1::default();
+        let mut parent_state = ChatBoardStateV1::default();
         parent_state.members.members.push(AuthorizedMember {
             member: Member {
                 owner_member_id: owner_id,
@@ -756,7 +756,7 @@ mod tests {
                 .into(),
         });
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
@@ -819,8 +819,8 @@ mod tests {
         };
 
         // Parent state with member REMOVED (simulates ban/max_members)
-        let parent_state = ChatRoomStateV1::default();
-        let parameters = ChatRoomParametersV1 {
+        let parent_state = ChatBoardStateV1::default();
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 

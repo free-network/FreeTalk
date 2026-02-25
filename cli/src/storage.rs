@@ -3,8 +3,8 @@ use anyhow::{anyhow, Result};
 use directories::ProjectDirs;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use freenet_stdlib::prelude::ContractKey;
-use river_core::room_state::member::AuthorizedMember;
-use river_core::room_state::ChatRoomStateV1;
+use river_core::board_state::member::AuthorizedMember;
+use river_core::board_state::ChatBoardStateV1;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -12,9 +12,9 @@ use std::path::PathBuf;
 use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredRoomInfo {
+pub struct StoredBoardInfo {
     pub signing_key_bytes: [u8; 32],
-    pub state: ChatRoomStateV1,
+    pub state: ChatBoardStateV1,
     pub contract_key: String, // Store as string for serialization
     /// The user's own AuthorizedMember, stored so they can re-add themselves
     /// after being pruned for inactivity (no recent messages).
@@ -26,9 +26,9 @@ pub struct StoredRoomInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RoomStorage {
-    /// Map from room owner verifying key (as base58) to room info
-    pub rooms: HashMap<String, StoredRoomInfo>,
+pub struct BoardStorage {
+    /// Map from board owner verifying key (as base58) to board info
+    pub boards: HashMap<String, StoredBoardInfo>,
 }
 
 pub struct Storage {
@@ -51,23 +51,23 @@ impl Storage {
 
         fs::create_dir_all(&data_dir)?;
 
-        let storage_path = data_dir.join("rooms.json");
+        let storage_path = data_dir.join("boards.json");
 
         Ok(Self { storage_path })
     }
 
-    pub fn load_rooms(&self) -> Result<RoomStorage> {
+    pub fn load_boards(&self) -> Result<BoardStorage> {
         if !self.storage_path.exists() {
-            return Ok(RoomStorage::default());
+            return Ok(BoardStorage::default());
         }
 
         let contents = fs::read_to_string(&self.storage_path)?;
-        let mut storage: RoomStorage = serde_json::from_str(&contents)?;
+        let mut storage: BoardStorage = serde_json::from_str(&contents)?;
 
         // Regenerate contract keys to ensure they match the current bundled WASM
-        // This handles the case where rooms were stored with an older WASM version
+        // This handles the case where boards were stored with an older WASM version
         let mut updated = false;
-        for (owner_key_str, room_info) in storage.rooms.iter_mut() {
+        for (owner_key_str, board_info) in storage.boards.iter_mut() {
             let owner_key_bytes = match bs58::decode(owner_key_str).into_vec() {
                 Ok(bytes) if bytes.len() == 32 => {
                     let mut arr = [0u8; 32];
@@ -82,41 +82,41 @@ impl Storage {
             };
             let new_key = compute_contract_key(&owner_vk);
             let new_key_str = new_key.id().to_string();
-            if room_info.contract_key != new_key_str {
+            if board_info.contract_key != new_key_str {
                 info!(
-                    "Updating contract key for room: {} -> {}",
-                    room_info.contract_key, new_key_str
+                    "Updating contract key for board: {} -> {}",
+                    board_info.contract_key, new_key_str
                 );
-                room_info.contract_key = new_key_str;
+                board_info.contract_key = new_key_str;
                 updated = true;
             }
         }
 
         // Save the updated storage if any keys changed
         if updated {
-            self.save_rooms(&storage)?;
+            self.save_boards(&storage)?;
         }
 
         Ok(storage)
     }
 
-    pub fn save_rooms(&self, storage: &RoomStorage) -> Result<()> {
+    pub fn save_boards(&self, storage: &BoardStorage) -> Result<()> {
         let contents = serde_json::to_string_pretty(storage)?;
         fs::write(&self.storage_path, contents)?;
         Ok(())
     }
 
-    pub fn add_room(
+    pub fn add_board(
         &self,
         owner_vk: &VerifyingKey,
         signing_key: &SigningKey,
-        state: ChatRoomStateV1,
+        state: ChatBoardStateV1,
         contract_key: &ContractKey,
     ) -> Result<()> {
-        let mut storage = self.load_rooms()?;
+        let mut storage = self.load_boards()?;
 
         let owner_key_str = bs58::encode(owner_vk.as_bytes()).into_string();
-        let room_info = StoredRoomInfo {
+        let board_info = StoredBoardInfo {
             signing_key_bytes: signing_key.to_bytes(),
             state,
             contract_key: contract_key.id().to_string(),
@@ -124,56 +124,56 @@ impl Storage {
             invite_chain: Vec::new(),
         };
 
-        storage.rooms.insert(owner_key_str, room_info);
-        self.save_rooms(&storage)?;
+        storage.boards.insert(owner_key_str, board_info);
+        self.save_boards(&storage)?;
 
         Ok(())
     }
 
-    pub fn get_room(
+    pub fn get_board(
         &self,
         owner_vk: &VerifyingKey,
-    ) -> Result<Option<(SigningKey, ChatRoomStateV1, String)>> {
-        let storage = self.load_rooms()?;
+    ) -> Result<Option<(SigningKey, ChatBoardStateV1, String)>> {
+        let storage = self.load_boards()?;
         let owner_key_str = bs58::encode(owner_vk.as_bytes()).into_string();
 
-        if let Some(room_info) = storage.rooms.get(&owner_key_str) {
-            let signing_key = SigningKey::from_bytes(&room_info.signing_key_bytes);
+        if let Some(board_info) = storage.boards.get(&owner_key_str) {
+            let signing_key = SigningKey::from_bytes(&board_info.signing_key_bytes);
             Ok(Some((
                 signing_key,
-                room_info.state.clone(),
-                room_info.contract_key.clone(),
+                board_info.state.clone(),
+                board_info.contract_key.clone(),
             )))
         } else {
             Ok(None)
         }
     }
 
-    pub fn update_room_state(&self, owner_vk: &VerifyingKey, state: ChatRoomStateV1) -> Result<()> {
-        let mut storage = self.load_rooms()?;
+    pub fn update_board_state(&self, owner_vk: &VerifyingKey, state: ChatBoardStateV1) -> Result<()> {
+        let mut storage = self.load_boards()?;
         let owner_key_str = bs58::encode(owner_vk.as_bytes()).into_string();
 
-        if let Some(room_info) = storage.rooms.get_mut(&owner_key_str) {
-            room_info.state = state;
-            self.save_rooms(&storage)?;
+        if let Some(board_info) = storage.boards.get_mut(&owner_key_str) {
+            board_info.state = state;
+            self.save_boards(&storage)?;
             Ok(())
         } else {
             Err(anyhow!("Board not found"))
         }
     }
 
-    /// Update the contract key for a room (used during migration to new contract version)
+    /// Update the contract key for a board (used during migration to new contract version)
     pub fn update_contract_key(
         &self,
         owner_vk: &VerifyingKey,
         new_key: &ContractKey,
     ) -> Result<()> {
-        let mut storage = self.load_rooms()?;
+        let mut storage = self.load_boards()?;
         let owner_key_str = bs58::encode(owner_vk.as_bytes()).into_string();
 
-        if let Some(room_info) = storage.rooms.get_mut(&owner_key_str) {
-            room_info.contract_key = new_key.id().to_string();
-            self.save_rooms(&storage)?;
+        if let Some(board_info) = storage.boards.get_mut(&owner_key_str) {
+            board_info.contract_key = new_key.id().to_string();
+            self.save_boards(&storage)?;
             Ok(())
         } else {
             Err(anyhow!("Board not found"))
@@ -186,39 +186,39 @@ impl Storage {
         authorized_member: &AuthorizedMember,
         invite_chain: &[AuthorizedMember],
     ) -> Result<()> {
-        let mut storage = self.load_rooms()?;
+        let mut storage = self.load_boards()?;
         let owner_key_str = bs58::encode(owner_vk.as_bytes()).into_string();
-        if let Some(room_info) = storage.rooms.get_mut(&owner_key_str) {
-            room_info.self_authorized_member = Some(authorized_member.clone());
-            room_info.invite_chain = invite_chain.to_vec();
-            self.save_rooms(&storage)?;
+        if let Some(board_info) = storage.boards.get_mut(&owner_key_str) {
+            board_info.self_authorized_member = Some(authorized_member.clone());
+            board_info.invite_chain = invite_chain.to_vec();
+            self.save_boards(&storage)?;
         }
         Ok(())
     }
 
-    pub fn list_rooms(&self) -> Result<Vec<(VerifyingKey, String, String)>> {
-        let storage = self.load_rooms()?;
-        let mut rooms = Vec::new();
+    pub fn list_boards(&self) -> Result<Vec<(VerifyingKey, String, String)>> {
+        let storage = self.load_boards()?;
+        let mut boards = Vec::new();
 
-        for (owner_key_str, room_info) in storage.rooms.iter() {
+        for (owner_key_str, board_info) in storage.boards.iter() {
             let owner_key_bytes = bs58::decode(owner_key_str).into_vec()?;
             if owner_key_bytes.len() == 32 {
                 let mut key_array = [0u8; 32];
                 key_array.copy_from_slice(&owner_key_bytes);
                 if let Ok(owner_vk) = VerifyingKey::from_bytes(&key_array) {
-                    let room_name = room_info
+                    let board_name = board_info
                         .state
                         .configuration
                         .configuration
                         .display
                         .name
                         .to_string_lossy();
-                    rooms.push((owner_vk, room_name, room_info.contract_key.clone()));
+                    boards.push((owner_vk, board_name, board_info.contract_key.clone()));
                 }
             }
         }
 
-        Ok(rooms)
+        Ok(boards)
     }
 }
 
@@ -226,7 +226,7 @@ impl Storage {
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use river_core::room_state::configuration::{AuthorizedConfigurationV1, Configuration};
+    use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
     use tempfile::TempDir;
 
     fn create_test_storage() -> (Storage, TempDir) {
@@ -240,14 +240,14 @@ mod tests {
     }
 
     /// Compute the expected contract key for a given owner verifying key.
-    /// This matches what load_rooms will regenerate.
+    /// This matches what load_boards will regenerate.
     fn expected_contract_key(owner_vk: &VerifyingKey) -> ContractKey {
         compute_contract_key(owner_vk)
     }
 
-    fn create_test_state(owner_sk: &SigningKey) -> ChatRoomStateV1 {
+    fn create_test_state(owner_sk: &SigningKey) -> ChatBoardStateV1 {
         let owner_vk = owner_sk.verifying_key();
-        let mut state = ChatRoomStateV1::default();
+        let mut state = ChatBoardStateV1::default();
         let config = Configuration {
             owner_member_id: owner_vk.into(),
             ..Default::default()
@@ -264,13 +264,13 @@ mod tests {
         let state = create_test_state(&owner_sk);
         let initial_key = expected_contract_key(&owner_vk);
 
-        // Add room with the computed contract key
+        // Add board with the computed contract key
         storage
-            .add_room(&owner_vk, &owner_sk, state, &initial_key)
+            .add_board(&owner_vk, &owner_sk, state, &initial_key)
             .unwrap();
 
         // Verify the key is stored correctly (will be regenerated on load)
-        let (_, _, stored_key) = storage.get_room(&owner_vk).unwrap().unwrap();
+        let (_, _, stored_key) = storage.get_board(&owner_vk).unwrap().unwrap();
         assert_eq!(stored_key, initial_key.id().to_string());
 
         // Create a different key for testing update
@@ -286,20 +286,20 @@ mod tests {
             .unwrap();
 
         // After reload, key will be regenerated to match current WASM, not the updated key
-        // This tests that update_contract_key persists, but load_rooms regenerates
-        let (_, _, stored_key) = storage.get_room(&owner_vk).unwrap().unwrap();
+        // This tests that update_contract_key persists, but load_boards regenerates
+        let (_, _, stored_key) = storage.get_board(&owner_vk).unwrap().unwrap();
         // The key gets regenerated on load, so it will be the expected key
         assert_eq!(stored_key, initial_key.id().to_string());
     }
 
     #[test]
-    fn test_update_contract_key_room_not_found() {
+    fn test_update_contract_key_board_not_found() {
         let (storage, _temp_dir) = create_test_storage();
         let owner_sk = create_test_signing_key();
         let owner_vk = owner_sk.verifying_key();
         let new_key = expected_contract_key(&owner_vk);
 
-        // Attempt to update non-existent room
+        // Attempt to update non-existent board
         let result = storage.update_contract_key(&owner_vk, &new_key);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Board not found"));
@@ -313,9 +313,9 @@ mod tests {
         let state = create_test_state(&owner_sk);
         let initial_key = expected_contract_key(&owner_vk);
 
-        // Add room
+        // Add board
         storage
-            .add_room(&owner_vk, &owner_sk, state.clone(), &initial_key)
+            .add_board(&owner_vk, &owner_sk, state.clone(), &initial_key)
             .unwrap();
 
         // Create a different key for testing update
@@ -331,7 +331,7 @@ mod tests {
             .unwrap();
 
         // Verify state is preserved (key will be regenerated but state should remain)
-        let (retrieved_sk, retrieved_state, _) = storage.get_room(&owner_vk).unwrap().unwrap();
+        let (retrieved_sk, retrieved_state, _) = storage.get_board(&owner_vk).unwrap().unwrap();
         assert_eq!(retrieved_sk.to_bytes(), owner_sk.to_bytes());
         assert_eq!(
             retrieved_state.configuration.configuration.max_members,
@@ -347,14 +347,14 @@ mod tests {
         let state = create_test_state(&owner_sk);
         let contract_key = expected_contract_key(&owner_vk);
 
-        // Add room
+        // Add board
         storage
-            .add_room(&owner_vk, &owner_sk, state.clone(), &contract_key)
+            .add_board(&owner_vk, &owner_sk, state.clone(), &contract_key)
             .unwrap();
 
         // Retrieve and verify
         let (retrieved_sk, retrieved_state, retrieved_key) =
-            storage.get_room(&owner_vk).unwrap().unwrap();
+            storage.get_board(&owner_vk).unwrap().unwrap();
 
         assert_eq!(retrieved_sk.to_bytes(), owner_sk.to_bytes());
         // The contract key should match the expected key (computed from owner_vk + current WASM)

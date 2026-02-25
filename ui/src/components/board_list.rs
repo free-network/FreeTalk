@@ -1,11 +1,11 @@
-pub(crate) mod create_room_modal;
-pub(crate) mod edit_room_modal;
+pub(crate) mod create_board_modal;
+pub(crate) mod edit_board_modal;
 pub(crate) mod receive_invitation_modal;
-pub(crate) mod room_name_field;
+pub(crate) mod board_name_field;
 
-use crate::components::app::chat_delegate::save_rooms_to_delegate;
-use crate::components::app::document_title::mark_current_room_as_read;
-use crate::components::app::{CREATE_ROOM_MODAL, CURRENT_ROOM, ROOMS};
+use crate::components::app::chat_delegate::save_boards_to_delegate;
+use crate::components::app::document_title::mark_current_board_as_read;
+use crate::components::app::{CREATE_BOARD_MODAL, CURRENT_BOARD, BOARDS};
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::logger::tracing::error;
 use dioxus::prelude::*;
@@ -55,39 +55,39 @@ fn format_build_time_local() -> String {
 }
 
 #[component]
-pub fn RoomList() -> Element {
+pub fn BoardList() -> Element {
     let mut is_open = use_signal(|| false);
 
-    // Memoize the room list to avoid reading signals during render
-    let room_items = use_memo(move || {
-        let rooms = ROOMS.read();
-        let current_room_key = CURRENT_ROOM.read().owner_key;
+    // Memoize the board list to avoid reading signals during render
+    let board_items = use_memo(move || {
+        let boards = BOARDS.read();
+        let current_board_key = CURRENT_BOARD.read().owner_key;
 
-        rooms
+        boards
             .map
             .iter()
-            .map(|(room_key, room_data)| {
-                let room_key = *room_key;
-                // Decrypt room name if room is private and we have the secret
-                let sealed_name = &room_data
-                    .room_state
+            .map(|(board_key, board_data)| {
+                let board_key = *board_key;
+                // Decrypt board name if board is private and we have the secret
+                let sealed_name = &board_data
+                    .board_state
                     .configuration
                     .configuration
                     .display
                     .name;
-                let room_name = match unseal_bytes_with_secrets(sealed_name, &room_data.secrets) {
+                let board_name = match unseal_bytes_with_secrets(sealed_name, &board_data.secrets) {
                     Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                     Err(_) => sealed_name.to_string_lossy(),
                 };
-                let is_current = current_room_key == Some(room_key);
-                (room_key, room_name, is_current)
+                let is_current = current_board_key == Some(board_key);
+                (board_key, board_name, is_current)
             })
             .collect::<Vec<_>>()
     });
 
-    // Get current room name for the dropdown button
-    let current_room_name = use_memo(move || {
-        room_items
+    // Get current board name for the dropdown button
+    let current_board_name = use_memo(move || {
+        board_items
             .read()
             .iter()
             .find(|(_, _, is_current)| *is_current)
@@ -105,7 +105,7 @@ pub fn RoomList() -> Element {
                         is_open.set(!is_open());
                     },
                     Icon { width: 48, height: 48, icon: FaComments, class: "text-text-muted" }
-                    span { class: "flex-1 text-left text-4xl truncate", "{current_room_name}" }
+                    span { class: "flex-1 text-left text-4xl truncate", "{current_board_name}" }
                     Icon {
                         width: 12,
                         height: 12,
@@ -129,12 +129,12 @@ pub fn RoomList() -> Element {
                         div { class: "bg-panel", style: "min-width: 60vw",
                             // Board list
                             ul { class: "max-h-64 overflow-y-auto py-1",
-                                {room_items.read().iter().map(|(room_key, room_name, is_current)| {
-                                    let room_key = *room_key;
-                                    let room_name = room_name.clone();
+                                {board_items.read().iter().map(|(board_key, board_name, is_current)| {
+                                    let board_key = *board_key;
+                                    let board_name = board_name.clone();
                                     let is_current = *is_current;
                                     rsx! {
-                                        li { key: "{room_key:?}",
+                                        li { key: "{board_key:?}",
                                             button {
                                                 class: format!(
                                                     "w-full text-left px-3 py-2 text-sm transition-colors {}",
@@ -145,34 +145,34 @@ pub fn RoomList() -> Element {
                                                     }
                                                 ),
                                                 onclick: move |_| {
-                                                    // Navigate to room URL using hash (component is outside Router context)
-                                                    let room_id = bs58::encode(room_key.as_bytes()).into_string();
+                                                    // Navigate to board URL using hash (component is outside Router context)
+                                                    let board_id = bs58::encode(board_key.as_bytes()).into_string();
                                                     if let Some(win) = window() {
-                                                        let _ = win.location().set_hash(&format!("/room/{}", room_id));
+                                                        let _ = win.location().set_hash(&format!("/board/{}", board_id));
                                                     }
-                                                    mark_current_room_as_read();
+                                                    mark_current_board_as_read();
                                                     is_open.set(false);
                                                     spawn(async move {
-                                                        if let Err(e) = save_rooms_to_delegate().await {
-                                                            error!("Failed to save current room selection: {}", e);
+                                                        if let Err(e) = save_boards_to_delegate().await {
+                                                            error!("Failed to save current board selection: {}", e);
                                                         }
                                                     });
                                                 },
-                                                span { class: "block truncate", "{room_name}" }
+                                                span { class: "block truncate", "{board_name}" }
                                             }
                                         }
                                     }
                                 }).collect::<Vec<_>>().into_iter()}
 
                                 // Empty state
-                                if room_items.read().is_empty() {
+                                if board_items.read().is_empty() {
                                     li { class: "px-3 py-4 text-sm text-text-muted text-center",
                                         "No boards yet"
                                     }
                                 }
                             }
 
-                            // Header with create room button
+                            // Header with create board button
                             div { class: "px-3 py-2 border-t border-border flex items-center justify-center",
                                 span { class: "text-xs font-semibold text-text-muted uppercase tracking-wide",
                                     "Boards"
@@ -181,7 +181,7 @@ pub fn RoomList() -> Element {
                                     class: "p-1 rounded text-text-muted hover:text-accent hover:bg-surface transition-colors",
                                     title: "Create Board",
                                     onclick: move |_| {
-                                        CREATE_ROOM_MODAL.write().show = true;
+                                        CREATE_BOARD_MODAL.write().show = true;
                                         is_open.set(false);
                                     },
                                     Icon { width: 12, height: 12, icon: FaPlus }

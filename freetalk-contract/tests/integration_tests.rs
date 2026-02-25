@@ -3,9 +3,9 @@
 mod common;
 
 use common::{
-    collect_river_node_diagnostics, connect_ws_with_retries, deploy_room_contract,
-    get_all_room_states, river_states_equal, send_test_message, subscribe_to_contract,
-    update_room_state_delta, wait_for_update_response, RoomTestState,
+    collect_river_node_diagnostics, connect_ws_with_retries, deploy_board_contract,
+    get_all_board_states, river_states_equal, send_test_message, subscribe_to_contract,
+    update_board_state_delta, wait_for_update_response, BoardTestState,
 };
 use freenet_scaffold::ComposableState;
 use freenet_stdlib::prelude::*;
@@ -137,10 +137,10 @@ async fn test_invitation_message_propagation() -> TestResult {
 
         let alice_signing_key = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
         let alice_verifying_key = alice_signing_key.verifying_key();
-        let initial_state = RoomTestState::new_test_room();
+        let initial_state = BoardTestState::new_test_board();
 
         println!("[CONFIG] Pre-configured Alice owner key: {:?}", alice_verifying_key);
-        println!("[CONFIG] Pre-configured initial state with {} members", initial_state.room_state.members.members.len());
+        println!("[CONFIG] Pre-configured initial state with {} members", initial_state.board_state.members.members.len());
 
         tokio::time::sleep(std::time::Duration::from_secs(20)).await;
 
@@ -162,18 +162,18 @@ async fn test_invitation_message_propagation() -> TestResult {
             println!("=== River Invitation Flow Test ===");
             println!("Testing: Gateway + Alice (Peer 1) + Bob (Peer 2)");
 
-            println!("\n[STEP 1] Create a room on Alice");
+            println!("\n[STEP 1] Create a board on Alice");
             println!("   - Using pre-configured Alice owner key: {:?}", alice_verifying_key);
 
             println!("Deploying contract...");
-            let contract_key = deploy_room_contract(
+            let contract_key = deploy_board_contract(
                 &mut client_node1,
-                initial_state.room_state.clone(),
+                initial_state.board_state.clone(),
                 &initial_state.parameters,
                 false,
             ).await.map_err(|e| format!("Failed to deploy River contract: {}", e))?;
 
-            println!("\n[STEP 2] Alice subscribes to the room");
+            println!("\n[STEP 2] Alice subscribes to the board");
             println!("About to call subscribe_to_contract for Alice...");
 
             let subscribe_start = std::time::Instant::now();
@@ -192,53 +192,53 @@ async fn test_invitation_message_propagation() -> TestResult {
 
             println!("   - Bob's key: {:?}", bob_verifying_key);
 
-            let bob_member = river_core::room_state::member::Member {
+            let bob_member = river_core::board_state::member::Member {
                 owner_member_id: alice_verifying_key.into(),
                 member_vk: bob_verifying_key,
                 invited_by: alice_verifying_key.into(),
             };
 
-            let authorized_bob_member = river_core::room_state::member::AuthorizedMember::new(
+            let authorized_bob_member = river_core::board_state::member::AuthorizedMember::new(
                 bob_member, &alice_signing_key
             );
 
             println!("   - Created authorized member for Bob");
 
-            println!("\n Step 4: Bob accepts invitation and joins room");
+            println!("\n Step 4: Bob accepts invitation and joins board");
 
             subscribe_to_contract(&mut _bob_client, contract_key).await
                 .map_err(|e| format!("Bob subscribe failed: {}", e))?;
 
             let mut bob_clients = vec![&mut _bob_client];
-            let bob_room_states = get_all_room_states(&mut bob_clients, contract_key).await
-                .map_err(|e| format!("Bob failed to get room state: {}", e))?;
-            let mut bob_room_state = bob_room_states[0].clone();
+            let bob_board_states = get_all_board_states(&mut bob_clients, contract_key).await
+                .map_err(|e| format!("Bob failed to get board state: {}", e))?;
+            let mut bob_board_state = bob_board_states[0].clone();
 
-            let bob_members_delta = river_core::room_state::member::MembersDelta::new(
+            let bob_members_delta = river_core::board_state::member::MembersDelta::new(
                 vec![authorized_bob_member.clone()]
             );
 
-            bob_room_state.members.apply_delta(&bob_room_state.clone(), &initial_state.parameters, &Some(bob_members_delta))
+            bob_board_state.members.apply_delta(&bob_board_state.clone(), &initial_state.parameters, &Some(bob_members_delta))
                 .map_err(|e| format!("Failed to add Bob to members: {}", e))?;
 
-            let bob_member_info = river_core::room_state::member_info::MemberInfo {
+            let bob_member_info = river_core::board_state::member_info::MemberInfo {
                 member_id: bob_signing_key.verifying_key().into(),
                 version: 0,
-                preferred_nickname: river_core::room_state::privacy::SealedBytes::public("Bob".to_string().into_bytes()),
+                preferred_nickname: river_core::board_state::privacy::SealedBytes::public("Bob".to_string().into_bytes()),
             };
-            let authorized_bob_info = river_core::room_state::member_info::AuthorizedMemberInfo::new_with_member_key(
+            let authorized_bob_info = river_core::board_state::member_info::AuthorizedMemberInfo::new_with_member_key(
                 bob_member_info, &bob_signing_key
             );
 
-            bob_room_state.member_info.member_info.push(authorized_bob_info.clone());
+            bob_board_state.member_info.member_info.push(authorized_bob_info.clone());
 
-            let bob_membership_delta = river_core::room_state::ChatRoomStateV1Delta {
-                members: Some(river_core::room_state::member::MembersDelta::new(vec![authorized_bob_member.clone()])),
+            let bob_membership_delta = river_core::board_state::ChatBoardStateV1Delta {
+                members: Some(river_core::board_state::member::MembersDelta::new(vec![authorized_bob_member.clone()])),
                 ..Default::default()
             };
 
             println!("   - Sending Bob's membership delta to network...");
-            update_room_state_delta(&mut _bob_client, contract_key, bob_membership_delta).await
+            update_board_state_delta(&mut _bob_client, contract_key, bob_membership_delta).await
                 .map_err(|e| format!("Failed to update Bob's membership: {}", e))?;
 
             println!("   - Waiting for membership update response...");
@@ -248,12 +248,12 @@ async fn test_invitation_message_propagation() -> TestResult {
             println!("   - Bob membership update successful!");
 
             println!("   - Sending Bob's member info (nickname)...");
-            let bob_info_delta = river_core::room_state::ChatRoomStateV1Delta {
+            let bob_info_delta = river_core::board_state::ChatBoardStateV1Delta {
                 member_info: Some(vec![authorized_bob_info.clone()]),
                 ..Default::default()
             };
 
-            update_room_state_delta(&mut _bob_client, contract_key, bob_info_delta).await
+            update_board_state_delta(&mut _bob_client, contract_key, bob_info_delta).await
                 .map_err(|e| format!("Failed to update Bob's member info: {}", e))?;
 
             wait_for_update_response(&mut _bob_client, &contract_key).await
@@ -261,16 +261,16 @@ async fn test_invitation_message_propagation() -> TestResult {
 
             println!("   - Bob member info update successful!");
 
-            println!("   - Bob successfully joined the room");
+            println!("   - Bob successfully joined the board");
             tokio::time::sleep(Duration::from_secs(3)).await;
 
             println!("\n Step 5: Testing message propagation between Alice and Bob");
 
             println!("   - Alice sends message: 'Hello Bob!'");
             let mut alice_clients = vec![&mut client_node1];
-            let alice_room_states = get_all_room_states(&mut alice_clients, contract_key).await?;
+            let alice_board_states = get_all_board_states(&mut alice_clients, contract_key).await?;
 
-            send_test_message(&mut client_node1, contract_key, &alice_room_states[0], &initial_state.parameters,
+            send_test_message(&mut client_node1, contract_key, &alice_board_states[0], &initial_state.parameters,
                 "Hello Bob!".to_string(), &alice_signing_key).await
                 .map_err(|e| format!("Alice failed to send message: {}", e))?;
             wait_for_update_response(&mut client_node1, &contract_key).await?;
@@ -279,9 +279,9 @@ async fn test_invitation_message_propagation() -> TestResult {
 
             println!("   - Bob sends message: 'Hello Alice!'");
             let mut bob_clients = vec![&mut _bob_client];
-            let bob_room_states = get_all_room_states(&mut bob_clients, contract_key).await?;
+            let bob_board_states = get_all_board_states(&mut bob_clients, contract_key).await?;
 
-            send_test_message(&mut _bob_client, contract_key, &bob_room_states[0], &initial_state.parameters,
+            send_test_message(&mut _bob_client, contract_key, &bob_board_states[0], &initial_state.parameters,
                 "Hello Alice!".to_string(), &bob_signing_key).await
                 .map_err(|e| format!("Bob failed to send message: {}", e))?;
             wait_for_update_response(&mut _bob_client, &contract_key).await?;
@@ -291,7 +291,7 @@ async fn test_invitation_message_propagation() -> TestResult {
             println!("\n Step 6: Verifying message propagation (Issue #1775 test)");
 
             let mut all_clients = vec![&mut client_node1, &mut _bob_client];
-            let final_states = get_all_room_states(&mut all_clients, contract_key).await?;
+            let final_states = get_all_board_states(&mut all_clients, contract_key).await?;
             let (alice_final_state, bob_final_state) = (&final_states[0], &final_states[1]);
 
             println!("   - Alice sees {} messages", alice_final_state.recent_messages.messages.len());

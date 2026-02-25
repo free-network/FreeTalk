@@ -8,27 +8,27 @@ use freenet_stdlib::{
     prelude::*,
 };
 use river_core::{
-    room_state::{configuration::AuthorizedConfigurationV1, ChatRoomParametersV1},
-    ChatRoomStateV1,
+    board_state::{configuration::AuthorizedConfigurationV1, ChatBoardParametersV1},
+    ChatBoardStateV1,
 };
 use std::time::Duration;
 pub use test_utils::*;
 
 #[derive(Debug, Clone)]
-pub struct RoomTestState {
-    pub room_state: ChatRoomStateV1,
-    pub parameters: ChatRoomParametersV1,
+pub struct BoardTestState {
+    pub board_state: ChatBoardStateV1,
+    pub parameters: ChatBoardParametersV1,
     #[allow(dead_code)]
     pub owner_key: SigningKey,
 }
 
-impl RoomTestState {
-    pub fn new_test_room() -> Self {
+impl BoardTestState {
+    pub fn new_test_board() -> Self {
         let owner_key = SigningKey::from_bytes(&[1u8; 32]);
         let owner_verifying_key = owner_key.verifying_key();
 
         let config = AuthorizedConfigurationV1::new(
-            river_core::room_state::configuration::Configuration::default(),
+            river_core::board_state::configuration::Configuration::default(),
             &owner_key,
         );
 
@@ -42,52 +42,52 @@ impl RoomTestState {
 
         let owner_id = owner_verifying_key.into();
 
-        let member1 = river_core::room_state::member::Member {
+        let member1 = river_core::board_state::member::Member {
             owner_member_id: owner_id,
             invited_by: owner_id,
             member_vk: member1_verifying_key,
         };
 
-        let member2 = river_core::room_state::member::Member {
+        let member2 = river_core::board_state::member::Member {
             owner_member_id: owner_id,
             invited_by: owner_id,
             member_vk: member2_verifying_key,
         };
 
-        let member3 = river_core::room_state::member::Member {
+        let member3 = river_core::board_state::member::Member {
             owner_member_id: owner_id,
             invited_by: owner_id,
             member_vk: member3_verifying_key,
         };
 
         let authorized_member1 =
-            river_core::room_state::member::AuthorizedMember::new(member1, &owner_key);
+            river_core::board_state::member::AuthorizedMember::new(member1, &owner_key);
         let authorized_member2 =
-            river_core::room_state::member::AuthorizedMember::new(member2, &owner_key);
+            river_core::board_state::member::AuthorizedMember::new(member2, &owner_key);
         let authorized_member3 =
-            river_core::room_state::member::AuthorizedMember::new(member3, &owner_key);
+            river_core::board_state::member::AuthorizedMember::new(member3, &owner_key);
 
-        let members = river_core::room_state::member::MembersV1 {
+        let members = river_core::board_state::member::MembersV1 {
             members: vec![authorized_member1, authorized_member2, authorized_member3],
         };
 
-        let room_state = ChatRoomStateV1 {
+        let board_state = ChatBoardStateV1 {
             configuration: config,
-            bans: river_core::room_state::ban::BansV1::default(),
+            bans: river_core::board_state::ban::BansV1::default(),
             members,
-            member_info: river_core::room_state::member_info::MemberInfoV1::default(),
-            secrets: river_core::room_state::secret::RoomSecretsV1::default(),
-            recent_messages: river_core::room_state::message::MessagesV1::default(),
-            upgrade: river_core::room_state::upgrade::OptionalUpgradeV1(None),
+            member_info: river_core::board_state::member_info::MemberInfoV1::default(),
+            secrets: river_core::board_state::secret::BoardSecretsV1::default(),
+            recent_messages: river_core::board_state::message::MessagesV1::default(),
+            upgrade: river_core::board_state::upgrade::OptionalUpgradeV1(None),
             ..Default::default()
         };
 
-        let parameters = ChatRoomParametersV1 {
+        let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
         Self {
-            room_state,
+            board_state,
             parameters,
             owner_key,
         }
@@ -104,7 +104,7 @@ impl RoomTestState {
     }
 }
 
-pub fn river_states_equal(a: &ChatRoomStateV1, b: &ChatRoomStateV1) -> bool {
+pub fn river_states_equal(a: &ChatBoardStateV1, b: &ChatBoardStateV1) -> bool {
     a.configuration == b.configuration
         && a.bans == b.bans
         && a.members == b.members
@@ -113,28 +113,28 @@ pub fn river_states_equal(a: &ChatRoomStateV1, b: &ChatRoomStateV1) -> bool {
         && a.upgrade == b.upgrade
 }
 
-pub async fn deploy_room_contract(
+pub async fn deploy_board_contract(
     client: &mut WebApi,
-    initial_room_state: ChatRoomStateV1,
-    parameters: &ChatRoomParametersV1,
+    initial_board_state: ChatBoardStateV1,
+    parameters: &ChatBoardParametersV1,
     subscribe: bool,
 ) -> Result<ContractKey> {
     let mut path_to_code = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path_to_code.pop(); // go up from room-contract
+    path_to_code.pop(); // go up from board-contract
     path_to_code.pop(); // go up from contracts to river root
 
     println!(
-        "Loading River room contract from project root: {:?}",
+        "Loading River board contract from project root: {:?}",
         path_to_code
     );
     println!("Target directory: {:?}", std::env::var("CARGO_TARGET_DIR"));
 
-    let validation_result = initial_room_state.verify(&initial_room_state, parameters);
+    let validation_result = initial_board_state.verify(&initial_board_state, parameters);
     match validation_result {
-        Ok(_) => println!("[VALIDATION] Initial room state validation completed successfully"),
+        Ok(_) => println!("[VALIDATION] Initial board state validation completed successfully"),
         Err(e) => {
-            println!("[VALIDATION] Initial room state validation failed: {}", e);
-            return Err(anyhow::anyhow!("Invalid initial room state: {}", e));
+            println!("[VALIDATION] Initial board state validation failed: {}", e);
+            return Err(anyhow::anyhow!("Invalid initial board state: {}", e));
         }
     }
 
@@ -150,12 +150,12 @@ pub async fn deploy_room_contract(
     println!("River contract loaded with key: {:?}", contract_key);
 
     let mut state_bytes = Vec::new();
-    ciborium::ser::into_writer(&initial_room_state, &mut state_bytes)?;
+    ciborium::ser::into_writer(&initial_board_state, &mut state_bytes)?;
 
-    let deserialized_state: ChatRoomStateV1 = ciborium::de::from_reader(state_bytes.as_slice())
+    let deserialized_state: ChatBoardStateV1 = ciborium::de::from_reader(state_bytes.as_slice())
         .map_err(|e| anyhow::anyhow!("State deserialization failed: {}", e))?;
 
-    if deserialized_state != initial_room_state {
+    if deserialized_state != initial_board_state {
         return Err(anyhow::anyhow!("Deserialized state doesn't match original"));
     }
 
@@ -212,8 +212,8 @@ pub async fn subscribe_to_contract(client: &mut WebApi, key: ContractKey) -> Res
 
 // Contract compilation constants
 const WASM_TARGET: &str = "wasm32-unknown-unknown";
-const PATH_TO_CONTRACT: &str = "contracts/room-contract";
-const WASM_FILE_NAME: &str = "room-contract";
+const PATH_TO_CONTRACT: &str = "contracts/board-contract";
+const WASM_FILE_NAME: &str = "board-contract";
 const CONTRACT_FEATURES: &str = "contract,freenet-main-contract";
 
 // Timeout constants
@@ -405,31 +405,31 @@ fn pipe_std_streams(mut child: std::process::Child) -> anyhow::Result<()> {
 pub async fn send_test_message(
     client: &mut WebApi,
     key: ContractKey,
-    room_state: &ChatRoomStateV1,
-    parameters: &ChatRoomParametersV1,
+    board_state: &ChatBoardStateV1,
+    parameters: &ChatBoardParametersV1,
     message_content: String,
     signing_key: &SigningKey,
 ) -> Result<()> {
     println!("--> [UPDATE] Sending test message: '{}'", message_content);
 
-    let message = river_core::room_state::message::MessageV1 {
-        room_owner: parameters.owner_id(),
+    let message = river_core::board_state::message::MessageV1 {
+        board_owner: parameters.owner_id(),
         author: signing_key.verifying_key().into(),
-        content: river_core::room_state::message::RoomMessageBody::public(message_content.clone()),
+        content: river_core::board_state::message::BoardMessageBody::public(message_content.clone()),
         time: std::time::SystemTime::now(),
     };
 
     let auth_message =
-        river_core::room_state::message::AuthorizedMessageV1::new(message, signing_key);
+        river_core::board_state::message::AuthorizedMessageV1::new(message, signing_key);
 
-    let delta = river_core::room_state::ChatRoomStateV1Delta {
+    let delta = river_core::board_state::ChatBoardStateV1Delta {
         recent_messages: Some(vec![auth_message.clone()]),
         ..Default::default()
     };
 
-    let mut test_state = room_state.clone();
+    let mut test_state = board_state.clone();
     test_state
-        .apply_delta(room_state, parameters, &Some(delta.clone()))
+        .apply_delta(board_state, parameters, &Some(delta.clone()))
         .map_err(|e| anyhow::anyhow!("Failed to apply message delta locally: {:?}", e))?;
 
     let mut delta_bytes = Vec::new();
@@ -449,10 +449,10 @@ pub async fn send_test_message(
     Ok(())
 }
 
-pub async fn update_room_state_delta(
+pub async fn update_board_state_delta(
     client: &mut WebApi,
     key: ContractKey,
-    delta: river_core::room_state::ChatRoomStateV1Delta,
+    delta: river_core::board_state::ChatBoardStateV1Delta,
 ) -> Result<()> {
     let mut delta_bytes = Vec::new();
     ciborium::ser::into_writer(&delta, &mut delta_bytes)?;
@@ -512,10 +512,10 @@ pub async fn wait_for_update_response(
     }
 }
 
-pub async fn get_all_room_states(
+pub async fn get_all_board_states(
     clients: &mut [&mut WebApi],
     key: ContractKey,
-) -> Result<Vec<ChatRoomStateV1>> {
+) -> Result<Vec<ChatBoardStateV1>> {
     let mut states = Vec::new();
 
     for (index, client) in clients.iter_mut().enumerate() {
@@ -641,7 +641,7 @@ async fn wait_for_subscribe_response(
 async fn wait_for_get_response(
     client: &mut WebApi,
     contract_key: &ContractKey,
-) -> Result<ChatRoomStateV1> {
+) -> Result<ChatBoardStateV1> {
     loop {
         let response = client.recv().await?;
         if let HostResponse::ContractResponse(
@@ -649,8 +649,8 @@ async fn wait_for_get_response(
         ) = response
         {
             if &key == contract_key {
-                let room_state: ChatRoomStateV1 = ciborium::de::from_reader(state.as_ref())?;
-                return Ok(room_state);
+                let board_state: ChatBoardStateV1 = ciborium::de::from_reader(state.as_ref())?;
+                return Ok(board_state);
             }
         }
     }

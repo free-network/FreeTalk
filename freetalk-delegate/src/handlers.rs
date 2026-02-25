@@ -1,7 +1,7 @@
 use super::*;
 use ed25519_dalek::{Signer, SigningKey};
 use freenet_stdlib::prelude::{ContractInstanceId, DelegateCtx};
-use river_core::chat_delegate::{RequestId, RoomKey};
+use river_core::chat_delegate::{RequestId, BoardKey};
 
 /// Handle an application message using the host function API for direct secret access.
 pub(crate) fn handle_application_message(
@@ -40,120 +40,120 @@ pub(crate) fn handle_application_message(
 
         // Signing key management
         ChatDelegateRequestMsg::StoreSigningKey {
-            room_key,
+            board_key,
             signing_key_bytes,
         } => {
             logging::info(
-                format!("Delegate received StoreSigningKey for room: {room_key:?}").as_str(),
+                format!("Delegate received StoreSigningKey for board: {board_key:?}").as_str(),
             );
-            handle_store_signing_key(ctx, origin, room_key, signing_key_bytes, app_msg.app)
+            handle_store_signing_key(ctx, origin, board_key, signing_key_bytes, app_msg.app)
         }
-        ChatDelegateRequestMsg::GetPublicKey { room_key } => {
+        ChatDelegateRequestMsg::GetPublicKey { board_key } => {
             logging::info(
-                format!("Delegate received GetPublicKey for room: {room_key:?}").as_str(),
+                format!("Delegate received GetPublicKey for board: {board_key:?}").as_str(),
             );
-            handle_get_public_key(ctx, origin, room_key, app_msg.app)
+            handle_get_public_key(ctx, origin, board_key, app_msg.app)
         }
 
         // Signing operations - all include request_id for correlation
         ChatDelegateRequestMsg::SignMessage {
-            room_key,
+            board_key,
             request_id,
             message_bytes,
         } => {
-            logging::info(format!("Delegate received SignMessage for room: {room_key:?}").as_str());
+            logging::info(format!("Delegate received SignMessage for board: {board_key:?}").as_str());
             handle_sign_request(
                 ctx,
                 origin,
-                room_key,
+                board_key,
                 request_id,
                 message_bytes,
                 app_msg.app,
             )
         }
         ChatDelegateRequestMsg::SignMember {
-            room_key,
+            board_key,
             request_id,
             member_bytes,
         } => {
-            logging::info(format!("Delegate received SignMember for room: {room_key:?}").as_str());
-            handle_sign_request(ctx, origin, room_key, request_id, member_bytes, app_msg.app)
+            logging::info(format!("Delegate received SignMember for board: {board_key:?}").as_str());
+            handle_sign_request(ctx, origin, board_key, request_id, member_bytes, app_msg.app)
         }
         ChatDelegateRequestMsg::SignBan {
-            room_key,
+            board_key,
             request_id,
             ban_bytes,
         } => {
-            logging::info(format!("Delegate received SignBan for room: {room_key:?}").as_str());
-            handle_sign_request(ctx, origin, room_key, request_id, ban_bytes, app_msg.app)
+            logging::info(format!("Delegate received SignBan for board: {board_key:?}").as_str());
+            handle_sign_request(ctx, origin, board_key, request_id, ban_bytes, app_msg.app)
         }
         ChatDelegateRequestMsg::SignConfig {
-            room_key,
+            board_key,
             request_id,
             config_bytes,
         } => {
-            logging::info(format!("Delegate received SignConfig for room: {room_key:?}").as_str());
-            handle_sign_request(ctx, origin, room_key, request_id, config_bytes, app_msg.app)
+            logging::info(format!("Delegate received SignConfig for board: {board_key:?}").as_str());
+            handle_sign_request(ctx, origin, board_key, request_id, config_bytes, app_msg.app)
         }
         ChatDelegateRequestMsg::SignMemberInfo {
-            room_key,
+            board_key,
             request_id,
             member_info_bytes,
         } => {
             logging::info(
-                format!("Delegate received SignMemberInfo for room: {room_key:?}").as_str(),
+                format!("Delegate received SignMemberInfo for board: {board_key:?}").as_str(),
             );
             handle_sign_request(
                 ctx,
                 origin,
-                room_key,
+                board_key,
                 request_id,
                 member_info_bytes,
                 app_msg.app,
             )
         }
         ChatDelegateRequestMsg::SignSecretVersion {
-            room_key,
+            board_key,
             request_id,
             record_bytes,
         } => {
             logging::info(
-                format!("Delegate received SignSecretVersion for room: {room_key:?}").as_str(),
+                format!("Delegate received SignSecretVersion for board: {board_key:?}").as_str(),
             );
-            handle_sign_request(ctx, origin, room_key, request_id, record_bytes, app_msg.app)
+            handle_sign_request(ctx, origin, board_key, request_id, record_bytes, app_msg.app)
         }
         ChatDelegateRequestMsg::SignEncryptedSecret {
-            room_key,
+            board_key,
             request_id,
             secret_bytes,
         } => {
             logging::info(
-                format!("Delegate received SignEncryptedSecret for room: {room_key:?}").as_str(),
+                format!("Delegate received SignEncryptedSecret for board: {board_key:?}").as_str(),
             );
-            handle_sign_request(ctx, origin, room_key, request_id, secret_bytes, app_msg.app)
+            handle_sign_request(ctx, origin, board_key, request_id, secret_bytes, app_msg.app)
         }
         ChatDelegateRequestMsg::SignUpgrade {
-            room_key,
+            board_key,
             request_id,
             upgrade_bytes,
         } => {
-            logging::info(format!("Delegate received SignUpgrade for room: {room_key:?}").as_str());
+            logging::info(format!("Delegate received SignUpgrade for board: {board_key:?}").as_str());
             handle_sign_request(
                 ctx,
                 origin,
-                room_key,
+                board_key,
                 request_id,
                 upgrade_bytes,
                 app_msg.app,
             )
         }
         ChatDelegateRequestMsg::SignAdmin {
-            room_key,
+            board_key,
             request_id,
             admin_bytes,
         } => {
-            logging::info(format!("Delegate received SignAdmin for room: {room_key:?}").as_str());
-            handle_sign_request(ctx, origin, room_key, request_id, admin_bytes, app_msg.app)
+            logging::info(format!("Delegate received SignAdmin for board: {board_key:?}").as_str());
+            handle_sign_request(ctx, origin, board_key, request_id, admin_bytes, app_msg.app)
         }
     }
 }
@@ -303,7 +303,7 @@ fn handle_list_request(
 // by Freenet - it contains the ContractInstanceId of the webapp that sent the
 // message. This cannot be spoofed.
 //
-// Keys are stored under: "signing_key:{origin_base58}:{room_key_base58}"
+// Keys are stored under: "signing_key:{origin_base58}:{board_key_base58}"
 //
 // This means:
 // - When River (contract A) stores a signing key, it's stored under A's origin
@@ -316,23 +316,23 @@ fn handle_list_request(
 //
 // ============================================================================
 
-/// Create a secret key for storing a signing key for a room.
-/// Format: "signing_key:{origin_base58}:{room_key_base58}"
-fn create_signing_key_secret_key(origin: &Origin, room_key: &RoomKey) -> Vec<u8> {
+/// Create a secret key for storing a signing key for a board.
+/// Format: "signing_key:{origin_base58}:{board_key_base58}"
+fn create_signing_key_secret_key(origin: &Origin, board_key: &BoardKey) -> Vec<u8> {
     let origin_b58 = bs58::encode(&origin.0).into_string();
-    let room_key_b58 = bs58::encode(room_key).into_string();
-    format!("signing_key:{origin_b58}:{room_key_b58}").into_bytes()
+    let board_key_b58 = bs58::encode(board_key).into_string();
+    format!("signing_key:{origin_b58}:{board_key_b58}").into_bytes()
 }
 
 /// Handle a store signing key request
 fn handle_store_signing_key(
     ctx: &mut DelegateCtx,
     origin: &Origin,
-    room_key: RoomKey,
+    board_key: BoardKey,
     signing_key_bytes: [u8; 32],
     app: ContractInstanceId,
 ) -> Result<Vec<OutboundDelegateMsg>, DelegateError> {
-    let secret_key = create_signing_key_secret_key(origin, &room_key);
+    let secret_key = create_signing_key_secret_key(origin, &board_key);
 
     // Store the signing key directly via host function
     // Note: In WASM, set_secret returns true on success. In non-WASM tests, it always returns false.
@@ -345,11 +345,11 @@ fn handle_store_signing_key(
     #[cfg(not(target_family = "wasm"))]
     let _ = ctx.set_secret(&secret_key, &signing_key_bytes);
 
-    logging::info("Stored signing key for room");
+    logging::info("Stored signing key for board");
 
     // Create response for the client
     let response = ChatDelegateResponseMsg::StoreSigningKeyResponse {
-        room_key,
+        board_key,
         result: Ok(()),
     };
 
@@ -360,10 +360,10 @@ fn handle_store_signing_key(
 fn handle_get_public_key(
     ctx: &mut DelegateCtx,
     origin: &Origin,
-    room_key: RoomKey,
+    board_key: BoardKey,
     app: ContractInstanceId,
 ) -> Result<Vec<OutboundDelegateMsg>, DelegateError> {
-    let secret_key = create_signing_key_secret_key(origin, &room_key);
+    let secret_key = create_signing_key_secret_key(origin, &board_key);
 
     // Get the signing key directly via host function
     let public_key = ctx.get_secret(&secret_key).and_then(|sk_bytes| {
@@ -377,13 +377,13 @@ fn handle_get_public_key(
     });
 
     logging::info(&format!(
-        "Retrieved public key for room, key present: {}",
+        "Retrieved public key for board, key present: {}",
         public_key.is_some()
     ));
 
     // Create response for the client
     let response = ChatDelegateResponseMsg::GetPublicKeyResponse {
-        room_key,
+        board_key,
         public_key,
     };
 
@@ -394,12 +394,12 @@ fn handle_get_public_key(
 fn handle_sign_request(
     ctx: &mut DelegateCtx,
     origin: &Origin,
-    room_key: RoomKey,
+    board_key: BoardKey,
     request_id: RequestId,
     data_to_sign: Vec<u8>,
     app: ContractInstanceId,
 ) -> Result<Vec<OutboundDelegateMsg>, DelegateError> {
-    let secret_key = create_signing_key_secret_key(origin, &room_key);
+    let secret_key = create_signing_key_secret_key(origin, &board_key);
 
     // Get the signing key and sign directly
     let signature: Result<Vec<u8>, String> = match ctx.get_secret(&secret_key) {
@@ -417,17 +417,17 @@ fn handle_sign_request(
                 ))
             }
         }
-        None => Err("Signing key not found for this room".to_string()),
+        None => Err("Signing key not found for this board".to_string()),
     };
 
     logging::info(&format!(
-        "Sign request for room, signature created: {}",
+        "Sign request for board, signature created: {}",
         signature.is_ok()
     ));
 
     // Create response for the client
     let response = ChatDelegateResponseMsg::SignResponse {
-        room_key,
+        board_key,
         request_id,
         signature,
     };
@@ -713,11 +713,11 @@ mod tests {
 
     #[test]
     fn test_store_signing_key() {
-        let room_key: river_core::chat_delegate::RoomKey = [7u8; 32];
+        let board_key: river_core::chat_delegate::BoardKey = [7u8; 32];
         let signing_key_bytes: [u8; 32] = [8u8; 32];
 
         let request = ChatDelegateRequestMsg::StoreSigningKey {
-            room_key,
+            board_key,
             signing_key_bytes,
         };
         let dummy_app_id = ContractInstanceId::new([7u8; 32]);
@@ -739,10 +739,10 @@ mod tests {
         let response = extract_response(result).unwrap();
         match response {
             ChatDelegateResponseMsg::StoreSigningKeyResponse {
-                room_key: resp_room_key,
+                board_key: resp_board_key,
                 result,
             } => {
-                assert_eq!(resp_room_key, room_key);
+                assert_eq!(resp_board_key, board_key);
                 assert!(result.is_ok());
             }
             _ => panic!("Expected StoreSigningKeyResponse, got {:?}", response),
@@ -751,9 +751,9 @@ mod tests {
 
     #[test]
     fn test_get_public_key_not_found() {
-        let room_key: river_core::chat_delegate::RoomKey = [9u8; 32];
+        let board_key: river_core::chat_delegate::BoardKey = [9u8; 32];
 
-        let request = ChatDelegateRequestMsg::GetPublicKey { room_key };
+        let request = ChatDelegateRequestMsg::GetPublicKey { board_key };
         let dummy_app_id = ContractInstanceId::new([8u8; 32]);
         let app_msg = create_app_message(request, dummy_app_id);
         let inbound_msg = InboundDelegateMsg::ApplicationMessage(app_msg);
@@ -773,10 +773,10 @@ mod tests {
         let response = extract_response(result).unwrap();
         match response {
             ChatDelegateResponseMsg::GetPublicKeyResponse {
-                room_key: resp_room_key,
+                board_key: resp_board_key,
                 public_key,
             } => {
-                assert_eq!(resp_room_key, room_key);
+                assert_eq!(resp_board_key, board_key);
                 // In non-WASM test environment, get_secret returns None
                 assert!(public_key.is_none());
             }
@@ -786,12 +786,12 @@ mod tests {
 
     #[test]
     fn test_sign_message_without_key_returns_error() {
-        let room_key: river_core::chat_delegate::RoomKey = [10u8; 32];
+        let board_key: river_core::chat_delegate::BoardKey = [10u8; 32];
         let request_id: river_core::chat_delegate::RequestId = 12345;
         let message_bytes = b"test message to sign".to_vec();
 
         let request = ChatDelegateRequestMsg::SignMessage {
-            room_key,
+            board_key,
             request_id,
             message_bytes,
         };
@@ -814,11 +814,11 @@ mod tests {
         let response = extract_response(result).unwrap();
         match response {
             ChatDelegateResponseMsg::SignResponse {
-                room_key: resp_room_key,
+                board_key: resp_board_key,
                 request_id: resp_request_id,
                 signature,
             } => {
-                assert_eq!(resp_room_key, room_key);
+                assert_eq!(resp_board_key, board_key);
                 assert_eq!(resp_request_id, request_id);
                 // Should be an error because no signing key is stored
                 assert!(signature.is_err());
