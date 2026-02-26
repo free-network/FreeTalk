@@ -102,7 +102,7 @@ pub fn MemberInfoModal() -> Element {
             };
         }
 
-        // Determine if the member is downstream of the current user in the invite chain
+        // Determine if the current user can ban this member
         let is_downstream = member
             .and_then(|m| {
                 owner_key_signal.as_ref().map(|owner| {
@@ -112,11 +112,22 @@ pub fn MemberInfoModal() -> Element {
 
                     let self_member_id =
                         self_member_id().expect("Self member ID should be available");
-                    // Member is downstream if:
+
+                    // Check if current user is an admin
+                    let is_self_admin = board_state
+                        .board_state
+                        .admin
+                        .admins
+                        .iter()
+                        .any(|a| a.admin.id() == self_member_id);
+
+                    // Member can be banned if:
                     // 1. Current user is owner (owner can ban anyone), or
-                    // 2. Current user appears in their invite chain (upstream of target)
+                    // 2. Current user is admin (admins can ban anyone), or
+                    // 3. Current user appears in their invite chain (upstream of target)
                     invite_chain.is_ok_and(|chain| {
                         self_member_id == CURRENT_BOARD.read().owner_id().unwrap()
+                            || is_self_admin
                             || chain.iter().any(|m| m.member.id() == self_member_id)
                     })
                 })
