@@ -676,11 +676,36 @@ fn MessageHeader(
     }
 }
 
+/// Truncate text to a maximum number of characters, adding ellipsis if truncated
+fn truncate_text(text: &str, max_chars: usize) -> (String, bool) {
+    if text.chars().count() <= max_chars {
+        (text.to_string(), false)
+    } else {
+        let truncated: String = text.chars().take(max_chars).collect();
+        (truncated + "…", true)
+    }
+}
+
+/// Truncate text to a maximum number of lines and characters
+fn truncate_content(text: &str, max_lines: usize, max_chars: usize) -> (String, bool) {
+    let lines: Vec<&str> = text.lines().collect();
+    let line_limited = if lines.len() > max_lines {
+        lines[..max_lines].join("\n")
+    } else {
+        text.to_string()
+    };
+
+    let was_line_truncated = lines.len() > max_lines;
+    let (result, was_char_truncated) = truncate_text(&line_limited, max_chars);
+    (result, was_line_truncated || was_char_truncated)
+}
+
 /// Shared content display component (non-editing mode)
 #[component]
 fn MessageContentDisplay(
     title_text: String,
     content_html: String,
+    content_text: String,
     edited: bool,
     size: MessageSize,
     expanded: bool,
@@ -711,20 +736,42 @@ fn MessageContentDisplay(
         "text-lg text-text leading-relaxed"
     };
 
+    // Truncate title and content for non-expanded card views
+    let (display_title, _title_truncated) = if !expanded && matches!(size, MessageSize::Normal) {
+        truncate_text(&title_text, 48)
+    } else {
+        (title_text.clone(), false)
+    };
+
+    let (display_content_html, content_truncated) = if !expanded && matches!(size, MessageSize::Normal) {
+        // For truncation, work with plain text then convert back to HTML
+        let (truncated_text, was_truncated) = truncate_content(&content_text, 16, 512);
+        if was_truncated {
+            (text_to_html(&truncated_text), true)
+        } else {
+            (content_html.clone(), false)
+        }
+    } else {
+        (content_html.clone(), false)
+    };
+
     rsx! {
         // Title
-        if !title_text.is_empty() {
+        if !display_title.is_empty() {
             match size {
-                MessageSize::Large if expanded => rsx! { h1 { class: "{title_class}", "{title_text}" } },
-                MessageSize::Compact => rsx! { h4 { class: "{title_class}", "{title_text}" } },
-                _ => rsx! { h2 { class: "{title_class}", "{title_text}" } },
+                MessageSize::Large if expanded => rsx! { h1 { class: "{title_class}", "{display_title}" } },
+                MessageSize::Compact => rsx! { h4 { class: "{title_class}", "{display_title}" } },
+                _ => rsx! { h2 { class: "{title_class}", "{display_title}" } },
             }
         }
         // Content
         div { class: "{text_class}",
             span {
                 class: "{content_class}",
-                dangerous_inner_html: "{content_html}"
+                dangerous_inner_html: "{display_content_html}"
+            }
+            if content_truncated {
+                span { class: "text-accent ml-1", "Read more →" }
             }
             if edited {
                 span { class: "{edited_class}", "(edited)" }
@@ -1197,6 +1244,7 @@ pub fn MessageCard(
                             MessageContentDisplay {
                                 title_text: title_text.clone(),
                                 content_html: content_html.clone(),
+                                content_text: content_text.clone(),
                                 edited: edited,
                                 size: size,
                                 expanded: false,
@@ -1333,6 +1381,7 @@ pub fn MessageCard(
                                 MessageContentDisplay {
                                     title_text: title_text.clone(),
                                     content_html: content_html.clone(),
+                                    content_text: content_text.clone(),
                                     edited: edited,
                                     size: size,
                                     expanded: expanded,
