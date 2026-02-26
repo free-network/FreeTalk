@@ -57,7 +57,7 @@ impl MessageData {
 
     /// Get a string ID suitable for use in URLs/routes
     pub fn id_string(&self) -> String {
-        format!("{:?}", self.message_id.0)
+        format!("{}", self.message_id.0.0)
     }
 }
 
