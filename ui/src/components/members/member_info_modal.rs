@@ -83,6 +83,14 @@ pub fn MemberInfoModal() -> Element {
             .as_ref()
             .is_some_and(|k| MemberId::from(&*k) == member_id);
 
+        // Determine if the member is an admin
+        let is_admin = board_state
+            .board_state
+            .admin
+            .admins
+            .iter()
+            .any(|a| a.admin.id() == member_id);
+
         // Only show error if member isn't found AND isn't the owner
         if member.is_none() && !is_owner {
             error!("Member {member_id} not found in members list and is not owner");
@@ -178,6 +186,11 @@ pub fn MemberInfoModal() -> Element {
                                 span {
                                     class: "inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-blue-500/20 text-blue-400",
                                     "👑 Board Owner"
+                                }
+                            } else if is_admin {
+                                span {
+                                    class: "inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-purple-500/20 text-purple-400",
+                                    "👑 Admin"
                                 }
                             }
                             if member_id == self_member_id.unwrap() {

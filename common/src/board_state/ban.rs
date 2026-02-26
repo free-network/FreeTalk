@@ -73,8 +73,8 @@ impl BansV1 {
     ///
     /// This method checks:
     /// - If the banned member still exists, verifies the banning member is in their invite chain
-    ///   (unless banner is owner). If the banned member was already removed, the ban is valid.
-    /// - If the banning member exists (for non-owner bans where banned member still exists)
+    ///   (unless banner is owner or admin). If the banned member was already removed, the ban is valid.
+    /// - If the banning member exists (for non-owner/non-admin bans where banned member still exists)
     /// - If the number of bans exceeds the maximum allowed
     fn get_invalid_bans(
         &self,
@@ -82,6 +82,7 @@ impl BansV1 {
         parameters: &ChatBoardParametersV1,
     ) -> HashMap<BanId, BanValidationError> {
         let member_map = parent_state.members.members_by_member_id();
+        let admin_ids: HashSet<MemberId> = parent_state.admin.admins.iter().map(|a| a.admin.id()).collect();
         let mut invalid_bans = HashMap::new();
         let banned_user_ids: HashSet<MemberId> = self.0.iter().map(|b| b.ban.banned_user).collect();
 
@@ -91,6 +92,7 @@ impl BansV1 {
                 ban,
                 &member_map,
                 parameters,
+                &admin_ids,
                 &mut invalid_bans,
                 &banned_user_ids,
             );
@@ -108,6 +110,7 @@ impl BansV1 {
         ban: &AuthorizedUserBan,
         member_map: &HashMap<MemberId, &AuthorizedMember>,
         parameters: &ChatBoardParametersV1,
+        admin_ids: &HashSet<MemberId>,
         invalid_bans: &mut HashMap<BanId, BanValidationError>,
         banned_user_ids: &HashSet<MemberId>,
     ) {
@@ -124,8 +127,10 @@ impl BansV1 {
             }
         };
 
-        // Skip banning member verification if banner is board owner
-        if ban.banned_by != parameters.owner_id() {
+        // Skip banning member verification if banner is board owner or admin
+        let is_owner = ban.banned_by == parameters.owner_id();
+        let is_admin = admin_ids.contains(&ban.banned_by);
+        if !is_owner && !is_admin {
             // Check if banning member exists
             let banning_member = match member_map.get(&ban.banned_by) {
                 Some(member) => member,

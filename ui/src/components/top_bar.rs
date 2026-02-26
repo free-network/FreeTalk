@@ -95,6 +95,12 @@ pub fn TopBar() -> Element {
     let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
     let owner_id = MemberId::from(&board_data.owner_vk);
     let is_owner = self_member_id == owner_id;
+    let is_admin = board_data
+        .board_state
+        .admin
+        .admins
+        .iter()
+        .any(|a| a.admin.id() == self_member_id);
     let can_participate = board_data.can_participate();
 
     let self_nickname = board_data
@@ -135,13 +141,15 @@ pub fn TopBar() -> Element {
                 }
                 if is_owner {
                     span { class: "text-lg", title: "Board Owner", "👑" }
+                } else if is_admin {
+                    span { class: "text-lg", title: "Admin", "👑" }
                 }
             }
 
             // Right side: admin button and post input
             div { class: "flex items-center gap-3 pr-4",
-                // Admin button for owners
-                if is_owner {
+                // Admin button for owners or admins
+                if is_owner || is_admin {
                     a {
                         href: "#/board/{board_id}/admin",
                         class: "flex items-center gap-2 px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",

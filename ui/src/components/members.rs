@@ -43,6 +43,7 @@ struct MemberDisplay {
     nickname: String,
     _member_id: MemberId,
     is_owner: bool,
+    is_admin: bool,
     is_self: bool,
     invited_you: bool,
     sponsored_you: bool,
@@ -90,6 +91,8 @@ fn format_member_display(member: &MemberDisplay) -> String {
 
     if member.is_owner {
         tags.push(("👑", "Board Owner"));
+    } else if member.is_admin {
+        tags.push(("👑", "Admin"));
     }
     if member.is_self {
         tags.push(("⭐", "You"));
@@ -180,10 +183,19 @@ pub fn MemberList() -> Element {
 
         let ordered_ids = invite_tree_order(owner_id, members);
 
+        // Build set of admin IDs for quick lookup
+        let admin_ids: std::collections::HashSet<MemberId> = board_state
+            .admin
+            .admins
+            .iter()
+            .map(|a| a.admin.id())
+            .collect();
+
         // Build display list in tree order
         let mut all_members = Vec::new();
         for &member_id in &ordered_ids {
             let is_owner = member_id == owner_id;
+            let is_admin = admin_ids.contains(&member_id);
 
             let nickname = member_info
                 .member_info
@@ -204,6 +216,7 @@ pub fn MemberList() -> Element {
                 nickname,
                 _member_id: member_id,
                 is_owner,
+                is_admin,
                 is_self: member_id == self_member_id,
                 invited_you: members.is_inviter_of(member_id, self_member_id, &params),
                 sponsored_you: if is_owner {
