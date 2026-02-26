@@ -1,15 +1,13 @@
-use crate::board_state::ban::BansV1;
 use crate::board_state::member::MemberId;
 use crate::board_state::ChatBoardParametersV1;
-use crate::util::{sign_struct, truncated_base32, verify_struct};
+use crate::util::{sign_struct, verify_struct};
 use crate::ChatBoardStateV1;
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
-use freenet_scaffold::util::{fast_hash, FastHash};
 use freenet_scaffold::ComposableState;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Clone, Debug, Default)]
@@ -107,8 +105,13 @@ impl ComposableState for AdminsV1 {
                 ));
             }
 
-            // Verify that all new admins have valid signatures
+            let owner_id = parameters.owner_id();
+
+            // Verify that all new admins have valid signatures and are not the owner
             for admin in &delta.added {
+                if admin.admin.id() == owner_id {
+                    return Err("Owner cannot be added as an admin".to_string());
+                }
                 admin.verify_signature(&parameters.owner)?;
             }
 
