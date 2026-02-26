@@ -81,6 +81,7 @@ impl ComposableState for AuthorizedConfigurationV1 {
             if delta.configuration.max_recent_messages == 0
                 || delta.configuration.max_user_bans == 0
                 || delta.configuration.max_message_size == 0
+                || delta.configuration.max_title_size == 0
                 || delta.configuration.max_nickname_size == 0
                 || delta.configuration.max_members == 0
                 || delta.configuration.max_admins == 0
@@ -180,7 +181,8 @@ impl Default for Configuration {
             display: BoardDisplayMetadata::default(),
             max_recent_messages: 100,
             max_user_bans: 10,
-            max_message_size: 1000,
+            max_message_size: 10000,
+            max_title_size: 100,
             max_nickname_size: 50,
             max_members: 200,
             max_admins: 40,
@@ -211,11 +213,17 @@ pub struct Configuration {
     pub max_recent_messages: usize,
     pub max_user_bans: usize,
     pub max_message_size: usize,
+    #[serde(default = "default_max_title_size")]
+    pub max_title_size: usize,
     pub max_nickname_size: usize,
     pub max_members: usize,
     pub max_admins: usize,
     pub max_board_name: usize,
     pub max_board_description: usize,
+}
+
+fn default_max_title_size() -> usize {
+    100
 }
 
 #[cfg(test)]

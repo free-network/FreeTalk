@@ -169,13 +169,23 @@ pub fn TopBar() -> Element {
 
                 // Post input
                 match can_participate {
-                    Ok(()) => rsx! {
-                        PostInput {
-                            handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
-                                handle_send_message(msg)
-                            },
-                            replying_to: replying_to,
-                            on_request_edit_last: move |_| {},
+                    Ok(()) => {
+                        let max_title = current_board_data.read().as_ref()
+                            .map(|bd| bd.board_state.configuration.configuration.max_title_size)
+                            .unwrap_or(100);
+                        let max_message = current_board_data.read().as_ref()
+                            .map(|bd| bd.board_state.configuration.configuration.max_message_size)
+                            .unwrap_or(10000);
+                        rsx! {
+                            PostInput {
+                                handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
+                                    handle_send_message(msg)
+                                },
+                                replying_to: replying_to,
+                                on_request_edit_last: move |_| {},
+                                max_title_size: max_title,
+                                max_message_size: max_message,
+                            }
                         }
                     },
                     Err(SendMessageError::UserNotMember) => rsx! {},

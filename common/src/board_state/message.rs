@@ -103,6 +103,7 @@ impl ComposableState for MessagesV1 {
     ) -> Result<(), String> {
         let max_recent_messages = parent_state.configuration.configuration.max_recent_messages;
         let max_message_size = parent_state.configuration.configuration.max_message_size;
+        let max_title_size = parent_state.configuration.configuration.max_title_size;
         let privacy_mode = &parent_state.configuration.configuration.privacy_mode;
         let current_secret_version = parent_state.secrets.current_version;
 
@@ -110,6 +111,20 @@ impl ComposableState for MessagesV1 {
         if let Some(delta) = delta {
             for msg in delta {
                 let content = &msg.message.content;
+
+                // Validate title constraints (for public text/reply messages)
+                if let Some(title) = content.title() {
+                    if title.len() > max_title_size {
+                        return Err(format!(
+                            "Title length {} exceeds maximum {}",
+                            title.len(),
+                            max_title_size
+                        ));
+                    }
+                    if title.contains('\n') || title.contains('\r') {
+                        return Err("Title cannot contain newlines".to_string());
+                    }
+                }
 
                 match content {
                     BoardMessageBody::Private { secret_version, .. } => {
@@ -678,6 +693,24 @@ impl BoardMessageBody {
     pub fn as_public_string(&self) -> Option<String> {
         self.decode_content()
             .and_then(|c| c.as_text().map(|s| s.to_string()))
+    }
+
+    /// Extract title from the message content (for public messages only).
+    /// Returns None for private messages or non-text/reply content.
+    pub fn title(&self) -> Option<String> {
+        use crate::board_state::content::{
+            ReplyContentV1, TextContentV1, CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
+        };
+        match self {
+            Self::Public {
+                content_type, data, ..
+            } => match *content_type {
+                CONTENT_TYPE_TEXT => TextContentV1::decode(data).ok().map(|t| t.title),
+                CONTENT_TYPE_REPLY => ReplyContentV1::decode(data).ok().map(|r| r.title),
+                _ => None,
+            },
+            Self::Private { .. } => None,
+        }
     }
 }
 

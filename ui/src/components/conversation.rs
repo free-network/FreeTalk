@@ -520,16 +520,22 @@ pub fn Conversation(
                 match current_board_data.as_ref() {
                     Some(board_data) => {
                         match board_data.can_participate() {
-                            Ok(()) => rsx! {
-                                div { class: "flex justify-center",
-                                    PostInput {
-                                        handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
-                                            let handle = handle_send_message.clone();
-                                            handle(msg)
-                                        },
-                                        replying_to: replying_to,
-                                        on_request_edit_last: move |_| {},
-                                        default_reply_to: default_reply_to.clone(),
+                            Ok(()) => {
+                                let max_title = board_data.board_state.configuration.configuration.max_title_size;
+                                let max_message = board_data.board_state.configuration.configuration.max_message_size;
+                                rsx! {
+                                    div { class: "flex justify-center",
+                                        PostInput {
+                                            handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
+                                                let handle = handle_send_message.clone();
+                                                handle(msg)
+                                            },
+                                            replying_to: replying_to,
+                                            on_request_edit_last: move |_| {},
+                                            default_reply_to: default_reply_to.clone(),
+                                            max_title_size: max_title,
+                                            max_message_size: max_message,
+                                        }
                                     }
                                 }
                             },
@@ -791,6 +797,10 @@ fn MessageEditForm(
     msg_id: MessageId,
     on_edit: Option<EventHandler<(MessageId, String, String)>>,
     size: MessageSize,
+    #[props(default = 100)]
+    max_title_size: usize,
+    #[props(default = 10000)]
+    max_message_size: usize,
 ) -> Element {
     let (input_class, textarea_class, button_class, container_class) = match size {
         MessageSize::Compact => (
@@ -817,55 +827,97 @@ fn MessageEditForm(
     // Use Ctrl+Enter for Card, Enter for Reply
     let use_ctrl = !matches!(size, MessageSize::Compact);
 
-    // Check if content has changed
-    let has_changes = move || {
+    // Check if content has changed (closure that can be called multiple times)
+    let has_changes = {
+        let original_title = original_title_for_key.clone();
+        let original_text = original_text_for_key.clone();
+        move || {
+            let new_title = edit_title.read().clone();
+            let new_text = edit_text.read().clone();
+            !new_text.is_empty() && (new_title != original_title || new_text != original_text)
+        }
+    };
+
+    // Check if within limits
+    let within_limits = move || {
+        edit_title.read().len() <= max_title_size && edit_text.read().len() <= max_message_size
+    };
+
+    // Compute derived state for the button
+    let can_save = use_memo(move || {
         let new_title = edit_title.read().clone();
         let new_text = edit_text.read().clone();
-        !new_text.is_empty()
-            && (new_title != original_title_for_key || new_text != original_text_for_key)
-    };
+        let changed = !new_text.is_empty()
+            && (new_title != original_title_for_key || new_text != original_text_for_key);
+        let valid = edit_title.read().len() <= max_title_size
+            && edit_text.read().len() <= max_message_size;
+        changed && valid
+    });
 
     rsx! {
         div { class: "{container_class}",
-            // Title input
-            input {
-                r#type: "text",
-                class: "{input_class}",
-                placeholder: "Title (optional)",
-                value: "{edit_title}",
-                oninput: move |e| edit_title.set(e.value().clone()),
-                onkeydown: move |e: KeyboardEvent| {
-                    if e.key() == Key::Escape {
-                        editing.set(false);
+            // Title input with character count
+            div { class: "space-y-1",
+                div { class: "flex items-center justify-between",
+                    span { class: "text-xs text-text-muted", "Title (optional)" }
+                    span {
+                        class: if edit_title.read().len() > max_title_size { "text-xs text-red-400" } else { "text-xs text-text-muted" },
+                        "{edit_title.read().len()}/{max_title_size}"
                     }
-                },
-            }
-            // Content textarea
-            textarea {
-                class: "{textarea_class}",
-                value: "{edit_text}",
-                autofocus: true,
-                oninput: move |e| edit_text.set(e.value().clone()),
-                onkeydown: move |e: KeyboardEvent| {
-                    if e.key() == Key::Escape {
-                        editing.set(false);
-                    } else if e.key() == Key::Enter {
-                        let should_submit = if use_ctrl {
-                            e.modifiers().ctrl() || e.modifiers().meta()
-                        } else {
-                            !e.modifiers().shift()
-                        };
-                        if should_submit {
-                            e.prevent_default();
-                            if has_changes() {
-                                if let Some(ref handler) = on_edit {
-                                    handler.call((msg_id_for_key.clone(), edit_title.read().clone(), edit_text.read().clone()));
-                                }
-                            }
+                }
+                input {
+                    r#type: "text",
+                    class: "{input_class}",
+                    placeholder: "Title (optional)",
+                    maxlength: max_title_size as i64,
+                    value: "{edit_title}",
+                    oninput: move |e| {
+                        // Strip newlines from title
+                        let value = e.value().replace(['\n', '\r'], "");
+                        edit_title.set(value);
+                    },
+                    onkeydown: move |e: KeyboardEvent| {
+                        if e.key() == Key::Escape {
                             editing.set(false);
                         }
+                    },
+                }
+            }
+            // Content textarea with character count
+            div { class: "space-y-1",
+                div { class: "flex items-center justify-between",
+                    span { class: "text-xs text-text-muted", "Content" }
+                    span {
+                        class: if edit_text.read().len() > max_message_size { "text-xs text-red-400" } else { "text-xs text-text-muted" },
+                        "{edit_text.read().len()}/{max_message_size}"
                     }
-                },
+                }
+                textarea {
+                    class: "{textarea_class}",
+                    value: "{edit_text}",
+                    autofocus: true,
+                    oninput: move |e| edit_text.set(e.value().clone()),
+                    onkeydown: move |e: KeyboardEvent| {
+                        if e.key() == Key::Escape {
+                            editing.set(false);
+                        } else if e.key() == Key::Enter {
+                            let should_submit = if use_ctrl {
+                                e.modifiers().ctrl() || e.modifiers().meta()
+                            } else {
+                                !e.modifiers().shift()
+                            };
+                            if should_submit {
+                                e.prevent_default();
+                                if has_changes() && within_limits() {
+                                    if let Some(ref handler) = on_edit {
+                                        handler.call((msg_id_for_key.clone(), edit_title.read().clone(), edit_text.read().clone()));
+                                    }
+                                }
+                                editing.set(false);
+                            }
+                        }
+                    },
+                }
             }
             div { class: if matches!(size, MessageSize::Compact) { "flex gap-2" } else { "flex gap-3" },
                 button {
@@ -874,11 +926,12 @@ fn MessageEditForm(
                     "Cancel"
                 }
                 button {
-                    class: "{button_class} bg-accent text-white",
+                    class: "{button_class} bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed",
+                    disabled: !*can_save.read(),
                     onclick: move |_| {
                         let new_title = edit_title.read().clone();
                         let new_text = edit_text.read().clone();
-                        if !new_text.is_empty() && (new_title != original_title_for_save || new_text != original_text_for_save) {
+                        if !new_text.is_empty() && (new_title != original_title_for_save || new_text != original_text_for_save) && within_limits() {
                             if let Some(ref handler) = on_edit {
                                 handler.call((msg_id_for_save.clone(), new_title, new_text));
                             }
