@@ -16,6 +16,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Prebuild
+      run: cargo build --verbose --package freetalk-delegate --target wasm32-unknown-unknown
     - name: Build
       run: cargo build --verbose
     - name: Run tests
