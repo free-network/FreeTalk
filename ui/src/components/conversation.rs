@@ -758,7 +758,7 @@ fn MessageContentDisplay(
 
     let (display_content_html, content_truncated) = if !expanded && matches!(size, MessageSize::Normal) {
         // For truncation, work with plain text then convert back to HTML
-        let (truncated_text, was_truncated) = truncate_content(&content_text, 16, 512);
+        let (truncated_text, was_truncated) = truncate_content(&content_text, 8, 512);
         if was_truncated {
             (text_to_html(&truncated_text), true)
         } else {
