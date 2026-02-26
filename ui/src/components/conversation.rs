@@ -1219,10 +1219,8 @@ pub fn MessageCard(
     #[props(default)]
     default_reply_to: Option<ReplyContext>,
     /// Maximum title length (from board configuration)
-    #[props(default = 100)]
     max_title_size: usize,
     /// Maximum message length (from board configuration)
-    #[props(default = 10000)]
     max_message_size: usize,
 ) -> Element {
     let msg = message.clone();
