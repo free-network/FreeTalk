@@ -37,6 +37,11 @@ jobs:
       run: nix develop --command cargo build --verbose --release --target wasm32-unknown-unknown
     - name: Run tests
       run: nix develop --command cargo test --verbose
+    - name: Copy contracts for UI build
+      run: |
+        mkdir -p ui/public/contracts
+        cp target/wasm32-unknown-unknown/release/board_contract.wasm ui/public/contracts/
+        cp target/wasm32-unknown-unknown/release/freetalk_delegate.wasm ui/public/contracts/
     - name: Build UI with dioxus
       run: nix develop --command dx build --package freetalk-ui --release
     - name: Upload board_contract.wasm
