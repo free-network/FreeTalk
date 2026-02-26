@@ -29,6 +29,8 @@ jobs:
       run: nix develop --command cargo build --verbose --package freetalk-delegate --target wasm32-unknown-unknown --release
     - name: Prebuild board-contract
       run: nix develop --command cargo build --verbose --package board-contract --target wasm32-unknown-unknown --release
+    - name: Copy board-contract to cli
+      run: cp target/wasm32-unknown-unknown/release/board_contract.wasm cli/contracts/board_contract.wasm
     - name: Build
       run: nix develop --command cargo build --verbose --release
     - name: Build wasm32
