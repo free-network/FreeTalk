@@ -82,7 +82,12 @@ impl BansV1 {
         parameters: &ChatBoardParametersV1,
     ) -> HashMap<BanId, BanValidationError> {
         let member_map = parent_state.members.members_by_member_id();
-        let admin_ids: HashSet<MemberId> = parent_state.admin.admins.iter().map(|a| a.admin.id()).collect();
+        let admin_ids: HashSet<MemberId> = parent_state
+            .admin
+            .admins
+            .iter()
+            .map(|a| a.admin.id())
+            .collect();
         let mut invalid_bans = HashMap::new();
         let banned_user_ids: HashSet<MemberId> = self.0.iter().map(|b| b.ban.banned_user).collect();
 

@@ -1,16 +1,18 @@
 //! Shared message action handlers for reactions, edits, and deletions.
 
-use crate::components::app::{NEEDS_SYNC, BOARDS};
+use crate::components::app::{BOARDS, NEEDS_SYNC};
 use crate::util::ecies::encrypt_with_symmetric_key;
 use crate::util::get_current_system_time;
 use dioxus::prelude::*;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use freenet_scaffold::ComposableState;
-use river_core::chat_delegate::BoardKey;
 use river_core::board_state::content::ActionContentV1;
 use river_core::board_state::member::MemberId;
-use river_core::board_state::message::{AuthorizedMessageV1, MessageId, MessageV1, BoardMessageBody};
+use river_core::board_state::message::{
+    AuthorizedMessageV1, BoardMessageBody, MessageId, MessageV1,
+};
 use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1, ChatBoardStateV1Delta};
+use river_core::chat_delegate::BoardKey;
 
 /// Parameters needed for message actions
 #[derive(Clone)]
@@ -75,22 +77,14 @@ pub async fn toggle_reaction(ctx: ActionContext, target_message_id: MessageId, e
 
     if clicked_same {
         // Remove the reaction
-        let content = build_remove_reaction_content(
-            &ctx,
-            target_message_id.clone(),
-            emoji,
-        );
+        let content = build_remove_reaction_content(&ctx, target_message_id.clone(), emoji);
         if let Some(content) = content {
             messages_to_send.push(content);
         }
     } else {
         // Remove old reaction if exists, then add new one
         if let Some(old_emoji) = existing_reaction {
-            let content = build_remove_reaction_content(
-                &ctx,
-                target_message_id.clone(),
-                old_emoji,
-            );
+            let content = build_remove_reaction_content(&ctx, target_message_id.clone(), old_emoji);
             if let Some(content) = content {
                 messages_to_send.push(content);
             }
@@ -124,7 +118,12 @@ pub async fn delete_message(ctx: ActionContext, target_message_id: MessageId) {
 }
 
 /// Edit a message
-pub async fn edit_message(ctx: ActionContext, target_message_id: MessageId, new_title: String, new_text: String) {
+pub async fn edit_message(
+    ctx: ActionContext,
+    target_message_id: MessageId,
+    new_title: String,
+    new_text: String,
+) {
     if new_text.is_empty() {
         return;
     }
@@ -199,12 +198,9 @@ async fn send_action_messages(ctx: ActionContext, contents: Vec<BoardMessageBody
             return;
         }
 
-        let signature = crate::signing::sign_message_with_fallback(
-            ctx.board_key,
-            message_bytes,
-            &ctx.self_sk,
-        )
-        .await;
+        let signature =
+            crate::signing::sign_message_with_fallback(ctx.board_key, message_bytes, &ctx.self_sk)
+                .await;
 
         auth_messages.push(AuthorizedMessageV1::with_signature(message, signature));
     }
@@ -224,7 +220,9 @@ async fn send_action_messages(ctx: ActionContext, contents: Vec<BoardMessageBody
                     .board_state
                     .apply_delta(
                         &board_state_clone,
-                        &ChatBoardParametersV1 { owner: current_board },
+                        &ChatBoardParametersV1 {
+                            owner: current_board,
+                        },
                         &Some(delta),
                     )
                     .is_ok()

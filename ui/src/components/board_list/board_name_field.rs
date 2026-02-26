@@ -1,4 +1,4 @@
-use crate::components::app::{CURRENT_BOARD, NEEDS_SYNC,BOARDS};
+use crate::components::app::{BOARDS, CURRENT_BOARD, NEEDS_SYNC};
 use crate::util::ecies::{seal_bytes, unseal_bytes_with_secrets};
 use dioxus::logger::tracing::*;
 use dioxus::prelude::*;
@@ -14,7 +14,7 @@ pub fn BoardNameField(config: Configuration, is_owner: bool) -> Element {
     // Extract and decrypt the board name using version-aware decryption
     let initial_name = {
         let owner_key = CURRENT_BOARD.read().owner_key;
-        let boards =BOARDS.read();
+        let boards = BOARDS.read();
         let secrets = owner_key
             .and_then(|key| boards.map.get(&key))
             .map(|board_data| board_data.secrets.clone())
@@ -40,7 +40,7 @@ pub fn BoardNameField(config: Configuration, is_owner: bool) -> Element {
             let owner_key = CURRENT_BOARD.read().owner_key.expect("No owner key");
 
             // Get signing data and encryption info from board
-            let signing_data =BOARDS.with(|boards| {
+            let signing_data = BOARDS.with(|boards| {
                 if let Some(board_data) = boards.map.get(&owner_key) {
                     Some((
                         board_data.board_key(),
@@ -54,7 +54,8 @@ pub fn BoardNameField(config: Configuration, is_owner: bool) -> Element {
                 }
             });
 
-            let Some((board_key, self_sk, board_state_clone, board_secret_opt)) = signing_data else {
+            let Some((board_key, self_sk, board_state_clone, board_secret_opt)) = signing_data
+            else {
                 return;
             };
 
@@ -92,8 +93,8 @@ pub fn BoardNameField(config: Configuration, is_owner: bool) -> Element {
                     ..Default::default()
                 };
 
-               BOARDS.with_mut(|boards| {
-                    if let Some(board_data) =boards.map.get_mut(&owner_key) {
+                BOARDS.with_mut(|boards| {
+                    if let Some(board_data) = boards.map.get_mut(&owner_key) {
                         info!("Applying delta to board state");
                         match ComposableState::apply_delta(
                             &mut board_data.board_state,

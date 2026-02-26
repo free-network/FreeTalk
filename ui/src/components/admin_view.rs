@@ -1,7 +1,7 @@
 //! Admin management view for viewing and adding admins.
 
-use crate::components::app::{CURRENT_BOARD, NEEDS_SYNC, BOARDS};
 use crate::board_data::BoardData;
+use crate::components::app::{BOARDS, CURRENT_BOARD, NEEDS_SYNC};
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use freenet_scaffold::util::FastHash;
@@ -26,9 +26,12 @@ pub fn AdminView() -> Element {
 
     // Check if current user is the owner
     let is_owner = use_memo(move || {
-        current_board_data.read().as_ref().map_or(false, |board_data| {
-            board_data.owner_vk == board_data.self_sk.verifying_key()
-        })
+        current_board_data
+            .read()
+            .as_ref()
+            .map_or(false, |board_data| {
+                board_data.owner_vk == board_data.self_sk.verifying_key()
+            })
     });
 
     // Get list of current admins
@@ -42,28 +45,31 @@ pub fn AdminView() -> Element {
 
     // Get list of members who can be made admin (not already admin, not owner)
     let available_members = use_memo(move || {
-        current_board_data.read().as_ref().map_or(vec![], |board_data| {
-            let owner_id = MemberId::from(&board_data.owner_vk);
-            let admin_ids: std::collections::HashSet<_> = board_data
-                .board_state
-                .admin
-                .admins
-                .iter()
-                .map(|a| a.admin.member_id)
-                .collect();
+        current_board_data
+            .read()
+            .as_ref()
+            .map_or(vec![], |board_data| {
+                let owner_id = MemberId::from(&board_data.owner_vk);
+                let admin_ids: std::collections::HashSet<_> = board_data
+                    .board_state
+                    .admin
+                    .admins
+                    .iter()
+                    .map(|a| a.admin.member_id)
+                    .collect();
 
-            board_data
-                .board_state
-                .members
-                .members
-                .iter()
-                .filter(|m| {
-                    let member_id = m.member.id();
-                    member_id != owner_id && !admin_ids.contains(&member_id)
-                })
-                .map(|m| m.member.id())
-                .collect::<Vec<_>>()
-        })
+                board_data
+                    .board_state
+                    .members
+                    .members
+                    .iter()
+                    .filter(|m| {
+                        let member_id = m.member.id();
+                        member_id != owner_id && !admin_ids.contains(&member_id)
+                    })
+                    .map(|m| m.member.id())
+                    .collect::<Vec<_>>()
+            })
     });
 
     // Helper to get nickname for a member

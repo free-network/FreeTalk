@@ -4,13 +4,13 @@ use rand::rngs::OsRng;
 use river_core::board_state::ban::{AuthorizedUserBan, UserBan};
 use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
 use river_core::board_state::member::{AuthorizedMember, Member, MemberId};
-use river_core::board_state::message::{AuthorizedMessageV1, MessageV1, BoardMessageBody};
+use river_core::board_state::message::{AuthorizedMessageV1, BoardMessageBody, MessageV1};
 use river_core::board_state::privacy::{
-    PrivacyMode, BoardCipherSpec, BoardDisplayMetadata, SealedBytes,
+    BoardCipherSpec, BoardDisplayMetadata, PrivacyMode, SealedBytes,
 };
 use river_core::board_state::secret::{
-    AuthorizedEncryptedSecretForMember, AuthorizedSecretVersionRecord, EncryptedSecretForMemberV1,
-    BoardSecretsV1, SecretVersionRecordV1, SecretsDelta,
+    AuthorizedEncryptedSecretForMember, AuthorizedSecretVersionRecord, BoardSecretsV1,
+    EncryptedSecretForMemberV1, SecretVersionRecordV1, SecretsDelta,
 };
 use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1};
 use std::time::SystemTime;

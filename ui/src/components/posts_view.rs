@@ -1,5 +1,7 @@
-use crate::components::app::{Route, CURRENT_BOARD, BOARDS};
-use crate::components::conversation::{get_all_messages, get_top_level_posts, MessageCard, MessageCardVariant};
+use crate::components::app::{Route, BOARDS, CURRENT_BOARD};
+use crate::components::conversation::{
+    get_all_messages, get_top_level_posts, MessageCard, MessageCardVariant,
+};
 use crate::util::message_actions::{self, ActionContext};
 use dioxus::prelude::*;
 use river_core::board_state::member::MemberId;
@@ -60,7 +62,9 @@ pub fn PostsView() -> Element {
     };
 
     // Handler for editing messages
-    let handle_edit_message = move |target_message_id: MessageId, new_title: String, new_text: String| {
+    let handle_edit_message = move |target_message_id: MessageId,
+                                    new_title: String,
+                                    new_text: String| {
         if let Some(ctx) = ActionContext::from_current_board() {
             spawn_local(async move {
                 message_actions::edit_message(ctx, target_message_id, new_title, new_text).await;
@@ -207,9 +211,7 @@ pub fn SinglePostView(post_id: String) -> Element {
                     self_member_id,
                     &board_data.secrets,
                 );
-                let post = all_messages
-                    .into_iter()
-                    .find(|m| m.id_string() == post_id);
+                let post = all_messages.into_iter().find(|m| m.id_string() == post_id);
                 return post.map(|p| (p, self_member_id));
             }
         }
@@ -235,7 +237,9 @@ pub fn SinglePostView(post_id: String) -> Element {
     };
 
     // Handler for editing messages
-    let handle_edit_message = move |target_message_id: MessageId, new_title: String, new_text: String| {
+    let handle_edit_message = move |target_message_id: MessageId,
+                                    new_title: String,
+                                    new_text: String| {
         if let Some(ctx) = ActionContext::from_current_board() {
             spawn_local(async move {
                 message_actions::edit_message(ctx, target_message_id, new_title, new_text).await;

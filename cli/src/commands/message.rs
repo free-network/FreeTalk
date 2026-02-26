@@ -398,8 +398,13 @@ pub async fn execute(command: MessageCommands, api: ApiClient, format: OutputFor
             let board_owner_key = parse_board_id(&board_id)?;
             let target_message_id = parse_message_id(&message_id)?;
 
-            api.edit_message(&board_owner_key, target_message_id, new_title.clone(), new_content.clone())
-                .await?;
+            api.edit_message(
+                &board_owner_key,
+                target_message_id,
+                new_title.clone(),
+                new_content.clone(),
+            )
+            .await?;
 
             match format {
                 OutputFormat::Human => println!("Message edited successfully"),

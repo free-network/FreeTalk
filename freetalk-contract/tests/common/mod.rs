@@ -415,7 +415,10 @@ pub async fn send_test_message(
     let message = river_core::board_state::message::MessageV1 {
         board_owner: parameters.owner_id(),
         author: signing_key.verifying_key().into(),
-        content: river_core::board_state::message::BoardMessageBody::public(String::new(), message_content.clone()),
+        content: river_core::board_state::message::BoardMessageBody::public(
+            String::new(),
+            message_content.clone(),
+        ),
         time: std::time::SystemTime::now(),
     };
 

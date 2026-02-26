@@ -1,5 +1,5 @@
 use crate::components::app::receive_times::get_delay_secs;
-use crate::components::app::{CURRENT_BOARD, MEMBER_INFO_MODAL, BOARDS};
+use crate::components::app::{BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL};
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::markdown::text_to_html;
@@ -12,13 +12,13 @@ pub mod message_input;
 mod not_member_notification;
 use self::emoji_picker::FREQUENT_EMOJIS;
 use self::not_member_notification::NotMemberNotification;
-use crate::components::conversation::message_input::PostInput;
 use crate::board_data::SendMessageError;
+use crate::components::conversation::message_input::PostInput;
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use river_core::board_state::member::MemberId;
 use river_core::board_state::member_info::MemberInfoV1;
-use river_core::board_state::message::{MessageId, MessagesV1, BoardMessageBody};
+use river_core::board_state::message::{BoardMessageBody, MessageId, MessagesV1};
 use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
 
@@ -323,7 +323,8 @@ fn extract_reply_context(
 pub fn Conversation(
     #[props(default)] parent_message_id: Option<MessageId>,
     /// Default reply context - when set, new messages will be replies to this
-    #[props(default)] default_reply_to: Option<ReplyContext>,
+    #[props(default)]
+    default_reply_to: Option<ReplyContext>,
 ) -> Element {
     let current_board_data = {
         let current_board = CURRENT_BOARD.read();
@@ -399,13 +400,20 @@ pub fn Conversation(
     };
 
     // Handler for editing a message
-    let handle_edit_message = move |target_message_id: MessageId, new_title: String, new_text: String| {
-        if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_board() {
-            spawn_local(async move {
-                crate::util::message_actions::edit_message(ctx, target_message_id, new_title, new_text).await;
-            });
-        }
-    };
+    let handle_edit_message =
+        move |target_message_id: MessageId, new_title: String, new_text: String| {
+            if let Some(ctx) = crate::util::message_actions::ActionContext::from_current_board() {
+                spawn_local(async move {
+                    crate::util::message_actions::edit_message(
+                        ctx,
+                        target_message_id,
+                        new_title,
+                        new_text,
+                    )
+                    .await;
+                });
+            }
+        };
 
     // Message sending handler
     let handle_send_message = {
@@ -623,8 +631,20 @@ fn MessageHeader(
     };
 
     let time_class = match size {
-        MessageSize::Compact => if time_clamped { "text-xs text-text-muted italic" } else { "text-xs text-text-muted" },
-        _ => if time_clamped { "text-sm text-text-muted italic" } else { "text-sm text-text-muted" },
+        MessageSize::Compact => {
+            if time_clamped {
+                "text-xs text-text-muted italic"
+            } else {
+                "text-xs text-text-muted"
+            }
+        }
+        _ => {
+            if time_clamped {
+                "text-sm text-text-muted italic"
+            } else {
+                "text-sm text-text-muted"
+            }
+        }
     };
 
     rsx! {
@@ -680,8 +700,16 @@ fn MessageContentDisplay(
         ),
     };
 
-    let edited_class = if matches!(size, MessageSize::Compact) { "text-xs ml-2 text-text-muted" } else { "text-sm ml-2 text-text-muted" };
-    let text_class = if matches!(size, MessageSize::Compact) { "text-sm text-text" } else { "text-lg text-text leading-relaxed" };
+    let edited_class = if matches!(size, MessageSize::Compact) {
+        "text-xs ml-2 text-text-muted"
+    } else {
+        "text-sm ml-2 text-text-muted"
+    };
+    let text_class = if matches!(size, MessageSize::Compact) {
+        "text-sm text-text"
+    } else {
+        "text-lg text-text leading-relaxed"
+    };
 
     rsx! {
         // Title
@@ -746,7 +774,8 @@ fn MessageEditForm(
     let has_changes = move || {
         let new_title = edit_title.read().clone();
         let new_text = edit_text.read().clone();
-        !new_text.is_empty() && (new_title != original_title_for_key || new_text != original_text_for_key)
+        !new_text.is_empty()
+            && (new_title != original_title_for_key || new_text != original_text_for_key)
     };
 
     rsx! {
@@ -911,7 +940,9 @@ fn ActionButtons(
     // Create emoji picker state locally to ensure it's element-specific
     let mut open_emoji_picker = use_signal(|| false);
 
-    let has_actions = on_react.is_some() || on_reply.is_some() || (is_self && (on_edit.is_some() || on_request_delete.is_some()));
+    let has_actions = on_react.is_some()
+        || on_reply.is_some()
+        || (is_self && (on_edit.is_some() || on_request_delete.is_some()));
 
     if !has_actions || !*is_hovered.read() {
         return rsx! {};

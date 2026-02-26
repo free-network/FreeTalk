@@ -1,6 +1,6 @@
+pub mod board_state;
 pub mod chat_delegate;
 pub mod crypto_values;
-pub mod board_state;
 pub mod util;
 pub mod web_container;
 

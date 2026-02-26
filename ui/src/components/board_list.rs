@@ -1,11 +1,11 @@
+pub(crate) mod board_name_field;
 pub(crate) mod create_board_modal;
 pub(crate) mod edit_board_modal;
 pub(crate) mod receive_invitation_modal;
-pub(crate) mod board_name_field;
 
 use crate::components::app::chat_delegate::save_boards_to_delegate;
 use crate::components::app::document_title::mark_current_board_as_read;
-use crate::components::app::{CREATE_BOARD_MODAL, CURRENT_BOARD, BOARDS};
+use crate::components::app::{BOARDS, CREATE_BOARD_MODAL, CURRENT_BOARD};
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::logger::tracing::error;
 use dioxus::prelude::*;

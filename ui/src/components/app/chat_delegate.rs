@@ -1,4 +1,4 @@
-use crate::components::app::{CURRENT_BOARD, BOARDS, WEB_API};
+use crate::components::app::{BOARDS, CURRENT_BOARD, WEB_API};
 use dioxus::logger::tracing::{error, info, warn};
 use dioxus::prelude::*;
 use freenet_stdlib::client_api::ClientRequest::DelegateOp;
@@ -10,7 +10,7 @@ use freenet_stdlib::prelude::{
 use futures::channel::oneshot;
 use futures::future::{select, Either};
 use river_core::chat_delegate::{
-    ChatDelegateKey, ChatDelegateRequestMsg, ChatDelegateResponseMsg, RequestId, BoardKey,
+    BoardKey, ChatDelegateKey, ChatDelegateRequestMsg, ChatDelegateResponseMsg, RequestId,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -1,8 +1,8 @@
 //! Top bar component showing user profile, admin controls, and post input.
 
-use crate::components::app::{CURRENT_BOARD, MEMBER_INFO_MODAL, BOARDS};
-use crate::components::conversation::message_input::PostInput;
 use crate::board_data::SendMessageError;
+use crate::components::app::{BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL};
+use crate::components::conversation::message_input::PostInput;
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::messaging::{send_message, ReplyContext};
@@ -67,8 +67,14 @@ pub fn TopBar() -> Element {
                 }
             };
 
-            if let Some((current_board, board_key, self_sk, board_state_clone, is_private, secret_opt)) =
-                board_info
+            if let Some((
+                current_board,
+                board_key,
+                self_sk,
+                board_state_clone,
+                is_private,
+                secret_opt,
+            )) = board_info
             {
                 spawn(async move {
                     send_message(
@@ -110,8 +116,10 @@ pub fn TopBar() -> Element {
         .iter()
         .find(|ami| ami.member_info.member_id == self_member_id)
         .map(|ami| {
-            match unseal_bytes_with_secrets(&ami.member_info.preferred_nickname, &board_data.secrets)
-            {
+            match unseal_bytes_with_secrets(
+                &ami.member_info.preferred_nickname,
+                &board_data.secrets,
+            ) {
                 Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
                 Err(_) => ami.member_info.preferred_nickname.to_string_lossy(),
             }

@@ -6,20 +6,20 @@ use crate::{constants::BOARD_CONTRACT_WASM, util::to_cbor_vec};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use freenet_scaffold::ComposableState;
 use freenet_stdlib::prelude::{ContractCode, ContractKey, Parameters};
-use river_core::chat_delegate::BoardKey;
 use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
 use river_core::board_state::member::AuthorizedMember;
 use river_core::board_state::member::MemberId;
 use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
 use river_core::board_state::message::MessageId;
 use river_core::board_state::privacy::{
-    PrivacyMode, BoardCipherSpec, BoardDisplayMetadata, SealedBytes,
+    BoardCipherSpec, BoardDisplayMetadata, PrivacyMode, SealedBytes,
 };
 use river_core::board_state::secret::{
     AuthorizedEncryptedSecretForMember, AuthorizedSecretVersionRecord, EncryptedSecretForMemberV1,
     SecretVersionRecordV1,
 };
 use river_core::board_state::ChatBoardParametersV1;
+use river_core::chat_delegate::BoardKey;
 use river_core::ChatBoardStateV1;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -279,7 +279,11 @@ impl BoardData {
         {
             self.self_authorized_member = Some(member.clone());
             // Capture invite chain
-            if let Ok(chain) = self.board_state.members.get_invite_chain(member, parameters) {
+            if let Ok(chain) = self
+                .board_state
+                .members
+                .get_invite_chain(member, parameters)
+            {
                 self.invite_chain = chain;
             }
         }

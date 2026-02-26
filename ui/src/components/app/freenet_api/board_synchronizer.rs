@@ -9,7 +9,7 @@ use crate::components::app::freenet_api::constants::INVITATION_TIMEOUT_MS;
 use crate::components::app::notifications::{mark_initial_sync_complete, notify_new_messages};
 use crate::components::app::receive_times::record_receive_times;
 use crate::components::app::sync_info::{now_ms, BoardSyncStatus, SYNC_INFO};
-use crate::components::app::{CURRENT_BOARD, PENDING_INVITES, BOARDS, WEB_API};
+use crate::components::app::{BOARDS, CURRENT_BOARD, PENDING_INVITES, WEB_API};
 use crate::constants::BOARD_CONTRACT_WASM;
 use crate::invites::PendingBoardStatus;
 use crate::util::ecies::decrypt_with_symmetric_key;
@@ -26,7 +26,7 @@ use freenet_stdlib::{
     },
 };
 use river_core::board_state::member::MemberId;
-use river_core::board_state::message::{MessageId, BoardMessageBody};
+use river_core::board_state::message::{BoardMessageBody, MessageId};
 use river_core::board_state::privacy::PrivacyMode;
 use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1, ChatBoardStateV1Delta};
 use std::collections::HashMap;
@@ -377,7 +377,8 @@ impl BoardSynchronizer {
                             info!("Sent PutRequest for board {:?}", MemberId::from(*owner_vk));
                             // Update the sync status to subscribing using with_mut
                             SYNC_INFO.with_mut(|sync_info| {
-                                sync_info.update_sync_status(owner_vk, BoardSyncStatus::Subscribing);
+                                sync_info
+                                    .update_sync_status(owner_vk, BoardSyncStatus::Subscribing);
                             });
                         }
                         Err(e) => {
@@ -545,7 +546,11 @@ impl BoardSynchronizer {
     }
 
     /// Updates the board state and last_sync_state, should be called after state update received from network
-    pub(crate) fn update_board_state(&self, board_owner_vk: &VerifyingKey, state: &ChatBoardStateV1) {
+    pub(crate) fn update_board_state(
+        &self,
+        board_owner_vk: &VerifyingKey,
+        state: &ChatBoardStateV1,
+    ) {
         // Capture data needed for notifications BEFORE the mutable borrow
         let (old_message_ids, self_member_id, member_info_clone, board_secrets) = {
             let boards = BOARDS.read();

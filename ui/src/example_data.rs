@@ -1,7 +1,7 @@
 use crate::util::random_full_name;
 use crate::{
-    constants::BOARD_CONTRACT_WASM,
     board_data::{BoardData, Boards},
+    constants::BOARD_CONTRACT_WASM,
     util::to_cbor_vec,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};

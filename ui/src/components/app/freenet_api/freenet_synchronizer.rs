@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
+use super::board_synchronizer::BoardSynchronizer;
 use super::connection_manager::ConnectionManager;
 use super::error::SynchronizerError;
 use super::response_handler::ResponseHandler;
-use super::board_synchronizer::BoardSynchronizer;
 use crate::components::app::chat_delegate::set_up_chat_delegate;
 use crate::components::app::sync_info::{BoardSyncStatus, SYNC_INFO};
 use crate::components::app::{BOARDS, SYNC_STATUS, WEB_API};
@@ -452,7 +452,9 @@ impl FreenetSynchronizer {
                                             // Schedule a retry after a delay
                                             let tx = message_tx.clone();
                                             spawn_local(async move {
-                                                info!("Waiting before retrying board processing...");
+                                                info!(
+                                                    "Waiting before retrying board processing..."
+                                                );
                                                 sleep(Duration::from_millis(
                                                     super::constants::POST_PUT_DELAY_MS,
                                                 ))
@@ -489,7 +491,10 @@ impl FreenetSynchronizer {
                             .process_boards()
                             .await
                         {
-                            error!("Failed to process boards after invitation acceptance: {}", e);
+                            error!(
+                                "Failed to process boards after invitation acceptance: {}",
+                                e
+                            );
                         }
                     }
                 }

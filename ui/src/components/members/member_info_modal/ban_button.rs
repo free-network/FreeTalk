@@ -1,5 +1,5 @@
-use crate::components::app::{CURRENT_BOARD, MEMBER_INFO_MODAL, NEEDS_SYNC, BOARDS};
 use crate::board_data::BoardData;
+use crate::components::app::{BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL, NEEDS_SYNC};
 use crate::util::get_current_system_time;
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;

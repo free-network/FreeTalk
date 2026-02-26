@@ -10,13 +10,16 @@
 use crate::components::app::chat_delegate::{generate_request_id, send_delegate_request};
 use dioxus::logger::tracing::{info, warn};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
-use river_core::chat_delegate::{ChatDelegateRequestMsg, ChatDelegateResponseMsg, BoardKey};
+use river_core::chat_delegate::{BoardKey, ChatDelegateRequestMsg, ChatDelegateResponseMsg};
 
 /// Store a signing key in the delegate for a board.
 ///
 /// This should be called when creating a new board or when migrating
 /// an existing board's signing key to the delegate.
-pub async fn store_signing_key(board_key: BoardKey, signing_key: &SigningKey) -> Result<(), String> {
+pub async fn store_signing_key(
+    board_key: BoardKey,
+    signing_key: &SigningKey,
+) -> Result<(), String> {
     let request = ChatDelegateRequestMsg::StoreSigningKey {
         board_key,
         signing_key_bytes: signing_key.to_bytes(),
@@ -51,7 +54,10 @@ pub async fn get_public_key(board_key: BoardKey) -> Result<Option<VerifyingKey>,
 }
 
 /// Sign a message (MessageV1).
-pub async fn sign_message(board_key: BoardKey, message_bytes: Vec<u8>) -> Result<Signature, String> {
+pub async fn sign_message(
+    board_key: BoardKey,
+    message_bytes: Vec<u8>,
+) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignMessage {
         board_key,
         request_id: generate_request_id(),
@@ -137,7 +143,10 @@ pub async fn sign_encrypted_secret(
 }
 
 /// Sign a board upgrade (BoardUpgrade).
-pub async fn sign_upgrade(board_key: BoardKey, upgrade_bytes: Vec<u8>) -> Result<Signature, String> {
+pub async fn sign_upgrade(
+    board_key: BoardKey,
+    upgrade_bytes: Vec<u8>,
+) -> Result<Signature, String> {
     let request = ChatDelegateRequestMsg::SignUpgrade {
         board_key,
         request_id: generate_request_id(),

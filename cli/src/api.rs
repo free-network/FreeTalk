@@ -381,8 +381,9 @@ impl ApiClient {
                 match contract_response {
                     ContractResponse::GetResponse { state, .. } => {
                         // Deserialize the state properly
-                        let mut board_state: ChatBoardStateV1 = ciborium::de::from_reader(&state[..])
-                            .map_err(|e| anyhow!("Failed to deserialize board state: {}", e))?;
+                        let mut board_state: ChatBoardStateV1 =
+                            ciborium::de::from_reader(&state[..])
+                                .map_err(|e| anyhow!("Failed to deserialize board state: {}", e))?;
 
                         // Rebuild actions state (edits, deletes, reactions) from message content
                         board_state.recent_messages.rebuild_actions_state();
@@ -568,8 +569,9 @@ impl ApiClient {
                         info!("Successfully retrieved board state");
 
                         // Parse the actual board state from the response
-                        let board_state: ChatBoardStateV1 = ciborium::de::from_reader(&state[..])
-                            .map_err(|e| anyhow!("Failed to deserialize board state: {}", e))?;
+                        let board_state: ChatBoardStateV1 =
+                            ciborium::de::from_reader(&state[..])
+                                .map_err(|e| anyhow!("Failed to deserialize board state: {}", e))?;
 
                         info!(
                             "Board state retrieved: name={}, members={}, messages={}",
@@ -663,7 +665,10 @@ impl ApiClient {
     /// 4. Update local storage
     ///
     /// Returns the current contract key (possibly updated).
-    pub async fn ensure_board_migrated(&self, board_owner_key: &VerifyingKey) -> Result<ContractKey> {
+    pub async fn ensure_board_migrated(
+        &self,
+        board_owner_key: &VerifyingKey,
+    ) -> Result<ContractKey> {
         let expected_key = self.owner_vk_to_contract_key(board_owner_key);
 
         // Check if we have this board locally
@@ -946,7 +951,10 @@ impl ApiClient {
         let message = river_core::board_state::message::MessageV1 {
             board_owner: MemberId::from(*board_owner_key),
             author: sender_member_id,
-            content: river_core::board_state::message::BoardMessageBody::public(String::new(), message_content),
+            content: river_core::board_state::message::BoardMessageBody::public(
+                String::new(),
+                message_content,
+            ),
             time: std::time::SystemTime::now(),
         };
 
@@ -1037,7 +1045,10 @@ impl ApiClient {
         let message = river_core::board_state::message::MessageV1 {
             board_owner: river_core::board_state::member::MemberId::from(*board_owner_key),
             author: river_core::board_state::member::MemberId::from(&signing_key.verifying_key()),
-            content: river_core::board_state::message::BoardMessageBody::public(String::new(), message_content),
+            content: river_core::board_state::message::BoardMessageBody::public(
+                String::new(),
+                message_content,
+            ),
             time: std::time::SystemTime::now(),
         };
 
@@ -1170,7 +1181,8 @@ impl ApiClient {
             .map_err(|e| anyhow!("Failed to apply edit delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_board_state(board_owner_key, board_state)?;
+        self.storage
+            .update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
         self.send_delta(board_owner_key, delta).await
@@ -1226,7 +1238,8 @@ impl ApiClient {
             .map_err(|e| anyhow!("Failed to apply delete delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_board_state(board_owner_key, board_state)?;
+        self.storage
+            .update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
         self.send_delta(board_owner_key, delta).await
@@ -1287,7 +1300,8 @@ impl ApiClient {
             .map_err(|e| anyhow!("Failed to apply reaction delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_board_state(board_owner_key, board_state)?;
+        self.storage
+            .update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
         self.send_delta(board_owner_key, delta).await
@@ -1348,7 +1362,8 @@ impl ApiClient {
             .map_err(|e| anyhow!("Failed to apply remove_reaction delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_board_state(board_owner_key, board_state)?;
+        self.storage
+            .update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
         self.send_delta(board_owner_key, delta).await
@@ -1436,7 +1451,8 @@ impl ApiClient {
             .map_err(|e| anyhow!("Failed to apply reply delta: {:?}", e))?;
 
         // Update the stored state
-        self.storage.update_board_state(board_owner_key, board_state)?;
+        self.storage
+            .update_board_state(board_owner_key, board_state)?;
 
         // Send the delta to the network
         self.send_delta(board_owner_key, delta).await
@@ -1761,7 +1777,8 @@ impl ApiClient {
             .update_board_state(board_owner_key, board_state.clone())?;
 
         // Check if we need to re-add ourselves (pruned for inactivity)
-        let (members_delta, _) = self.build_rejoin_delta(&board_state, board_owner_key, &signing_key);
+        let (members_delta, _) =
+            self.build_rejoin_delta(&board_state, board_owner_key, &signing_key);
 
         // Create delta with member info update (and members delta if needed)
         let delta = ChatBoardStateV1Delta {

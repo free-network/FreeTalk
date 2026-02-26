@@ -149,7 +149,11 @@ impl Storage {
         }
     }
 
-    pub fn update_board_state(&self, owner_vk: &VerifyingKey, state: ChatBoardStateV1) -> Result<()> {
+    pub fn update_board_state(
+        &self,
+        owner_vk: &VerifyingKey,
+        state: ChatBoardStateV1,
+    ) -> Result<()> {
         let mut storage = self.load_boards()?;
         let owner_key_str = bs58::encode(owner_vk.as_bytes()).into_string();
 

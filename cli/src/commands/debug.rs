@@ -106,7 +106,10 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                             println!("✓ Successfully retrieved board state");
                             println!(
                                 "Configuration version: {}",
-                                board_state.configuration.configuration.configuration_version
+                                board_state
+                                    .configuration
+                                    .configuration
+                                    .configuration_version
                             );
                             println!(
                                 "Board name: {}",
@@ -314,7 +317,10 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                     println!("Limits:");
                     println!("  max_members: {}", board_config.max_members);
                     println!("  max_user_bans: {}", board_config.max_user_bans);
-                    println!("  max_recent_messages: {}", board_config.max_recent_messages);
+                    println!(
+                        "  max_recent_messages: {}",
+                        board_config.max_recent_messages
+                    );
                     println!("  max_message_size: {}", board_config.max_message_size);
                     println!("  max_nickname_size: {}", board_config.max_nickname_size);
                     println!("  max_board_name: {}", board_config.max_board_name);

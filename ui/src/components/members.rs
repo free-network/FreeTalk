@@ -1,5 +1,5 @@
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatus;
-use crate::components::app::{CURRENT_BOARD, MEMBER_INFO_MODAL, BOARDS, SYNC_STATUS};
+use crate::components::app::{BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL, SYNC_STATUS};
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::{FaUserPlus, FaUsers};

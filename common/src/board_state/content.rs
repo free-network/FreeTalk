@@ -87,7 +87,10 @@ impl ActionContentV1 {
         Self {
             action_type: ACTION_TYPE_EDIT,
             target,
-            payload: encode_cbor(&EditPayload { new_title, new_text }),
+            payload: encode_cbor(&EditPayload {
+                new_title,
+                new_text,
+            }),
         }
     }
 
@@ -299,7 +302,8 @@ mod tests {
 
     #[test]
     fn test_edit_action_roundtrip() {
-        let action = ActionContentV1::edit(test_message_id(), String::new(), "New text".to_string());
+        let action =
+            ActionContentV1::edit(test_message_id(), String::new(), "New text".to_string());
         let encoded = action.encode();
         let decoded = ActionContentV1::decode(&encoded).unwrap();
         assert_eq!(action, decoded);

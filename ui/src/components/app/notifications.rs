@@ -6,8 +6,8 @@
 //! - Board is not currently active
 //! - Permission has been granted
 
-use crate::components::app::{CURRENT_BOARD, BOARDS};
 use crate::board_data::CurrentBoard;
+use crate::components::app::{BOARDS, CURRENT_BOARD};
 use crate::util::ecies::{decrypt_with_symmetric_key, unseal_bytes_with_secrets};
 use dioxus::logger::tracing::{debug, info, warn};
 use dioxus::prelude::*;
@@ -216,7 +216,12 @@ pub fn show_notification(
             let granted = request_permission().await;
             if granted {
                 // Try again after permission granted
-                create_notification_internal(board_key, &board_name, &sender_name, &message_preview);
+                create_notification_internal(
+                    board_key,
+                    &board_name,
+                    &sender_name,
+                    &message_preview,
+                );
             }
         });
         return;

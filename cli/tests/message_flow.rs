@@ -1447,7 +1447,10 @@ async fn setup_board_and_exchange_messages(
     }
 
     // Collect drain task results and assert notifications were received.
-    println!("--- UpdateNotification results (board {}) ---", board.id + 1);
+    println!(
+        "--- UpdateNotification results (board {}) ---",
+        board.id + 1
+    );
     let mut any_failed = false;
     for task in drain_tasks {
         match tokio::time::timeout(Duration::from_secs(70), task).await {

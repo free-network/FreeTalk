@@ -1,5 +1,5 @@
 use crate::board_state::member::MemberId;
-use crate::board_state::privacy::{PrivacyMode, BoardDisplayMetadata};
+use crate::board_state::privacy::{BoardDisplayMetadata, PrivacyMode};
 use crate::board_state::ChatBoardParametersV1;
 use crate::util::truncated_base64;
 use crate::ChatBoardStateV1;
@@ -91,7 +91,8 @@ impl ComposableState for AuthorizedConfigurationV1 {
             }
 
             // Validate display metadata declared lengths
-            if delta.configuration.display.name.declared_len() > delta.configuration.max_board_name {
+            if delta.configuration.display.name.declared_len() > delta.configuration.max_board_name
+            {
                 return Err(format!(
                     "Board name declared length {} exceeds max_board_name {}",
                     delta.configuration.display.name.declared_len(),

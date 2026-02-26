@@ -1,6 +1,6 @@
 use super::board_name_field::BoardNameField;
 use crate::components::app::chat_delegate::save_boards_to_delegate;
-use crate::components::app::{CURRENT_BOARD, EDIT_BOARD_MODAL, NEEDS_SYNC, BOARDS};
+use crate::components::app::{BOARDS, CURRENT_BOARD, EDIT_BOARD_MODAL, NEEDS_SYNC};
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::FaRotate;

@@ -1,5 +1,5 @@
-use crate::components::app::freenet_api::error::SynchronizerError;
 use crate::components::app::freenet_api::board_synchronizer::BoardSynchronizer;
+use crate::components::app::freenet_api::error::SynchronizerError;
 use crate::components::app::sync_info::{BoardSyncStatus, SYNC_INFO};
 use crate::components::app::BOARDS;
 use crate::util::owner_vk_to_contract_key;
@@ -101,7 +101,10 @@ pub async fn handle_put_response(
 
             // Log board information
             for (member_id, contract_id) in board_info {
-                info!("Board in map: {:?}, contract ID: {}", member_id, contract_id);
+                info!(
+                    "Board in map: {:?}, contract ID: {}",
+                    member_id, contract_id
+                );
             }
         }
         None => {

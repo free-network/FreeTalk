@@ -1,4 +1,5 @@
 use crate::board_state::ban::BansV1;
+use crate::board_state::member::MemberId;
 use crate::board_state::ChatBoardParametersV1;
 use crate::util::{sign_struct, truncated_base32, verify_struct};
 use crate::ChatBoardStateV1;
@@ -10,7 +11,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
-use crate::board_state::member::MemberId;
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Clone, Debug, Default)]
 pub struct AdminsV1 {
@@ -117,11 +117,7 @@ impl ComposableState for AdminsV1 {
             // admins will be kept based on the deterministic removal criteria.
             for admin in &delta.added {
                 // Skip if this admin already exists
-                if self
-                    .admins
-                    .iter()
-                    .any(|m| m.admin.id() == admin.admin.id())
-                {
+                if self.admins.iter().any(|m| m.admin.id() == admin.admin.id()) {
                     continue;
                 }
                 self.admins.push(admin.clone());
@@ -244,10 +240,7 @@ pub struct Admin {
 impl fmt::Debug for Admin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Admin")
-            .field(
-                "member_id",
-                &format_args!("{}", self.member_id),
-            )
+            .field("member_id", &format_args!("{}", self.member_id))
             .finish()
     }
 }

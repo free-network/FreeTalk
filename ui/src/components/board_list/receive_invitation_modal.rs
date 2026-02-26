@@ -1,8 +1,8 @@
+use crate::board_data::Boards;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
-use crate::components::app::{Route, NEEDS_SYNC, PENDING_INVITES, BOARDS, SYNCHRONIZER};
+use crate::components::app::{Route, BOARDS, NEEDS_SYNC, PENDING_INVITES, SYNCHRONIZER};
 use crate::components::members::Invitation;
 use crate::invites::{PendingBoardJoin, PendingBoardStatus};
-use crate::board_data::Boards;
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use ed25519_dalek::VerifyingKey;

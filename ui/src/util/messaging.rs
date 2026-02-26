@@ -1,20 +1,23 @@
 //! Message sending utilities for the UI.
 
 use crate::components::app::notifications::request_permission_on_first_message;
-use crate::components::app::{NEEDS_SYNC,BOARDS};
+use crate::components::app::{BOARDS, NEEDS_SYNC};
 use crate::util::ecies::encrypt_with_symmetric_key;
 use crate::util::get_current_system_time;
 use dioxus::logger::tracing::{error, info, warn};
 use dioxus::prelude::ReadableExt;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use freenet_scaffold::ComposableState;
-use river_core::chat_delegate::BoardKey;
 use river_core::board_state::content::{
-    ReplyContentV1, TextContentV1, CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT, REPLY_CONTENT_VERSION, TEXT_CONTENT_VERSION,
+    ReplyContentV1, TextContentV1, CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT, REPLY_CONTENT_VERSION,
+    TEXT_CONTENT_VERSION,
 };
 use river_core::board_state::member::MemberId;
-use river_core::board_state::message::{AuthorizedMessageV1, MessageId, MessageV1, BoardMessageBody};
+use river_core::board_state::message::{
+    AuthorizedMessageV1, BoardMessageBody, MessageId, MessageV1,
+};
 use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1, ChatBoardStateV1Delta};
+use river_core::chat_delegate::BoardKey;
 
 /// Context for a reply message
 #[derive(Clone, PartialEq, Debug)]
@@ -122,12 +125,8 @@ pub async fn send_message(
     }
 
     // Sign using delegate with fallback to local signing
-    let signature = crate::signing::sign_message_with_fallback(
-        board_key,
-        message_bytes,
-        &self_sk,
-    )
-    .await;
+    let signature =
+        crate::signing::sign_message_with_fallback(board_key, message_bytes, &self_sk).await;
 
     let auth_message = AuthorizedMessageV1::with_signature(message, signature);
 
@@ -153,7 +152,8 @@ pub async fn send_message(
                         .iter()
                         .map(|m| m.member.id())
                         .collect();
-                    let mut members_to_add: Vec<river_core::board_state::member::AuthorizedMember> = vec![authorized_member.clone()];
+                    let mut members_to_add: Vec<river_core::board_state::member::AuthorizedMember> =
+                        vec![authorized_member.clone()];
                     for chain_member in &board_data.invite_chain {
                         if !current_member_ids.contains(&chain_member.member.id()) {
                             members_to_add.push(chain_member.clone());
@@ -162,7 +162,9 @@ pub async fn send_message(
 
                     // Use stored member_info to preserve nickname, or fall back to "Member"
                     use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
-                    let authorized_info: AuthorizedMemberInfo = if let Some(ref stored_info) = board_data.self_member_info {
+                    let authorized_info: AuthorizedMemberInfo = if let Some(ref stored_info) =
+                        board_data.self_member_info
+                    {
                         stored_info.clone()
                     } else {
                         use river_core::board_state::privacy::SealedBytes;
@@ -178,13 +180,17 @@ pub async fn send_message(
                         let member_info = MemberInfo {
                             member_id,
                             version: existing_version,
-                            preferred_nickname: SealedBytes::public("Member".to_string().into_bytes()),
+                            preferred_nickname: SealedBytes::public(
+                                "Member".to_string().into_bytes(),
+                            ),
                         };
                         AuthorizedMemberInfo::new_with_member_key(member_info, &board_data.self_sk)
                     };
 
                     (
-                        Some(river_core::board_state::member::MembersDelta::new(members_to_add)),
+                        Some(river_core::board_state::member::MembersDelta::new(
+                            members_to_add,
+                        )),
                         Some(vec![authorized_info]),
                     )
                 } else {
@@ -211,7 +217,9 @@ pub async fn send_message(
         if let Some(board_data) = boards.map.get_mut(&current_board) {
             if let Err(e) = board_data.board_state.apply_delta(
                 &board_state_clone,
-                &ChatBoardParametersV1 { owner: current_board },
+                &ChatBoardParametersV1 {
+                    owner: current_board,
+                },
                 &Some(delta),
             ) {
                 error!("Failed to apply message delta: {:?}", e);

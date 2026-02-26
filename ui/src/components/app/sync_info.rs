@@ -218,7 +218,8 @@ impl SyncInfo {
             let sync_info = self.map.get(key).unwrap();
             let sync_status = &sync_info.sync_status;
             let has_last_synced = sync_info.last_synced_state.is_some();
-            let states_match = sync_info.last_synced_state.as_ref() == Some(&board_data.board_state);
+            let states_match =
+                sync_info.last_synced_state.as_ref() == Some(&board_data.board_state);
 
             debug!(
                 "Board {:?} - sync status: {:?}, has last synced: {}, states match: {}",
@@ -263,7 +264,10 @@ impl SyncInfo {
             }
         }
 
-        info!("Found {} boards needing updates", boards_needing_update.len());
+        info!(
+            "Found {} boards needing updates",
+            boards_needing_update.len()
+        );
         boards_needing_update
     }
 

@@ -1,5 +1,5 @@
-use crate::components::app::freenet_api::error::SynchronizerError;
 use crate::components::app::freenet_api::board_synchronizer::BoardSynchronizer;
+use crate::components::app::freenet_api::error::SynchronizerError;
 use crate::components::app::sync_info::SYNC_INFO;
 use crate::util::from_cbor_slice;
 use dioxus::logger::tracing::{info, warn};

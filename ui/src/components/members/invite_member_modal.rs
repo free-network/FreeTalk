@@ -1,6 +1,6 @@
-use crate::components::app::{CURRENT_BOARD, BOARDS};
-use crate::components::members::Invitation;
 use crate::board_data::BoardData;
+use crate::components::app::{BOARDS, CURRENT_BOARD};
+use crate::components::members::Invitation;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::{FaArrowsRotate, FaCopy, FaXmark};

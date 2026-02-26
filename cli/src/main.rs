@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 
 use riverctl::{
     api,
-    commands::{debug, invite, member, message, board},
+    commands::{board, debug, invite, member, message},
     config, output,
 };
 

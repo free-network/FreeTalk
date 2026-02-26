@@ -14,9 +14,11 @@ use ed25519_dalek::SigningKey;
 use freenet_scaffold::ComposableState;
 use rand::rngs::OsRng;
 use river_core::board_state::ban::{AuthorizedUserBan, BansV1, UserBan};
-use river_core::board_state::member::{AuthorizedMember, Member, MemberId, MembersDelta, MembersV1};
+use river_core::board_state::member::{
+    AuthorizedMember, Member, MemberId, MembersDelta, MembersV1,
+};
 use river_core::board_state::message::{
-    AuthorizedMessageV1, MessageId, MessageV1, MessagesV1, BoardMessageBody,
+    AuthorizedMessageV1, BoardMessageBody, MessageId, MessageV1, MessagesV1,
 };
 use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1};
 use std::time::SystemTime;

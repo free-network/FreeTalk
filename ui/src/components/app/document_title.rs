@@ -8,7 +8,7 @@
 //! - Marking messages as read when tab becomes visible
 
 use crate::components::app::chat_delegate::save_boards_to_delegate;
-use crate::components::app::{CURRENT_BOARD, BOARDS};
+use crate::components::app::{BOARDS, CURRENT_BOARD};
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::logger::tracing::{debug, info, warn};
 use dioxus::prelude::*;

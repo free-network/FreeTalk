@@ -170,7 +170,7 @@ mod tests {
     use crate::board_state::configuration::Configuration;
     use crate::board_state::member::{AuthorizedMember, Member};
     use crate::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
-    use crate::board_state::message::{AuthorizedMessageV1, MessageV1, BoardMessageBody};
+    use crate::board_state::message::{AuthorizedMessageV1, BoardMessageBody, MessageV1};
     use ed25519_dalek::SigningKey;
     use std::fmt::Debug;
     use std::time::SystemTime;

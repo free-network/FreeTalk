@@ -1,8 +1,9 @@
 #![allow(non_snake_case)]
 
-use std::rc::Rc;
 use dioxus::prelude::*;
+use std::rc::Rc;
 
+mod board_data;
 mod components;
 mod constants;
 #[cfg(feature = "example-data")]
@@ -10,7 +11,6 @@ mod example_data;
 mod invites;
 #[allow(dead_code)]
 mod pending_invites;
-mod board_data;
 pub mod signing;
 mod util;
 

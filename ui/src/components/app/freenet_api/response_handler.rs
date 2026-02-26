@@ -4,8 +4,10 @@ mod subscribe_response;
 mod update_notification;
 mod update_response;
 
-use super::error::SynchronizerError;
 use super::board_synchronizer::BoardSynchronizer;
+use super::error::SynchronizerError;
+use crate::board_data::Boards;
+use crate::board_data::CurrentBoard;
 use crate::components::app::chat_delegate::{
     complete_pending_public_key_request, complete_pending_request, complete_pending_sign_request,
     complete_pending_signing_key_request, is_legacy_delegate_key, mark_legacy_migration_done,
@@ -14,9 +16,7 @@ use crate::components::app::chat_delegate::{
 use crate::components::app::document_title::{mark_current_board_as_read, update_document_title};
 use crate::components::app::notifications::mark_initial_sync_complete;
 use crate::components::app::sync_info::{BoardSyncStatus, SYNC_INFO};
-use crate::components::app::{CURRENT_BOARD, BOARDS};
-use crate::board_data::CurrentBoard;
-use crate::board_data::Boards;
+use crate::components::app::{BOARDS, CURRENT_BOARD};
 use crate::util::ecies::{decrypt_secret_from_member_blob, decrypt_with_symmetric_key};
 use crate::util::owner_vk_to_contract_key;
 use ciborium::de::from_reader;
@@ -26,10 +26,10 @@ use freenet_stdlib::client_api::{ContractResponse, HostResponse};
 use freenet_stdlib::prelude::OutboundDelegateMsg;
 pub use get_response::handle_get_response;
 pub use put_response::handle_put_response;
-use river_core::chat_delegate::{ChatDelegateRequestMsg, ChatDelegateResponseMsg};
 use river_core::board_state::member::MemberId;
-use river_core::board_state::message::{MessageId, BoardMessageBody};
+use river_core::board_state::message::{BoardMessageBody, MessageId};
 use river_core::board_state::privacy::PrivacyMode;
+use river_core::chat_delegate::{ChatDelegateRequestMsg, ChatDelegateResponseMsg};
 use std::collections::HashMap;
 pub use subscribe_response::handle_subscribe_response;
 pub use update_notification::handle_update_notification;
@@ -431,7 +431,9 @@ impl ResponseHandler {
 
                                                             // Get contract key and subscribe
                                                             let contract_key =
-                                                                owner_vk_to_contract_key(&board_key);
+                                                                owner_vk_to_contract_key(
+                                                                    &board_key,
+                                                                );
                                                             if let Err(e) = self
                                                                 .board_synchronizer
                                                                 .subscribe_to_contract(

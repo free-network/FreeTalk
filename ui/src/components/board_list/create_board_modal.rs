@@ -1,4 +1,4 @@
-use crate::components::app::{CREATE_BOARD_MODAL, NEEDS_SYNC, BOARDS};
+use crate::components::app::{BOARDS, CREATE_BOARD_MODAL, NEEDS_SYNC};
 use dioxus::prelude::*;
 use ed25519_dalek::SigningKey;
 use web_sys::window;
@@ -31,8 +31,8 @@ pub fn CreateBoardModal() -> Element {
 
         // Create board and get the key
         info!("🔵 About to call create_new_board_with_name...");
-        let new_board_key =
-            BOARDS.with_mut(|boards| boards.create_new_board_with_name(self_sk, name, nick, private));
+        let new_board_key = BOARDS
+            .with_mut(|boards| boards.create_new_board_with_name(self_sk, name, nick, private));
         info!("🔵 Board created with key: {:?}", new_board_key);
 
         // Navigate to board URL using hash (modal is outside Router context)

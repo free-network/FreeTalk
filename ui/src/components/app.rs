@@ -5,19 +5,22 @@ pub mod notifications;
 pub mod receive_times;
 pub mod sync_info;
 
-use super::{admin_view::AdminView, conversation::Conversation, members::MemberList, board_list::BoardList, top_bar::TopBar};
+use super::{
+    admin_view::AdminView, board_list::BoardList, conversation::Conversation, members::MemberList,
+    top_bar::TopBar,
+};
+use crate::board_data::{Boards, CurrentBoard};
 use crate::components::app::document_title::DocumentTitleUpdater;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatus;
 use crate::components::app::freenet_api::FreenetSynchronizer;
-use crate::components::members::member_info_modal::MemberInfoModal;
-use crate::components::members::Invitation;
-use crate::components::posts_view::{PostsView, SinglePostView};
 use crate::components::board_list::create_board_modal::CreateBoardModal;
 use crate::components::board_list::edit_board_modal::EditBoardModal;
 use crate::components::board_list::receive_invitation_modal::ReceiveInvitationModal;
+use crate::components::members::member_info_modal::MemberInfoModal;
+use crate::components::members::Invitation;
+use crate::components::posts_view::{PostsView, SinglePostView};
 use crate::invites::PendingInvites;
-use crate::board_data::{CurrentBoard, Boards};
 use dioxus::document::{Link, Stylesheet};
 use dioxus::logger::tracing::{debug, error, info};
 use dioxus::prelude::*;
@@ -111,7 +114,10 @@ pub fn App() -> Element {
             };
 
             if !url_matches {
-                debug!("CURRENT_BOARD changed to {} but URL doesn't match, navigating", board_id);
+                debug!(
+                    "CURRENT_BOARD changed to {} but URL doesn't match, navigating",
+                    board_id
+                );
                 if let Some(window) = window() {
                     if let Err(e) = window.location().set_hash(&format!("#/board/{}", board_id)) {
                         error!("Failed to navigate to board: {:?}", e);
@@ -144,7 +150,8 @@ pub fn App() -> Element {
                 if has_boards || has_invitations {
                     info!("Sending ProcessBoards message to synchronizer, has_boards={}, has_invitations={}", has_boards, has_invitations);
 
-                    if let Err(e) = message_sender.unbounded_send(SynchronizerMessage::ProcessBoards)
+                    if let Err(e) =
+                        message_sender.unbounded_send(SynchronizerMessage::ProcessBoards)
                     {
                         error!("Failed to send ProcessBoards message: {}", e);
                     } else {
@@ -205,9 +212,7 @@ fn Home() -> Element {
 /// Route component for handling invitations
 #[component]
 fn Invite(invite_code: String) -> Element {
-    let invitation = use_memo(move || {
-        Invitation::from_encoded_string(&invite_code).ok()
-    });
+    let invitation = use_memo(move || Invitation::from_encoded_string(&invite_code).ok());
 
     match invitation() {
         Some(inv) => rsx! {
@@ -283,7 +288,9 @@ fn sync_board_from_url(board_id: &str) {
                 let current = CURRENT_BOARD.read().owner_key;
                 if current != Some(vk) {
                     debug!("Syncing CURRENT_BOARD from URL: {}", board_id);
-                    *CURRENT_BOARD.write() = CurrentBoard { owner_key: Some(vk) };
+                    *CURRENT_BOARD.write() = CurrentBoard {
+                        owner_key: Some(vk),
+                    };
                 }
             }
         }

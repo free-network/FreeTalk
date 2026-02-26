@@ -1,7 +1,7 @@
 use super::*;
 use ed25519_dalek::{Signer, SigningKey};
 use freenet_stdlib::prelude::{ContractInstanceId, DelegateCtx};
-use river_core::chat_delegate::{RequestId, BoardKey};
+use river_core::chat_delegate::{BoardKey, RequestId};
 
 /// Handle an application message using the host function API for direct secret access.
 pub(crate) fn handle_application_message(
@@ -61,7 +61,9 @@ pub(crate) fn handle_application_message(
             request_id,
             message_bytes,
         } => {
-            logging::info(format!("Delegate received SignMessage for board: {board_key:?}").as_str());
+            logging::info(
+                format!("Delegate received SignMessage for board: {board_key:?}").as_str(),
+            );
             handle_sign_request(
                 ctx,
                 origin,
@@ -76,8 +78,17 @@ pub(crate) fn handle_application_message(
             request_id,
             member_bytes,
         } => {
-            logging::info(format!("Delegate received SignMember for board: {board_key:?}").as_str());
-            handle_sign_request(ctx, origin, board_key, request_id, member_bytes, app_msg.app)
+            logging::info(
+                format!("Delegate received SignMember for board: {board_key:?}").as_str(),
+            );
+            handle_sign_request(
+                ctx,
+                origin,
+                board_key,
+                request_id,
+                member_bytes,
+                app_msg.app,
+            )
         }
         ChatDelegateRequestMsg::SignBan {
             board_key,
@@ -92,8 +103,17 @@ pub(crate) fn handle_application_message(
             request_id,
             config_bytes,
         } => {
-            logging::info(format!("Delegate received SignConfig for board: {board_key:?}").as_str());
-            handle_sign_request(ctx, origin, board_key, request_id, config_bytes, app_msg.app)
+            logging::info(
+                format!("Delegate received SignConfig for board: {board_key:?}").as_str(),
+            );
+            handle_sign_request(
+                ctx,
+                origin,
+                board_key,
+                request_id,
+                config_bytes,
+                app_msg.app,
+            )
         }
         ChatDelegateRequestMsg::SignMemberInfo {
             board_key,
@@ -120,7 +140,14 @@ pub(crate) fn handle_application_message(
             logging::info(
                 format!("Delegate received SignSecretVersion for board: {board_key:?}").as_str(),
             );
-            handle_sign_request(ctx, origin, board_key, request_id, record_bytes, app_msg.app)
+            handle_sign_request(
+                ctx,
+                origin,
+                board_key,
+                request_id,
+                record_bytes,
+                app_msg.app,
+            )
         }
         ChatDelegateRequestMsg::SignEncryptedSecret {
             board_key,
@@ -130,14 +157,23 @@ pub(crate) fn handle_application_message(
             logging::info(
                 format!("Delegate received SignEncryptedSecret for board: {board_key:?}").as_str(),
             );
-            handle_sign_request(ctx, origin, board_key, request_id, secret_bytes, app_msg.app)
+            handle_sign_request(
+                ctx,
+                origin,
+                board_key,
+                request_id,
+                secret_bytes,
+                app_msg.app,
+            )
         }
         ChatDelegateRequestMsg::SignUpgrade {
             board_key,
             request_id,
             upgrade_bytes,
         } => {
-            logging::info(format!("Delegate received SignUpgrade for board: {board_key:?}").as_str());
+            logging::info(
+                format!("Delegate received SignUpgrade for board: {board_key:?}").as_str(),
+            );
             handle_sign_request(
                 ctx,
                 origin,

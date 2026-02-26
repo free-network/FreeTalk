@@ -127,7 +127,10 @@ pub async fn execute(command: MemberCommands, api: ApiClient, format: OutputForm
             }
             Ok(())
         }
-        MemberCommands::Ban { board_id, member_id } => {
+        MemberCommands::Ban {
+            board_id,
+            member_id,
+        } => {
             if !matches!(format, OutputFormat::Json) {
                 eprintln!("Banning member '{}' from board: {}", member_id, board_id);
             }

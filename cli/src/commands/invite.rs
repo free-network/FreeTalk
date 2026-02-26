@@ -44,7 +44,10 @@ pub async fn execute(command: InviteCommands, api: ApiClient, format: OutputForm
                 .map_err(|e| anyhow!("Invalid verifying key: {}", e))?;
 
             if !matches!(format, OutputFormat::Json) {
-                eprintln!("Creating invitation for board owned by: {}", board_owner_key);
+                eprintln!(
+                    "Creating invitation for board owned by: {}",
+                    board_owner_key
+                );
             }
 
             match api.create_invitation(&owner_vk).await {
