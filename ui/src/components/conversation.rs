@@ -756,7 +756,8 @@ fn MessageContentDisplay(
         (title_text.clone(), false)
     };
 
-    let (display_content_html, content_truncated) = if !expanded && matches!(size, MessageSize::Normal) {
+    // Truncate content for non-expanded card views (Normal size = PostsView cards)
+    let (display_content_html, content_truncated) = if !expanded {
         // For truncation, work with plain text then convert back to HTML
         let (truncated_text, was_truncated) = truncate_content(&content_text, 8, 512);
         if was_truncated {
