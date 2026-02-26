@@ -43,6 +43,15 @@ pub fn AdminView() -> Element {
             .unwrap_or_default()
     });
 
+    // Get list of banned users
+    let banned_users = use_memo(move || {
+        current_board_data
+            .read()
+            .as_ref()
+            .map(|board_data| board_data.board_state.bans.0.clone())
+            .unwrap_or_default()
+    });
+
     // Get list of members who can be made admin (not already admin, not owner)
     let available_members = use_memo(move || {
         current_board_data
@@ -195,6 +204,34 @@ pub fn AdminView() -> Element {
                                 div {
                                     p { class: "text-text font-medium", "{get_nickname(admin.admin.member_id)}" }
                                     p { class: "text-text-muted text-xs", "{admin.admin.member_id}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Banned users section
+            div { class: "mb-6",
+                h2 { class: "text-lg font-semibold text-text mb-3", "Banned Users" }
+
+                if banned_users.read().is_empty() {
+                    div { class: "bg-surface rounded-lg p-4 text-text-muted",
+                        "No users have been banned."
+                    }
+                } else {
+                    div { class: "space-y-2",
+                        for ban in banned_users.read().iter() {
+                            div { class: "bg-surface rounded-lg p-3 flex items-center gap-3",
+                                div { class: "w-8 h-8 bg-red-500/20 rounded-full flex items-center justify-center text-red-400 text-sm",
+                                    {get_nickname(ban.ban.banned_user).chars().next().unwrap_or('?').to_string()}
+                                }
+                                div { class: "flex-1",
+                                    p { class: "text-text font-medium", "{get_nickname(ban.ban.banned_user)}" }
+                                    p { class: "text-text-muted text-xs", "{ban.ban.banned_user}" }
+                                }
+                                div { class: "text-right text-xs text-text-muted",
+                                    p { "Banned by: {get_nickname(ban.banned_by)}" }
                                 }
                             }
                         }
