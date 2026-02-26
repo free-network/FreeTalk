@@ -2842,3 +2842,71 @@ fn test_merge_owner_ban_across_diverged_states() {
     ciborium::ser::into_writer(&merged_21, &mut bytes_21).unwrap();
     assert_eq!(bytes_12, bytes_21, "Owner ban merge must be commutative");
 }
+
+// =============================================================================
+// ADMIN TESTS
+// =============================================================================
+
+use river_core::board_state::admin::{Admin, AdminsDelta, AdminsV1, AuthorizedAdmin};
+
+/// Test that the owner cannot be added as an admin.
+/// The owner already has full privileges, so adding them as admin is rejected.
+#[test]
+fn test_owner_cannot_be_added_as_admin() {
+    let owner_sk = SigningKey::generate(&mut OsRng);
+    let owner_vk = owner_sk.verifying_key();
+    let owner_id: MemberId = owner_vk.into();
+
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
+    let parent_state = ChatBoardStateV1::default();
+
+    // Try to add owner as admin
+    let admin = Admin { member_id: owner_id };
+    let authorized_admin = AuthorizedAdmin::new(admin, &owner_sk);
+
+    let mut admins = AdminsV1::default();
+    let delta = AdminsDelta::new(vec![authorized_admin]);
+
+    let result = admins.apply_delta(&parent_state, &parameters, &Some(delta));
+
+    assert!(
+        result.is_err(),
+        "Adding owner as admin should fail"
+    );
+    assert!(
+        result.unwrap_err().contains("Owner cannot be added as an admin"),
+        "Error message should mention owner cannot be admin"
+    );
+}
+
+/// Test that a regular member can be added as admin.
+#[test]
+fn test_member_can_be_added_as_admin() {
+    let owner_sk = SigningKey::generate(&mut OsRng);
+    let owner_vk = owner_sk.verifying_key();
+    let owner_id: MemberId = owner_vk.into();
+
+    let parameters = ChatBoardParametersV1 { owner: owner_vk };
+    let parent_state = ChatBoardStateV1::default();
+
+    // Create a regular member
+    let (member, _member_sk) = create_test_member(owner_id, owner_id);
+    let member_id = member.id();
+
+    // Add member as admin (signed by owner)
+    let admin = Admin { member_id };
+    let authorized_admin = AuthorizedAdmin::new(admin, &owner_sk);
+
+    let mut admins = AdminsV1::default();
+    let delta = AdminsDelta::new(vec![authorized_admin]);
+
+    let result = admins.apply_delta(&parent_state, &parameters, &Some(delta));
+
+    assert!(
+        result.is_ok(),
+        "Adding regular member as admin should succeed: {:?}",
+        result
+    );
+    assert_eq!(admins.admins.len(), 1);
+    assert_eq!(admins.admins[0].admin.member_id, member_id);
+}
