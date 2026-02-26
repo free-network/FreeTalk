@@ -15,11 +15,9 @@ pub fn PostInput(
     /// Default reply context - applied when modal opens if replying_to is None
     #[props(default)]
     default_reply_to: Option<ReplyContext>,
-    /// Maximum title length (default 100)
-    #[props(default = 100)]
+    /// Maximum title length (from board configuration)
     max_title_size: usize,
-    /// Maximum message length (default 10000)
-    #[props(default = 10000)]
+    /// Maximum message length (from board configuration)
     max_message_size: usize,
 ) -> Element {
     let mut show_modal = use_signal(|| false);

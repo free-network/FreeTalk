@@ -213,7 +213,6 @@ pub struct Configuration {
     pub max_recent_messages: usize,
     pub max_user_bans: usize,
     pub max_message_size: usize,
-    #[serde(default = "default_max_title_size")]
     pub max_title_size: usize,
     pub max_nickname_size: usize,
     pub max_members: usize,
@@ -222,9 +221,6 @@ pub struct Configuration {
     pub max_board_description: usize,
 }
 
-fn default_max_title_size() -> usize {
-    100
-}
 
 #[cfg(test)]
 mod tests {

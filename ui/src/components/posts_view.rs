@@ -85,10 +85,17 @@ pub fn PostsView() -> Element {
                 div { class: "flex-1 overflow-y-auto",
                     div { class: "max-w-4xl mx-auto px-4 py-6",
                         {
-                            let self_member_id_for_posts = current_board_data.as_ref()
-                                .map(|rd| MemberId::from(&rd.self_sk.verifying_key()));
-                            match (posts.read().as_ref(), self_member_id_for_posts) {
-                                (Some(posts), Some(self_member_id)) if !posts.is_empty() => {
+                            let board_info = current_board_data.as_ref()
+                                .map(|rd| {
+                                    let config = &rd.board_state.configuration.configuration;
+                                    (
+                                        MemberId::from(&rd.self_sk.verifying_key()),
+                                        config.max_title_size,
+                                        config.max_message_size,
+                                    )
+                                });
+                            match (posts.read().as_ref(), board_info) {
+                                (Some(posts), Some((self_member_id, max_title_size, max_message_size))) if !posts.is_empty() => {
                                     rsx! {
                                         div { class: "space-y-8",
                                             {posts.iter().map({
@@ -107,6 +114,8 @@ pub fn PostsView() -> Element {
                                                                 self_member_id: self_member_id,
                                                                 expanded: false,
                                                                 show_replies: false,
+                                                                max_title_size: max_title_size,
+                                                                max_message_size: max_message_size,
                                                                 on_click: move |_| {
                                                                     // Get current board_id for navigation
                                                                     if let Some(key) = CURRENT_BOARD.read().owner_key {
@@ -198,13 +207,16 @@ pub fn SinglePostView(post_id: String) -> Element {
             .unwrap_or_default()
     });
 
-    // Find the post and self_member_id
+    // Find the post, self_member_id, and config
     let post_data = use_memo(move || {
         let current_board = CURRENT_BOARD.read();
         if let Some(key) = current_board.owner_key {
             let boards = BOARDS.read();
             if let Some(board_data) = boards.map.get(&key) {
                 let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
+                let config = &board_data.board_state.configuration.configuration;
+                let max_title_size = config.max_title_size;
+                let max_message_size = config.max_message_size;
                 let all_messages = get_all_messages(
                     &board_data.board_state.recent_messages,
                     &board_data.board_state.member_info,
@@ -212,7 +224,7 @@ pub fn SinglePostView(post_id: String) -> Element {
                     &board_data.secrets,
                 );
                 let post = all_messages.into_iter().find(|m| m.id_string() == post_id);
-                return post.map(|p| (p, self_member_id));
+                return post.map(|p| (p, self_member_id, max_title_size, max_message_size));
             }
         }
         None
@@ -262,7 +274,7 @@ pub fn SinglePostView(post_id: String) -> Element {
             div { class: "flex-1 overflow-y-auto",
                 {
                     match post_data.read().as_ref() {
-                        Some((post, self_member_id)) => {
+                        Some((post, self_member_id, max_title_size, max_message_size)) => {
                             rsx! {
                                 div { class: "max-w-4xl mx-auto px-4 py-6",
                                     MessageCard {
@@ -271,6 +283,8 @@ pub fn SinglePostView(post_id: String) -> Element {
                                         self_member_id: *self_member_id,
                                         expanded: true,
                                         show_replies: true,
+                                        max_title_size: *max_title_size,
+                                        max_message_size: *max_message_size,
                                         on_react: move |(msg_id, emoji)| {
                                             handle_toggle_reaction(msg_id, emoji);
                                         },

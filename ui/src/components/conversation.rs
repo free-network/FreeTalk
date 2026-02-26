@@ -348,6 +348,9 @@ pub fn Conversation(
                 let boards = BOARDS.read();
                 if let Some(board_data) = boards.map.get(&key) {
                     let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
+                    let config = &board_data.board_state.configuration.configuration;
+                    let max_title_size = config.max_title_size;
+                    let max_message_size = config.max_message_size;
                     let all_messages = get_all_messages(
                         &board_data.board_state.recent_messages,
                         &board_data.board_state.member_info,
@@ -374,7 +377,7 @@ pub fn Conversation(
                         .collect();
 
                     let tree = build_reply_tree(&all_messages, parent_id.as_ref());
-                    return Some((tree, self_member_id, member_names));
+                    return Some((tree, self_member_id, member_names, max_title_size, max_message_size));
                 }
             }
             None
@@ -456,10 +459,12 @@ pub fn Conversation(
                     {
                         if current_board_data.is_some() {
                             match message_tree.read().as_ref() {
-                                Some((tree, self_member_id, member_names)) if !tree.is_empty() => {
+                                Some((tree, self_member_id, member_names, max_title_size, max_message_size)) if !tree.is_empty() => {
                                     let tree = tree.clone();
                                     let self_member_id = *self_member_id;
                                     let member_names = member_names.clone();
+                                    let max_title_size = *max_title_size;
+                                    let max_message_size = *max_message_size;
                                     Some(rsx! {
                                         div { class: "space-y-2",
                                             {tree.into_iter().map({
@@ -478,6 +483,8 @@ pub fn Conversation(
                                                             member_names: member_names,
                                                             replies: msg_with_replies.replies.clone(),
                                                             depth: 0,
+                                                            max_title_size: max_title_size,
+                                                            max_message_size: max_message_size,
                                                             on_react: move |(msg_id, emoji)| {
                                                                 handle_toggle_reaction(msg_id, emoji);
                                                             },
@@ -797,9 +804,9 @@ fn MessageEditForm(
     msg_id: MessageId,
     on_edit: Option<EventHandler<(MessageId, String, String)>>,
     size: MessageSize,
-    #[props(default = 100)]
+    /// Maximum title length (from board configuration)
     max_title_size: usize,
-    #[props(default = 10000)]
+    /// Maximum message length (from board configuration)
     max_message_size: usize,
 ) -> Element {
     let (input_class, textarea_class, button_class, container_class) = match size {
@@ -1211,6 +1218,12 @@ pub fn MessageCard(
     /// Default reply context for replies section
     #[props(default)]
     default_reply_to: Option<ReplyContext>,
+    /// Maximum title length (from board configuration)
+    #[props(default = 100)]
+    max_title_size: usize,
+    /// Maximum message length (from board configuration)
+    #[props(default = 10000)]
+    max_message_size: usize,
 ) -> Element {
     let msg = message.clone();
     let is_self = msg.is_self;
@@ -1292,6 +1305,8 @@ pub fn MessageCard(
                                 msg_id: msg_id.clone(),
                                 on_edit: on_edit.clone(),
                                 size: size,
+                                max_title_size: max_title_size,
+                                max_message_size: max_message_size,
                             }
                         } else {
                             MessageContentDisplay {
@@ -1349,6 +1364,8 @@ pub fn MessageCard(
                                             member_names: member_names,
                                             replies: reply.replies.clone(),
                                             depth: depth + 1,
+                                            max_title_size: max_title_size,
+                                            max_message_size: max_message_size,
                                             on_react: on_react.clone(),
                                             on_request_delete: on_request_delete.clone(),
                                             on_edit: on_edit.clone(),
@@ -1429,6 +1446,8 @@ pub fn MessageCard(
                                     msg_id: msg_id.clone(),
                                     on_edit: on_edit.clone(),
                                     size: size,
+                                    max_title_size: max_title_size,
+                                    max_message_size: max_message_size,
                                 }
                             } else {
                                 MessageContentDisplay {
