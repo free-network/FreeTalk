@@ -160,7 +160,7 @@ pub fn TopBar() -> Element {
                 if is_owner || is_admin {
                     a {
                         href: "#/board/{board_id}/admin",
-                        class: "flex items-center gap-2 px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
+                        class: "flex items-center gap-2 px-4 py-2.5 bg-surface hover:bg-surface-hover text-text font-medium rounded-xl transition-colors",
                         title: "Manage Admins",
                         span { "⚙" }
                         span { "Admin" }
