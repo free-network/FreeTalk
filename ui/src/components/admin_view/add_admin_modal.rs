@@ -157,7 +157,7 @@ pub fn AddAdminModal(on_close: EventHandler<()>) -> Element {
                     }
 
                     if available_members.read().is_empty() {
-                        p { class: "text-text-muted",
+                        p { class: "text-text-muted mb-4",
                             "No members available to add as admin. All members are either already admins or the owner."
                         }
                     } else {
@@ -180,14 +180,16 @@ pub fn AddAdminModal(on_close: EventHandler<()>) -> Element {
                                 }
                             }
                         }
+                    }
 
-                        // Action buttons
-                        div { class: "flex gap-3 justify-end",
-                            button {
-                                class: "px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
-                                onclick: move |_| on_close.call(()),
-                                "Cancel"
-                            }
+                    // Action buttons (always shown)
+                    div { class: "flex gap-3 justify-end",
+                        button {
+                            class: "px-4 py-2 bg-surface hover:bg-surface-hover text-text rounded-lg transition-colors",
+                            onclick: move |_| on_close.call(()),
+                            "Cancel"
+                        }
+                        if !available_members.read().is_empty() {
                             button {
                                 class: "px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
                                 disabled: selected_member.read().is_none(),
