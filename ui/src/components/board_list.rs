@@ -96,103 +96,104 @@ pub fn BoardList() -> Element {
     });
 
     rsx! {
-        div { class: "relative inline-block items-center",
-            // Dropdown trigger button
-            div { class: "flex justify-center", style: "width: 100vw;",
+        div { class: "relative",
+            // Dropdown trigger button - current board display
+            div { class: "flex justify-center",
                 button {
-                    class: "flex items-center gap-6 px-4 py-2 bg-panel text-sm text-text hover:bg-surface transition-colors min-w-48 min-h-24", style: "min-width: 60vw;",
+                    class: "flex items-center gap-6 px-6 py-4 bg-panel text-text hover:bg-surface transition-colors",
+                    style: "min-width: 60vw;",
                     onclick: move |_| {
                         is_open.set(!is_open());
                     },
                     Icon { width: 48, height: 48, icon: FaComments, class: "text-text-muted" }
-                    span { class: "flex-1 text-left text-4xl truncate", "{current_board_name}" }
+                    span { class: "flex-1 text-left text-4xl font-medium truncate", "{current_board_name}" }
                     Icon {
-                        width: 12,
-                        height: 12,
+                        width: 16,
+                        height: 16,
                         icon: FaChevronDown,
                         class: format!("text-text-muted transition-transform {}", if is_open() { "rotate-180" } else { "" })
                     }
                 }
+            }
 
-                // Dropdown panel
-                if is_open() {
-                    // Backdrop to close dropdown when clicking outside
-                    div {
-                        class: "fixed inset-0 z-10",
-                        onclick: move |_| {
-                            is_open.set(false);
+            // Dropdown panel
+            if is_open() {
+                // Backdrop to close dropdown when clicking outside
+                div {
+                    class: "fixed inset-0 z-10",
+                    onclick: move |_| {
+                        is_open.set(false);
+                    }
+                }
+
+                // Dropdown menu - centered like the button
+                div { class: "absolute left-1/2 -translate-x-1/2 top-full z-20 bg-panel shadow-lg rounded-b-xl overflow-hidden",
+                    style: "min-width: 60vw;",
+
+                    // Board list
+                    div { class: "max-h-96 overflow-y-auto",
+                        {board_items.read().iter().map(|(board_key, board_name, is_current)| {
+                            let board_key = *board_key;
+                            let board_name = board_name.clone();
+                            let is_current = *is_current;
+                            rsx! {
+                                button {
+                                    key: "{board_key:?}",
+                                    class: format!(
+                                        "w-full flex items-center gap-4 px-6 py-4 transition-colors {}",
+                                        if is_current {
+                                            "bg-accent/10 text-accent"
+                                        } else {
+                                            "text-text hover:bg-surface"
+                                        }
+                                    ),
+                                    onclick: move |_| {
+                                        // Navigate to board URL using hash (component is outside Router context)
+                                        let board_id = bs58::encode(board_key.as_bytes()).into_string();
+                                        if let Some(win) = window() {
+                                            let _ = win.location().set_hash(&format!("/board/{}", board_id));
+                                        }
+                                        mark_current_board_as_read();
+                                        is_open.set(false);
+                                        spawn(async move {
+                                            if let Err(e) = save_boards_to_delegate().await {
+                                                error!("Failed to save current board selection: {}", e);
+                                            }
+                                        });
+                                    },
+                                    Icon {
+                                        width: 32,
+                                        height: 32,
+                                        icon: FaComments,
+                                        class: if is_current { "text-accent" } else { "text-text-muted" }
+                                    }
+                                    span { class: "flex-1 text-left text-2xl truncate", "{board_name}" }
+                                }
+                            }
+                        }).collect::<Vec<_>>().into_iter()}
+
+                        // Empty state
+                        if board_items.read().is_empty() {
+                            div { class: "px-6 py-8 text-xl text-text-muted text-center",
+                                "No boards yet"
+                            }
                         }
                     }
 
-                    // Dropdown menu
-                    div { class: "flex justify-center absolute left-0 top-full overflow-hidden z-20", style: "width: 100vw",
-                        div { class: "bg-panel", style: "min-width: 60vw",
-                            // Board list
-                            ul { class: "max-h-64 overflow-y-auto py-1",
-                                {board_items.read().iter().map(|(board_key, board_name, is_current)| {
-                                    let board_key = *board_key;
-                                    let board_name = board_name.clone();
-                                    let is_current = *is_current;
-                                    rsx! {
-                                        li { key: "{board_key:?}",
-                                            button {
-                                                class: format!(
-                                                    "w-full text-left px-3 py-2 text-sm transition-colors {}",
-                                                    if is_current {
-                                                        "bg-accent/10 text-accent font-medium"
-                                                    } else {
-                                                        "text-text hover:bg-surface"
-                                                    }
-                                                ),
-                                                onclick: move |_| {
-                                                    // Navigate to board URL using hash (component is outside Router context)
-                                                    let board_id = bs58::encode(board_key.as_bytes()).into_string();
-                                                    if let Some(win) = window() {
-                                                        let _ = win.location().set_hash(&format!("/board/{}", board_id));
-                                                    }
-                                                    mark_current_board_as_read();
-                                                    is_open.set(false);
-                                                    spawn(async move {
-                                                        if let Err(e) = save_boards_to_delegate().await {
-                                                            error!("Failed to save current board selection: {}", e);
-                                                        }
-                                                    });
-                                                },
-                                                span { class: "block truncate", "{board_name}" }
-                                            }
-                                        }
-                                    }
-                                }).collect::<Vec<_>>().into_iter()}
+                    // Create board button
+                    button {
+                        class: "w-full flex items-center gap-4 px-6 py-4 border-t border-border text-text-muted hover:text-accent hover:bg-surface transition-colors",
+                        onclick: move |_| {
+                            CREATE_BOARD_MODAL.write().show = true;
+                            is_open.set(false);
+                        },
+                        Icon { width: 32, height: 32, icon: FaPlus }
+                        span { class: "text-2xl", "Create Board" }
+                    }
 
-                                // Empty state
-                                if board_items.read().is_empty() {
-                                    li { class: "px-3 py-4 text-sm text-text-muted text-center",
-                                        "No boards yet"
-                                    }
-                                }
-                            }
-
-                            // Header with create board button
-                            div { class: "px-3 py-2 border-t border-border flex items-center justify-center",
-                                span { class: "text-xs font-semibold text-text-muted uppercase tracking-wide",
-                                    "Boards"
-                                }
-                                button {
-                                    class: "p-1 rounded text-text-muted hover:text-accent hover:bg-surface transition-colors",
-                                    title: "Create Board",
-                                    onclick: move |_| {
-                                        CREATE_BOARD_MODAL.write().show = true;
-                                        is_open.set(false);
-                                    },
-                                    Icon { width: 12, height: 12, icon: FaPlus }
-                                }
-                            }
-
-                            // Build info footer
-                            div { class: "px-3 py-2 border-t border-border text-xs text-text-muted text-center",
-                                {"Built: "} {format_build_time_local()}
-                            }
-                        }
+                    // Build info footer
+                    div { class: "px-6 py-2 border-t border-border text-sm text-text-muted text-center",
+                        {"Built: "} {format_build_time_local()}
                     }
                 }
             }
