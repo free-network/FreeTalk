@@ -214,11 +214,15 @@ pub fn App() -> Element {
         Stylesheet { href: asset!("/assets/main.css") }
 
         // Main layout with router - app-root fixes iOS Safari viewport issues
-        div { class: "flex bg-bg overflow-hidden app-root",
+        div { class: "flex flex-col bg-bg overflow-hidden app-root",
+            // Top bar with board selector (full width)
             BoardList {}
-            TopBar {}
-            Router::<Route> {}
-            MemberList {}
+            // Main content area (horizontal flex)
+            div { class: "flex flex-1 min-h-0 overflow-hidden",
+                TopBar {}
+                Router::<Route> {}
+                MemberList {}
+            }
             EditBoardModal {}
             MemberInfoModal {}
             CreateBoardModal {}
