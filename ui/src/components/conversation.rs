@@ -780,7 +780,7 @@ fn MessageContentDisplay(
         }
         // Content
         div { class: "{text_class}",
-            span {
+            div {
                 class: "{content_class}",
                 dangerous_inner_html: "{display_content_html}"
             }
