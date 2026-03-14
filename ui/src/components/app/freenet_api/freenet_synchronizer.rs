@@ -4,7 +4,7 @@ use super::board_synchronizer::BoardSynchronizer;
 use super::connection_manager::ConnectionManager;
 use super::error::SynchronizerError;
 use super::response_handler::ResponseHandler;
-use crate::components::app::chat_delegate::set_up_chat_delegate;
+use crate::components::app::chat_delegate::{mark_legacy_migration_done, set_up_chat_delegate};
 use crate::components::app::sync_info::{BoardSyncStatus, SYNC_INFO};
 use crate::components::app::{BOARDS, SYNC_STATUS, WEB_API};
 use crate::util::{owner_vk_to_contract_key, sleep};
@@ -22,6 +22,30 @@ use std::time::Duration;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
+
+/// Compute reconnection delay with exponential backoff and ±20% jitter.
+/// `consecutive_failures` is the number of failed attempts so far (0-indexed).
+fn reconnect_delay_ms(consecutive_failures: u32) -> u64 {
+    use super::constants::{RECONNECT_INITIAL_MS, RECONNECT_MAX_MS};
+
+    let base = RECONNECT_INITIAL_MS.saturating_mul(1u64 << consecutive_failures.min(20));
+    let capped = base.min(RECONNECT_MAX_MS);
+
+    // Add ±20% jitter using simple WASM-compatible pseudo-random
+    let jitter_range = capped / 5; // 20%
+    let jitter = if jitter_range > 0 {
+        // Use js_sys::Math::random() for WASM-compatible randomness
+        #[cfg(target_arch = "wasm32")]
+        let rand_val = (js_sys::Math::random() * (2.0 * jitter_range as f64)) as u64;
+        #[cfg(not(target_arch = "wasm32"))]
+        let rand_val = jitter_range; // deterministic for tests
+        rand_val
+    } else {
+        0
+    };
+
+    (capped - jitter_range + jitter).min(RECONNECT_MAX_MS)
+}
 
 /// Message types for communicating with the synchronizer
 pub enum SynchronizerMessage {
@@ -147,6 +171,26 @@ impl FreenetSynchronizer {
                 error!("Failed to send Connect message: {}", e);
             }
 
+            let mut consecutive_failures: u32 = 0;
+
+            // Helper: compute delay from current failure count, then increment for next time
+            let schedule_reconnect =
+                |consecutive_failures: &mut u32, tx: &UnboundedSender<SynchronizerMessage>| {
+                    let delay = reconnect_delay_ms(*consecutive_failures);
+                    *consecutive_failures = consecutive_failures.saturating_add(1);
+                    warn!(
+                        "Connection failed (attempt {}), reconnecting in {}ms",
+                        *consecutive_failures, delay
+                    );
+                    let tx = tx.clone();
+                    spawn_local(async move {
+                        sleep(Duration::from_millis(delay)).await;
+                        if let Err(e) = tx.unbounded_send(SynchronizerMessage::Connect) {
+                            error!("Failed to send reconnect message: {}", e);
+                        }
+                    });
+                };
+
             info!("Entering message loop");
             while let Some(msg) = message_rx.next().await {
                 match msg {
@@ -183,26 +227,18 @@ impl FreenetSynchronizer {
                         }
                     }
                     SynchronizerMessage::ConnectionLost => {
-                        warn!("WebSocket connection lost, scheduling reconnection");
                         // Clear the web API so is_connected() returns false
                         WEB_API.write().take();
                         *SYNC_STATUS.write() = SynchronizerStatus::Disconnected;
-
-                        // Schedule reconnection after a delay
-                        let tx = message_tx.clone();
-                        spawn_local(async move {
-                            info!("Waiting 3 seconds before reconnection attempt...");
-                            sleep(Duration::from_millis(3000)).await;
-                            if let Err(e) = tx.unbounded_send(SynchronizerMessage::Connect) {
-                                error!("Failed to send reconnect message: {}", e);
-                            }
-                        });
+                        schedule_reconnect(&mut consecutive_failures, &message_tx);
                     }
                     SynchronizerMessage::PageBecameVisible => {
                         // Page became visible after being hidden (e.g., after sleep/wake)
                         // Check if we're still connected, if not trigger reconnection
                         info!("Page visibility changed to visible, checking connection status");
                         if !connection_manager.is_connected() {
+                            // Reset backoff — user is actively looking at the page
+                            consecutive_failures = 0;
                             info!("Connection is not active after wake, triggering reconnection");
                             if let Err(e) = message_tx.unbounded_send(SynchronizerMessage::Connect)
                             {
@@ -264,6 +300,7 @@ impl FreenetSynchronizer {
                         {
                             Ok(()) => {
                                 info!("Connection established successfully");
+                                consecutive_failures = 0;
                                 // Check if web API is available without holding the lock
                                 // during process_boards() call
                                 let api_available = WEB_API.read().is_some();
@@ -288,16 +325,8 @@ impl FreenetSynchronizer {
                                 }
                             }
                             Err(e) => {
-                                error!("Failelld to initialize connection: {}", e);
-                                let tx = message_tx.clone();
-                                spawn_local(async move {
-                                    info!("Scheduling reconnection attempt");
-                                    sleep(Duration::from_millis(3000)).await;
-                                    if let Err(e) = tx.unbounded_send(SynchronizerMessage::Connect)
-                                    {
-                                        error!("Failed to send reconnect message: {}", e);
-                                    }
-                                });
+                                error!("Failed to initialize connection: {}", e);
+                                schedule_reconnect(&mut consecutive_failures, &message_tx);
                             }
                         }
                     }
@@ -380,6 +409,17 @@ impl FreenetSynchronizer {
                             }
                             Err(e) => {
                                 error!("Received error in API response: {}", e);
+
+                                // "delegate X not found in store" errors from legacy migration
+                                // requests should permanently mark migration as done. The old
+                                // delegate WASM was never installed on this node, so retrying
+                                // across sessions will never succeed.
+                                if e.to_string().contains("delegate")
+                                    && e.to_string().contains("not found")
+                                {
+                                    info!("Delegate not found error (likely legacy migration) - marking migration complete");
+                                    mark_legacy_migration_done();
+                                }
 
                                 // Special handling for "not supported" errors
                                 if e.to_string().contains("not supported") {

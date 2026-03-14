@@ -903,7 +903,12 @@ fn MessageEditForm(
                 textarea {
                     class: "{textarea_class}",
                     value: "{edit_text}",
-                    autofocus: true,
+                    onmounted: move |cx| {
+                        let element = cx.data();
+                        wasm_bindgen_futures::spawn_local(async move {
+                            let _ = element.set_focus(true).await;
+                        });
+                    },
                     oninput: move |e| edit_text.set(e.value().clone()),
                     onkeydown: move |e: KeyboardEvent| {
                         if e.key() == Key::Escape {

@@ -13,7 +13,7 @@ use river_core::chat_delegate::{
     BoardKey, ChatDelegateKey, ChatDelegateRequestMsg, ChatDelegateResponseMsg, RequestId,
 };
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 // Constant for the boards storage key
@@ -500,12 +500,27 @@ pub fn mark_legacy_migration_done() {
     }
 }
 
+/// Guard to prevent repeated legacy migration attempts within the same session.
+/// The migration is fire-and-forget: if the legacy delegates don't exist on the node,
+/// the node returns "delegate not found" errors that never reach the response handler's
+/// success path, so `mark_legacy_migration_done()` is never called. Without this guard,
+/// every WebSocket reconnect would re-fire all legacy delegate requests, creating a
+/// tight error spam loop.
+static LEGACY_MIGRATION_ATTEMPTED: AtomicBool = AtomicBool::new(false);
+
 /// Fire requests to load boards from all known legacy delegates (fire and forget).
 /// If any legacy delegate has board data, the response handler will migrate it.
 async fn fire_legacy_migration_request() {
-    // Check if migration has already been done
+    // Check if migration has already been done (persistent across sessions)
     if is_legacy_migration_done() {
         info!("Legacy migration already done, skipping");
+        return;
+    }
+
+    // Only attempt migration once per session to avoid error spam on reconnect.
+    // If the legacy delegates aren't installed, retrying won't help.
+    if LEGACY_MIGRATION_ATTEMPTED.swap(true, Ordering::Relaxed) {
+        info!("Legacy migration already attempted this session, skipping");
         return;
     }
 
