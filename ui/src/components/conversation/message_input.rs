@@ -66,12 +66,21 @@ pub fn PostInput(
     };
 
     rsx! {
-        // Compose button bar
-        button {
-            class: "p-3 bg-accent hover:bg-accent-hover text-white rounded-xl transition-colors",
-            onclick: open_modal,
-            title: if default_reply_to.is_some() { "Compose Reply" } else { "Compose Post" },
-            Icon { icon: FaPen, width: 18, height: 18 }
+        // Compose button - icon only for new post, with caption for reply
+        if default_reply_to.is_some() {
+            button {
+                class: "flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors",
+                onclick: open_modal,
+                Icon { icon: FaPen, width: 14, height: 14 }
+                "Compose Reply"
+            }
+        } else {
+            button {
+                class: "p-3 bg-accent hover:bg-accent-hover text-white rounded-xl transition-colors",
+                onclick: open_modal,
+                title: "Compose Post",
+                Icon { icon: FaPen, width: 18, height: 18 }
+            }
         }
 
         // Compose modal
