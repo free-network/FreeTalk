@@ -1,5 +1,5 @@
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatus;
-use crate::components::app::{BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL, NEEDS_SYNC, SYNC_STATUS};
+use crate::components::app::{mark_needs_sync, BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL, SYNC_STATUS};
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::{FaFileExport, FaFileImport, FaUserPlus, FaUsers};
@@ -495,10 +495,8 @@ fn ImportIdentityModal(is_active: Signal<bool>) -> Element {
                     current.owner_key = Some(owner_key);
                 });
 
-                // Trigger a sync for the new board
-                NEEDS_SYNC.with_mut(|needs_sync| {
-                    needs_sync.insert(owner_key);
-                });
+                // Trigger a sync for the new board (deferred to avoid RefCell panics)
+                mark_needs_sync(owner_key);
 
                 success_msg.set(Some("Identity imported! Syncing board state...".to_string()));
                 error_msg.set(None);

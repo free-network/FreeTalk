@@ -71,6 +71,33 @@ pub static AUTH_TOKEN: GlobalSignal<Option<String>> = Global::new(|| None);
 pub static NEEDS_SYNC: GlobalSignal<std::collections::HashSet<VerifyingKey>> =
     Global::new(std::collections::HashSet::new);
 
+/// Mark a board as needing sync, deferred via setTimeout(0).
+///
+/// IMPORTANT: Writing to NEEDS_SYNC triggers a Dioxus use_effect synchronously,
+/// which cascades into ProcessBoards → BOARDS.read() and other signal reads.
+/// If called while any signal is borrowed, this causes a RefCell re-entrant
+/// borrow panic in WASM (especially on Firefox mobile).
+///
+/// We use setTimeout(0) instead of spawn_local because spawn_local runs within
+/// wasm-bindgen-futures' task scheduler, which may itself hold a RefCell borrow
+/// when polling tasks. setTimeout(0) breaks out of the WASM call stack entirely,
+/// ensuring the write happens in a completely clean execution context.
+pub fn mark_needs_sync(board_key: ed25519_dalek::VerifyingKey) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::prelude::*;
+        let cb = Closure::once_into_js(move || {
+            NEEDS_SYNC.write().insert(board_key);
+        });
+        web_sys::window()
+            .expect("no window")
+            .set_timeout_with_callback(&cb.into())
+            .ok();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    NEEDS_SYNC.write().insert(board_key);
+}
+
 // Build metadata from build.rs
 const BUILD_TIMESTAMP: &str = env!("BUILD_TIMESTAMP_ISO");
 const GIT_COMMIT: &str = env!("GIT_COMMIT_HASH");

@@ -1,7 +1,7 @@
 //! Message sending utilities for the UI.
 
 use crate::components::app::notifications::request_permission_on_first_message;
-use crate::components::app::{BOARDS, NEEDS_SYNC};
+use crate::components::app::{mark_needs_sync, BOARDS};
 use crate::util::ecies::encrypt_with_symmetric_key;
 use crate::util::get_current_system_time;
 use dioxus::logger::tracing::{error, info, warn};
@@ -224,8 +224,8 @@ pub async fn send_message(
             ) {
                 error!("Failed to apply message delta: {:?}", e);
             } else {
-                // Mark board as needing sync after message added
-                NEEDS_SYNC.write().insert(current_board);
+                // Mark board as needing sync after message added (deferred to avoid RefCell panics)
+                mark_needs_sync(current_board);
 
                 // Request notification permission on first message
                 request_permission_on_first_message();

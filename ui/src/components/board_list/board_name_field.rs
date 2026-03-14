@@ -1,4 +1,4 @@
-use crate::components::app::{BOARDS, CURRENT_BOARD, NEEDS_SYNC};
+use crate::components::app::{mark_needs_sync, BOARDS, CURRENT_BOARD};
 use crate::util::ecies::{seal_bytes, unseal_bytes_with_secrets};
 use dioxus::logger::tracing::*;
 use dioxus::prelude::*;
@@ -104,8 +104,8 @@ pub fn BoardNameField(config: Configuration, is_owner: bool) -> Element {
                         ) {
                             Ok(_) => {
                                 info!("Delta applied successfully");
-                                // Mark board as needing sync after name change
-                                NEEDS_SYNC.write().insert(owner_key);
+                                // Mark board as needing sync after name change (deferred)
+                                mark_needs_sync(owner_key);
                             }
                             Err(e) => error!("Failed to apply delta: {:?}", e),
                         }

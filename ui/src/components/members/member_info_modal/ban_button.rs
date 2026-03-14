@@ -1,5 +1,5 @@
 use crate::board_data::BoardData;
-use crate::components::app::{BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL, NEEDS_SYNC};
+use crate::components::app::{mark_needs_sync, BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL};
 use crate::util::get_current_system_time;
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
@@ -110,8 +110,8 @@ pub fn BanButton(member_to_ban: MemberId, is_downstream: bool, nickname: String)
                     }
                 });
 
-                // Mark board as needing sync to propagate ban and rotation
-                NEEDS_SYNC.write().insert(current_board);
+                // Mark board as needing sync to propagate ban and rotation (deferred)
+                mark_needs_sync(current_board);
                 info!("Marked board for synchronization after ban");
             });
         }

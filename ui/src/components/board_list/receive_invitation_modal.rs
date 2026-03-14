@@ -1,6 +1,6 @@
 use crate::board_data::Boards;
 use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
-use crate::components::app::{Route, BOARDS, NEEDS_SYNC, PENDING_INVITES, SYNCHRONIZER};
+use crate::components::app::{mark_needs_sync, Route, BOARDS, PENDING_INVITES, SYNCHRONIZER};
 use crate::components::members::Invitation;
 use crate::invites::{PendingBoardJoin, PendingBoardStatus};
 use dioxus::logger::tracing::{error, info};
@@ -275,8 +275,8 @@ fn render_restore_access_option(inv: Invitation) -> Element {
                                 board_data.restore_member_access(member_vk, invitee.clone());
                             }
                         });
-                        // Mark board as needing sync after restoring member access
-                        NEEDS_SYNC.write().insert(board);
+                        // Mark board as needing sync after restoring member access (deferred)
+                        mark_needs_sync(board);
                         let board_id = bs58::encode(board.as_bytes()).into_string();
                         navigator().push(Route::Posts { board_id });
                     }

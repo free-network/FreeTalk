@@ -1,4 +1,4 @@
-use crate::components::app::{BOARDS, CREATE_BOARD_MODAL, NEEDS_SYNC};
+use crate::components::app::{mark_needs_sync, BOARDS, CREATE_BOARD_MODAL};
 use dioxus::prelude::*;
 use ed25519_dalek::SigningKey;
 use web_sys::window;
@@ -54,7 +54,7 @@ pub fn CreateBoardModal() -> Element {
 
         // Mark board as needing sync (this will trigger use_effect in app.rs)
         info!("🔵 Marking board for synchronization...");
-        NEEDS_SYNC.write().insert(new_board_key);
+        mark_needs_sync(new_board_key);
         info!("🔵 Board marked for sync");
 
         // Reset and close modal

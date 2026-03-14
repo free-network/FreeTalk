@@ -172,6 +172,43 @@ pub fn owner_vk_to_contract_key(owner_vk: &VerifyingKey) -> ContractKey {
     ContractKey::from_params_and_code(parameters, &contract_code)
 }
 
+/// Spawn a future via setTimeout(0), breaking out of the current WASM call stack.
+///
+/// IMPORTANT: spawn_local runs within wasm-bindgen-futures' task scheduler,
+/// which may hold a RefCell borrow when polling tasks. If the future reads/writes
+/// signals that are currently borrowed, this causes a RefCell re-entrant panic
+/// (especially on Firefox mobile).
+///
+/// This helper uses setTimeout(0) to schedule the spawn in a completely clean
+/// execution context, preventing such panics.
+#[cfg(target_arch = "wasm32")]
+pub fn safe_spawn_local<F>(f: F)
+where
+    F: std::future::Future<Output = ()> + 'static,
+{
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen_futures::spawn_local;
+
+    let boxed: std::pin::Pin<Box<dyn std::future::Future<Output = ()>>> = Box::pin(f);
+    let cb = Closure::once_into_js(move || {
+        spawn_local(boxed);
+    });
+    web_sys::window()
+        .expect("no window")
+        .set_timeout_with_callback(&cb.into())
+        .ok();
+}
+
+/// Non-WASM fallback: just run the future with spawn_local directly
+#[cfg(not(target_arch = "wasm32"))]
+pub fn safe_spawn_local<F>(_f: F)
+where
+    F: std::future::Future<Output = ()> + 'static,
+{
+    // In non-WASM we don't have a task scheduler, so this is a no-op
+    // (Could use tokio::spawn in a real server context)
+}
+
 /// Generate a consistent HSL color string from a MemberId.
 /// Uses the hash value to determine hue, with fixed saturation and lightness
 /// for good visibility on dark backgrounds.

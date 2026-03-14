@@ -1,5 +1,5 @@
 use crate::board_data::BoardData;
-use crate::components::app::{BOARDS, CURRENT_BOARD, NEEDS_SYNC};
+use crate::components::app::{mark_needs_sync, BOARDS, CURRENT_BOARD};
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use freenet_scaffold::util::FastHash;
@@ -122,7 +122,7 @@ pub fn AddAdminModal(on_close: EventHandler<()>) -> Element {
                 }
             });
 
-            NEEDS_SYNC.write().insert(current_board);
+            mark_needs_sync(current_board);
             info!("Marked board for synchronization after adding admin");
         });
     };

@@ -1,4 +1,4 @@
-use crate::components::app::{BOARDS, CURRENT_BOARD, NEEDS_SYNC};
+use crate::components::app::{mark_needs_sync, BOARDS, CURRENT_BOARD};
 use crate::util::ecies::{seal_bytes, unseal_bytes_with_secrets};
 use dioxus::logger::tracing::*;
 use dioxus::prelude::*;
@@ -161,8 +161,8 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
                                     "State after applying nickname delta: {:?}",
                                     board_data.board_state
                                 );
-                                // Mark board as needing sync after nickname change
-                                NEEDS_SYNC.write().insert(owner_key);
+                                // Mark board as needing sync after nickname change (deferred)
+                                mark_needs_sync(owner_key);
                             }
                         } else {
                             warn!("Board state not found for current board");

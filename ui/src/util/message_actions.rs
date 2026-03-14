@@ -1,6 +1,6 @@
 //! Shared message action handlers for reactions, edits, and deletions.
 
-use crate::components::app::{BOARDS, NEEDS_SYNC};
+use crate::components::app::{mark_needs_sync, BOARDS};
 use crate::util::ecies::encrypt_with_symmetric_key;
 use crate::util::get_current_system_time;
 use dioxus::prelude::*;
@@ -227,7 +227,7 @@ async fn send_action_messages(ctx: ActionContext, contents: Vec<BoardMessageBody
                     )
                     .is_ok()
                 {
-                    NEEDS_SYNC.write().insert(current_board);
+                    mark_needs_sync(current_board);
                 }
             }
         });

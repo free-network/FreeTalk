@@ -1,6 +1,6 @@
 use super::board_name_field::BoardNameField;
 use crate::components::app::chat_delegate::save_boards_to_delegate;
-use crate::components::app::{BOARDS, CURRENT_BOARD, EDIT_BOARD_MODAL, NEEDS_SYNC};
+use crate::components::app::{mark_needs_sync, BOARDS, CURRENT_BOARD, EDIT_BOARD_MODAL};
 use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::FaRotate;
@@ -170,7 +170,7 @@ pub fn EditBoardModal() -> Element {
                                                                                         ) {
                                                                                             error!("Failed to apply rotation delta: {}", e);
                                                                                         } else {
-                                                                                            NEEDS_SYNC.write().insert(current_board);
+                                                                                            mark_needs_sync(current_board);
                                                                                         }
                                                                                     }
                                                                                     Err(e) => error!("Failed to rotate secret: {}", e),
@@ -350,7 +350,7 @@ fn MaxMembersField(
                     ) {
                         Ok(_) => {
                             info!("max_members updated successfully");
-                            NEEDS_SYNC.write().insert(owner_key);
+                            mark_needs_sync(owner_key);
                         }
                         Err(e) => error!("Failed to apply max_members delta: {:?}", e),
                     }

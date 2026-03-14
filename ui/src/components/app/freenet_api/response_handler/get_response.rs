@@ -354,11 +354,11 @@ pub async fn handle_get_response(
                     }
                 });
 
-                // Mark board as needing sync so it gets saved to delegate storage.
+                // Mark board as needing sync so it gets saved to delegate storage (deferred).
                 // We do NOT trigger ProcessBoards because we haven't modified the
                 // board state — membership will be published with the first message.
-                use crate::components::app::NEEDS_SYNC;
-                NEEDS_SYNC.write().insert(owner_vk);
+                use crate::components::app::mark_needs_sync;
+                mark_needs_sync(owner_vk);
             }
         } else if is_existing_board {
             // This is a refresh GET for an already-subscribed board (e.g., after wake from suspension)
