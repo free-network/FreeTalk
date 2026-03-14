@@ -477,6 +477,9 @@ impl ResponseHandler {
                                                                     }
                                                                 },
                                                             );
+                                                        } else {
+                                                            // Current delegate successfully returned data - no migration needed
+                                                            mark_legacy_migration_done();
                                                         }
                                                     }
                                                     Err(e) => {
@@ -488,12 +491,11 @@ impl ResponseHandler {
                                                 }
                                             } else {
                                                 info!("No boards data found in delegate");
-                                                // TODO: Remove legacy migration code after 2026-03-01
-                                                // If legacy delegate has no data, mark migration done so we don't keep trying
-                                                if is_legacy_delegate {
-                                                    info!("No boards in legacy delegate - marking migration complete");
-                                                    mark_legacy_migration_done();
-                                                }
+                                                // Mark migration as done regardless of which delegate responded.
+                                                // - If current delegate: we successfully communicated with it,
+                                                //   so legacy migration isn't needed
+                                                // - If legacy delegate: it has no data, so nothing to migrate
+                                                mark_legacy_migration_done();
                                             }
                                         } else {
                                             warn!(

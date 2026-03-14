@@ -31,29 +31,7 @@ pub const BOARDS_STORAGE_KEY: &[u8] = b"boards_data";
 /// Previous delegate keys for migration. Each entry is (delegate_key, code_hash).
 /// Add a new entry here whenever the delegate WASM changes (e.g., dependency updates).
 const LEGACY_DELEGATES: &[([u8; 32], [u8; 32])] = &[
-    // V1: Before signing API was added (code_hash "8n6hw3vmym1qrvpbaunfnn5t8v1xzdmuiyaprtckwbpz")
-    (
-        [
-            26, 147, 48, 130, 14, 128, 108, 218, 84, 236, 167, 218, 178, 43, 132, 242, 12, 250,
-            121, 62, 190, 97, 162, 97, 83, 18, 204, 110, 110, 188, 255, 246,
-        ],
-        [
-            120, 57, 150, 189, 227, 188, 34, 53, 175, 254, 201, 222, 184, 160, 247, 233, 210, 31,
-            161, 49, 220, 240, 3, 0, 11, 176, 63, 70, 125, 176, 248, 49,
-        ],
-    ),
-    // V2: After scaffold 0.2.2 update with relaxed verify (2026-02-11)
-    (
-        [
-            227, 173, 92, 91, 26, 130, 16, 137, 83, 107, 232, 77, 103, 67, 41, 179, 127, 70, 210,
-            251, 163, 231, 2, 96, 8, 250, 232, 95, 53, 86, 81, 31,
-        ],
-        [
-            207, 185, 119, 76, 3, 205, 149, 66, 73, 85, 173, 171, 112, 164, 29, 117, 117, 205, 51,
-            18, 240, 159, 211, 241, 109, 110, 245, 72, 186, 140, 240, 81,
-        ],
-    ),
-    // V3: Before freenet-stdlib 0.3.2 MessageOrigin API change (2026-03-14)
+    // V1: Before freenet-stdlib 0.3.2 MessageOrigin API change (2026-03-14)
     (
         [
             166, 218, 132, 157, 222, 254, 162, 3, 250, 42, 63, 152, 144, 234, 255, 90, 24, 3, 65,
