@@ -100,8 +100,8 @@ pub fn BoardList() -> Element {
             // Dropdown trigger button - current board display
             div { class: "flex justify-center",
                 button {
-                    class: "flex items-center gap-6 px-6 py-4 bg-panel text-text hover:bg-surface transition-colors",
-                    style: "min-width: 60vw;",
+                    class: "w-full md:w-auto flex items-center gap-4 md:gap-6 px-4 md:px-6 py-3 md:py-4 bg-panel text-text hover:bg-surface transition-colors",
+                    style: "min-width: min(100vw, 60vw); max-width: 100vw;",
                     onclick: move |_| {
                         is_open.set(!is_open());
                     },
@@ -128,8 +128,8 @@ pub fn BoardList() -> Element {
 
                 // Dropdown menu - centered like the button
                 div { class: "absolute left-0 right-0 flex justify-center z-20",
-                    div { class: "bg-panel shadow-lg rounded-b-xl overflow-hidden",
-                        style: "min-width: 60vw;",
+                    div { class: "w-full md:w-auto bg-panel shadow-lg md:rounded-b-xl overflow-hidden",
+                        style: "min-width: min(100vw, 60vw);",
 
                         // Board list
                         div { class: "max-h-96 overflow-y-auto",

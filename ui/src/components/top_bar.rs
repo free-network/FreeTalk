@@ -7,6 +7,7 @@ use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use crate::util::messaging::{send_message, ReplyContext};
 use dioxus::prelude::*;
+use dioxus_free_icons::{icons::fa_solid_icons::FaBars, Icon};
 use river_core::board_state::member::MemberId;
 use river_core::board_state::privacy::PrivacyMode;
 
@@ -14,6 +15,7 @@ use river_core::board_state::privacy::PrivacyMode;
 #[component]
 pub fn TopBar() -> Element {
     let replying_to = use_signal(|| None::<ReplyContext>);
+    let mut menu_open = use_signal(|| false);
 
     // Get current board data
     let current_board_data = use_memo(move || {
@@ -156,30 +158,77 @@ pub fn TopBar() -> Element {
 
             // Right side: navigation buttons and post input
             div { class: "flex items-center gap-3 pr-4",
-                // Posts button
-                a {
-                    href: "#/board/{board_id}",
-                    class: "flex items-center gap-2 px-4 py-2.5 bg-surface hover:bg-surface-hover text-text font-medium rounded-xl transition-colors",
-                    title: "View Posts",
-                    span { "📝" }
-                    span { "Posts" }
-                }
-                // Members button
-                a {
-                    href: "#/board/{board_id}/members",
-                    class: "flex items-center gap-2 px-4 py-2.5 bg-surface hover:bg-surface-hover text-text font-medium rounded-xl transition-colors",
-                    title: "View Members",
-                    span { "👥" }
-                    span { "Members" }
-                }
-                // Admin button for owners or admins
-                if is_owner || is_admin {
+                // Desktop navigation buttons (hidden on mobile)
+                div { class: "hidden md:flex items-center gap-3",
+                    // Posts button
                     a {
-                        href: "#/board/{board_id}/admin",
+                        href: "#/board/{board_id}",
                         class: "flex items-center gap-2 px-4 py-2.5 bg-surface hover:bg-surface-hover text-text font-medium rounded-xl transition-colors",
-                        title: "Manage Admins",
-                        span { "⚙" }
-                        span { "Admin" }
+                        title: "View Posts",
+                        span { "📝" }
+                        span { "Posts" }
+                    }
+                    // Members button
+                    a {
+                        href: "#/board/{board_id}/members",
+                        class: "flex items-center gap-2 px-4 py-2.5 bg-surface hover:bg-surface-hover text-text font-medium rounded-xl transition-colors",
+                        title: "View Members",
+                        span { "👥" }
+                        span { "Members" }
+                    }
+                    // Admin button for owners or admins
+                    if is_owner || is_admin {
+                        a {
+                            href: "#/board/{board_id}/admin",
+                            class: "flex items-center gap-2 px-4 py-2.5 bg-surface hover:bg-surface-hover text-text font-medium rounded-xl transition-colors",
+                            title: "Manage Admins",
+                            span { "⚙" }
+                            span { "Admin" }
+                        }
+                    }
+                }
+
+                // Mobile hamburger menu (hidden on desktop)
+                div { class: "relative md:hidden",
+                    button {
+                        class: "p-3 bg-surface hover:bg-surface-hover text-text rounded-xl transition-colors",
+                        onclick: move |_| menu_open.set(!menu_open()),
+                        Icon { width: 24, height: 24, icon: FaBars }
+                    }
+
+                    // Mobile dropdown menu
+                    if menu_open() {
+                        // Backdrop
+                        div {
+                            class: "fixed inset-0 z-10",
+                            onclick: move |_| menu_open.set(false)
+                        }
+                        // Menu
+                        div { class: "absolute right-0 top-full mt-2 bg-panel shadow-lg rounded-xl overflow-hidden z-20 min-w-48",
+                            a {
+                                href: "#/board/{board_id}",
+                                class: "flex items-center gap-3 px-4 py-3 text-text hover:bg-surface transition-colors",
+                                onclick: move |_| menu_open.set(false),
+                                span { "📝" }
+                                span { "Posts" }
+                            }
+                            a {
+                                href: "#/board/{board_id}/members",
+                                class: "flex items-center gap-3 px-4 py-3 text-text hover:bg-surface transition-colors",
+                                onclick: move |_| menu_open.set(false),
+                                span { "👥" }
+                                span { "Members" }
+                            }
+                            if is_owner || is_admin {
+                                a {
+                                    href: "#/board/{board_id}/admin",
+                                    class: "flex items-center gap-3 px-4 py-3 text-text hover:bg-surface transition-colors",
+                                    onclick: move |_| menu_open.set(false),
+                                    span { "⚙" }
+                                    span { "Admin" }
+                                }
+                            }
+                        }
                     }
                 }
 
