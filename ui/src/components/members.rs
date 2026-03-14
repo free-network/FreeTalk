@@ -6,7 +6,7 @@ use dioxus_free_icons::Icon;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use river_core::board_state::identity::IdentityExport;
 use river_core::board_state::member::MembersV1;
-use river_core::board_state::member::{AuthorizedMember, MemberId};
+use river_core::board_state::member::{AuthorizedMember, Member, MemberId};
 use river_core::board_state::ChatBoardParametersV1;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -327,22 +327,40 @@ fn ExportIdentityModal(is_active: Signal<bool>) -> Element {
             if let Some(owner_key) = board_owner {
                 let boards_read = BOARDS.read();
                 if let Some(board_data) = boards_read.map.get(&owner_key) {
-                    if let Some(ref authorized_member) = board_data.self_authorized_member {
-                        let export = IdentityExport {
-                            board_owner: owner_key,
-                            signing_key: board_data.self_sk.clone(),
-                            authorized_member: authorized_member.clone(),
-                            invite_chain: board_data.invite_chain.clone(),
-                            member_info: board_data.self_member_info.clone(),
-                        };
-                        token_text.set(export.to_armored_string());
+                    // Get the authorized member, or create one for the owner
+                    let authorized_member = if let Some(ref am) = board_data.self_authorized_member
+                    {
+                        am.clone()
                     } else {
-                        token_text.set(
-                            "Cannot export: membership data not available. \
-                             Try sending a message first."
-                                .to_string(),
-                        );
-                    }
+                        // Check if we're the owner - owners can create their own AuthorizedMember
+                        let self_vk = board_data.self_sk.verifying_key();
+                        if self_vk == owner_key {
+                            // Owner is self-invited
+                            let owner_id = MemberId::from(&owner_key);
+                            let member = Member {
+                                owner_member_id: owner_id,
+                                invited_by: owner_id,
+                                member_vk: owner_key,
+                            };
+                            AuthorizedMember::new(member, &board_data.self_sk)
+                        } else {
+                            token_text.set(
+                                "Cannot export: membership data not available. \
+                                 Try sending a message first."
+                                    .to_string(),
+                            );
+                            return;
+                        }
+                    };
+
+                    let export = IdentityExport {
+                        board_owner: owner_key,
+                        signing_key: board_data.self_sk.clone(),
+                        authorized_member,
+                        invite_chain: board_data.invite_chain.clone(),
+                        member_info: board_data.self_member_info.clone(),
+                    };
+                    token_text.set(export.to_armored_string());
                 }
             }
         }
