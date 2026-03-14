@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Tell Tailwind v4 to scan Rust source files for class names.
+   Without this, responsive utilities like md:flex used in .rs files
+   won't be generated in the output CSS. */
+@source "../src/**/*.rs";
+
 /* Design tokens for River chat UI */
 @theme {
   /* Brand accent - dolphin blue */
