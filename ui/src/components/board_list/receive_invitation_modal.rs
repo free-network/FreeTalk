@@ -386,6 +386,7 @@ fn accept_invitation(inv: Invitation, nickname: String) {
                 preferred_nickname: nickname.clone(),
                 status: PendingBoardStatus::PendingSubscription,
                 subscribing_since: None,
+                retry_count: 0,
             },
         );
     });
