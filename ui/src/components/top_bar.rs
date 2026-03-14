@@ -154,8 +154,16 @@ pub fn TopBar() -> Element {
                 }
             }
 
-            // Right side: admin button and post input
+            // Right side: navigation buttons and post input
             div { class: "flex items-center gap-3 pr-4",
+                // Members button
+                a {
+                    href: "#/board/{board_id}/members",
+                    class: "flex items-center gap-2 px-4 py-2.5 bg-surface hover:bg-surface-hover text-text font-medium rounded-xl transition-colors",
+                    title: "View Members",
+                    span { "👥" }
+                    span { "Members" }
+                }
                 // Admin button for owners or admins
                 if is_owner || is_admin {
                     a {

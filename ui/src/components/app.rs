@@ -6,8 +6,8 @@ pub mod receive_times;
 pub mod sync_info;
 
 use super::{
-    admin_view::AdminView, board_list::BoardList, conversation::Conversation, members::MemberList,
-    top_bar::TopBar,
+    admin_view::AdminView, board_list::BoardList, conversation::Conversation,
+    members::MembersView, top_bar::TopBar,
 };
 use crate::board_data::{Boards, CurrentBoard};
 use crate::components::app::document_title::DocumentTitleUpdater;
@@ -46,6 +46,8 @@ pub enum Route {
     ConversationView { board_id: String },
     #[route("/board/:board_id/admin")]
     Admin { board_id: String },
+    #[route("/board/:board_id/members")]
+    Members { board_id: String },
     #[route("/:..route")]
     NotFound { route: Vec<String> },
 }
@@ -217,11 +219,11 @@ pub fn App() -> Element {
         div { class: "flex flex-col bg-bg overflow-hidden app-root",
             // Top bar with board selector (full width)
             BoardList {}
-            // Main content area (horizontal flex)
-            div { class: "flex flex-1 min-h-0 overflow-hidden",
-                TopBar {}
+            // User profile bar with post input
+            TopBar {}
+            // Main content area (router)
+            div { class: "flex-1 min-h-0 overflow-hidden",
                 Router::<Route> {}
-                MemberList {}
             }
             EditBoardModal {}
             MemberInfoModal {}
@@ -291,6 +293,13 @@ fn ConversationView(board_id: String) -> Element {
 fn Admin(board_id: String) -> Element {
     sync_board_from_url(&board_id);
     rsx! { AdminView {} }
+}
+
+/// Route component for members view
+#[component]
+fn Members(board_id: String) -> Element {
+    sync_board_from_url(&board_id);
+    rsx! { MembersView {} }
 }
 
 /// Route component for 404 not found

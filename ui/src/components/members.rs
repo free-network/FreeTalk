@@ -1,5 +1,4 @@
-use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatus;
-use crate::components::app::{mark_needs_sync, BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL, SYNC_STATUS};
+use crate::components::app::{mark_needs_sync, BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL};
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::{FaFileExport, FaFileImport, FaUserPlus, FaUsers};
@@ -164,7 +163,7 @@ fn invite_tree_order(owner_id: MemberId, members: &MembersV1) -> Vec<MemberId> {
 }
 
 #[component]
-pub fn MemberList() -> Element {
+pub fn MembersView() -> Element {
     let mut invite_modal_active = use_signal(|| false);
     let mut export_modal_active = use_signal(|| false);
     let mut import_modal_active = use_signal(|| false);
@@ -259,83 +258,46 @@ pub fn MemberList() -> Element {
     }
 
     rsx! {
-        aside { class: "w-56 flex-shrink-0 bg-panel border-l border-border flex flex-col",
-            // Header
-            div { class: "px-4 py-3 border-b border-border flex-shrink-0",
-                h2 { class: "text-sm font-semibold text-text-muted uppercase tracking-wide flex items-center gap-2",
-                    Icon { icon: FaUsers, width: 16, height: 16 }
-                    span { "Active Members" }
+        div { class: "flex-1 flex flex-col bg-bg overflow-hidden",
+            // Header with action buttons
+            div { class: "px-4 py-3 border-b border-border flex items-center justify-between flex-shrink-0",
+                h2 { class: "text-lg font-semibold text-text flex items-center gap-2",
+                    Icon { icon: FaUsers, width: 20, height: 20 }
+                    span { "Members" }
+                }
+                // Action buttons
+                div { class: "flex gap-2",
+                    button {
+                        class: "flex items-center gap-2 px-3 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors",
+                        onclick: move |_| invite_modal_active.set(true),
+                        Icon { icon: FaUserPlus, width: 14, height: 14 }
+                        span { "Invite" }
+                    }
+                    button {
+                        class: "flex items-center gap-1.5 px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-muted text-xs font-medium rounded-lg transition-colors border border-border",
+                        onclick: move |_| export_modal_active.set(true),
+                        Icon { icon: FaFileExport, width: 12, height: 12 }
+                        span { "Export" }
+                    }
+                    button {
+                        class: "flex items-center gap-1.5 px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-muted text-xs font-medium rounded-lg transition-colors border border-border",
+                        onclick: move |_| import_modal_active.set(true),
+                        Icon { icon: FaFileImport, width: 12, height: 12 }
+                        span { "Import" }
+                    }
                 }
             }
 
-            // Member list - scrollable independently
-            ul { class: "flex-1 px-2 py-2 space-y-0.5 overflow-y-auto min-h-0",
+            // Member list - scrollable
+            ul { class: "flex-1 px-4 py-4 space-y-1 overflow-y-auto",
                 for (display_name, member_id) in members {
                     li { key: "{member_id}",
                         button {
-                            class: "w-full text-left px-3 py-1.5 rounded-lg text-sm text-text hover:bg-surface transition-colors truncate",
+                            class: "w-full text-left px-4 py-2 rounded-lg text-text hover:bg-surface transition-colors",
                             title: "Member ID: {member_id}",
                             onclick: move |_| handle_member_click(member_id),
                             span {
                                 dangerous_inner_html: "{display_name}"
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Action buttons - fixed at bottom
-            div { class: "p-3 border-t border-border flex-shrink-0 space-y-2",
-                button {
-                    class: "w-full flex items-center justify-center gap-2 px-3 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors",
-                    onclick: move |_| invite_modal_active.set(true),
-                    Icon { icon: FaUserPlus, width: 14, height: 14 }
-                    span { "Invite Member" }
-                }
-                div { class: "flex gap-2",
-                    button {
-                        class: "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-muted text-xs font-medium rounded-lg transition-colors border border-border",
-                        onclick: move |_| export_modal_active.set(true),
-                        Icon { icon: FaFileExport, width: 12, height: 12 }
-                        span { "Export ID" }
-                    }
-                    button {
-                        class: "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-muted text-xs font-medium rounded-lg transition-colors border border-border",
-                        onclick: move |_| import_modal_active.set(true),
-                        Icon { icon: FaFileImport, width: 12, height: 12 }
-                        span { "Import ID" }
-                    }
-                }
-            }
-
-            // Connection status indicator - fixed at bottom
-            div { class: "px-3 pb-3 flex-shrink-0",
-                div {
-                    class: format!(
-                        "w-full px-3 py-1.5 rounded-full flex items-center justify-center text-xs font-medium {}",
-                        match &*SYNC_STATUS.read() {
-                            SynchronizerStatus::Connected => "bg-success-bg text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800",
-                            SynchronizerStatus::Connecting => "bg-warning-bg text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800",
-                            SynchronizerStatus::Disconnected | SynchronizerStatus::Error(_) => "bg-error-bg text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800",
-                        }
-                    ),
-                    div {
-                        class: format!(
-                            "w-2 h-2 rounded-full mr-2 {}",
-                            match &*SYNC_STATUS.read() {
-                                SynchronizerStatus::Connected => "bg-green-500",
-                                SynchronizerStatus::Connecting => "bg-yellow-500",
-                                SynchronizerStatus::Disconnected | SynchronizerStatus::Error(_) => "bg-red-500",
-                            }
-                        ),
-                    }
-                    span {
-                        {
-                            match &*SYNC_STATUS.read() {
-                                SynchronizerStatus::Connected => "Connected".to_string(),
-                                SynchronizerStatus::Connecting => "Connecting...".to_string(),
-                                SynchronizerStatus::Disconnected => "Disconnected".to_string(),
-                                SynchronizerStatus::Error(ref msg) => format!("Error: {}", msg),
                             }
                         }
                     }
