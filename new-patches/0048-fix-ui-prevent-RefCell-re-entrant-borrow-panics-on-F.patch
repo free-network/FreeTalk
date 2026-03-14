@@ -1,0 +1,1468 @@
+From a0864d0f1798b8827dc8442e0d18bf9de0aa943c Mon Sep 17 00:00:00 2001
+From: "nacho.d.g" <iduartgomez@gmail.com>
+Date: Sun, 8 Mar 2026 21:20:04 +0100
+Subject: [PATCH 48/69] fix(ui): prevent RefCell re-entrant borrow panics on
+ Firefox mobile (#152)
+
+* fix(ui): prevent RefCell re-entrant borrow panics on Firefox mobile
+
+Firefox mobile runs Dioxus signal subscriber notifications synchronously
+during Drop, unlike Chrome/Safari which defer to microtask boundaries.
+This causes three layers of RefCell re-entrant borrow panics:
+
+1. **Dioxus signal re-entrant borrow**: ROOMS.read() triggered during
+   ROOMS.with_mut() Drop notification cascade. Fixed by converting all
+   reactive ROOMS.read() to ROOMS.try_read() across 21 files.
+
+2. **wasm-bindgen-futures spawn_local inside task poll**: Calling
+   spawn_local from within a polled future causes re-entrant Task::run()
+   on Firefox. Added safe_spawn_local() helper that defers via
+   setTimeout(0) to break out of the WASM call stack.
+
+3. **ROOMS.with_mut() inside spawn_local task**: The mutation triggers
+   Dioxus notifications that re-queue the same task, causing re-entrant
+   poll at singlethread.rs:132. Moved ROOMS mutations out of spawn_local
+   tasks via setTimeout(0).
+
+Also adds:
+- mark_needs_sync() helper using setTimeout(0) for deferred signal writes
+- Panic hook with visible red error overlay for mobile crash feedback
+- Debug log overlay (enabled via ?debug=1 query param) with minimize button
+- Debug logging throughout message send path for mobile diagnostics
+
+* fix(ui): address review findings for Firefox mobile fix
+
+- Preserve NEEDS_SYNC room keys and re-insert on send failure
+- Use ROOMS.try_read() consistently in message send handler
+- Use fresh_room_data instead of stale closure-captured data
+- Use safe_spawn_local in create_room_modal for consistency
+- Increase delegate timeout from 3s to 10s for slow mobile devices
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* style: cargo fmt
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Ian Clarke <sanity@users.noreply.github.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ ui/src/components/app.rs                      |  50 +++++-
+ ui/src/components/app/chat_delegate.rs        |   5 +-
+ ui/src/components/app/document_title.rs       |  26 ++-
+ .../response_handler/get_response.rs          |   3 +-
+ .../app/freenet_api/room_synchronizer.rs      |   5 +
+ ui/src/components/app/notifications.rs        |   2 +-
+ ui/src/components/app/sync_info.rs            |  15 +-
+ ui/src/components/conversation.rs             | 164 ++++++++++++++---
+ ui/src/components/members.rs                  |  16 +-
+ .../components/members/invite_member_modal.rs |   2 +-
+ .../components/members/member_info_modal.rs   |   5 +-
+ .../members/member_info_modal/ban_button.rs   |   6 +-
+ .../member_info_modal/nickname_field.rs       |  40 +++--
+ ui/src/components/room_list.rs                |   4 +-
+ .../components/room_list/create_room_modal.rs |  19 +-
+ .../components/room_list/edit_room_modal.rs   |  87 ++++++---
+ .../room_list/receive_invitation_modal.rs     |  11 +-
+ .../components/room_list/room_name_field.rs   |  29 ++-
+ ui/src/main.rs                                |  41 ++++-
+ ui/src/signing.rs                             |   7 +-
+ ui/src/util.rs                                | 168 ++++++++++++++++++
+ 21 files changed, 580 insertions(+), 125 deletions(-)
+
+diff --git a/ui/src/components/app.rs b/ui/src/components/app.rs
+index 87c4dba3..9f6159e2 100644
+--- a/ui/src/components/app.rs
++++ b/ui/src/components/app.rs
+@@ -57,6 +57,33 @@ pub static AUTH_TOKEN: GlobalSignal<Option<String>> = Global::new(|| None);
+ pub static NEEDS_SYNC: GlobalSignal<std::collections::HashSet<VerifyingKey>> =
+     Global::new(std::collections::HashSet::new);
+ 
++/// Mark a room as needing sync, deferred via setTimeout(0).
++///
++/// IMPORTANT: Writing to NEEDS_SYNC triggers a Dioxus use_effect synchronously,
++/// which cascades into ProcessRooms → ROOMS.read() and other signal reads.
++/// If called while any signal is borrowed, this causes a RefCell re-entrant
++/// borrow panic in WASM.
++///
++/// We use setTimeout(0) instead of spawn_local because spawn_local runs within
++/// wasm-bindgen-futures' task scheduler, which may itself hold a RefCell borrow
++/// when polling tasks. setTimeout(0) breaks out of the WASM call stack entirely,
++/// ensuring the write happens in a completely clean execution context.
++pub fn mark_needs_sync(room_key: ed25519_dalek::VerifyingKey) {
++    #[cfg(target_arch = "wasm32")]
++    {
++        use wasm_bindgen::prelude::*;
++        let cb = Closure::once_into_js(move || {
++            NEEDS_SYNC.write().insert(room_key);
++        });
++        web_sys::window()
++            .expect("no window")
++            .set_timeout_with_callback(&cb.into())
++            .ok();
++    }
++    #[cfg(not(target_arch = "wasm32"))]
++    NEEDS_SYNC.write().insert(room_key);
++}
++
+ /// Which panel is active on mobile. Defaults to Chat (conversation view).
+ pub static MOBILE_VIEW: GlobalSignal<MobileView> = Global::new(|| MobileView::Chat);
+ 
+@@ -147,33 +174,38 @@ pub fn App() -> Element {
+ 
+                 // Get all the data we need upfront to avoid nested borrows
+                 let message_sender = SYNCHRONIZER.read().get_message_sender();
+-                let has_rooms = !ROOMS.read().map.is_empty();
++                let has_rooms = ROOMS.try_read().map(|r| !r.map.is_empty()).unwrap_or(false);
+                 let has_invitations = !PENDING_INVITES.read().map.is_empty();
+ 
++                // Save and clear NEEDS_SYNC synchronously to prevent infinite re-runs
++                // of this effect (the effect subscribes to NEEDS_SYNC, so deferring
++                // the clear would cause a tight loop before setTimeout fires).
++                let pending_rooms: Vec<_> = NEEDS_SYNC.read().iter().cloned().collect();
++                NEEDS_SYNC.write().clear();
++
+                 if has_rooms || has_invitations {
+                     info!("Sending ProcessRooms message to synchronizer, has_rooms={}, has_invitations={}", has_rooms, has_invitations);
+ 
+                     if let Err(e) = message_sender.unbounded_send(SynchronizerMessage::ProcessRooms)
+                     {
+                         error!("Failed to send ProcessRooms message: {}", e);
++                        // Re-insert rooms so they'll be retried on next trigger
++                        for key in pending_rooms {
++                            mark_needs_sync(key);
++                        }
+                     } else {
+                         info!("ProcessRooms message sent successfully");
+-
+-                        // Clear the sync queue after successfully sending message
+-                        NEEDS_SYNC.write().clear();
+                     }
+ 
+-                    // Also save rooms to delegate when they change
+-                    // Use spawn_local to avoid blocking the UI thread
+-                    spawn_local(async {
++                    // Use safe_spawn_local to avoid re-entrant borrow of
++                    // wasm-bindgen-futures' task scheduler on Firefox mobile.
++                    crate::util::safe_spawn_local(async {
+                         if let Err(e) = chat_delegate::save_rooms_to_delegate().await {
+                             error!("Failed to save rooms to delegate: {}", e);
+                         }
+                     });
+                 } else {
+                     debug!("No rooms to synchronize");
+-                    // Clear the queue even if there's nothing to sync
+-                    NEEDS_SYNC.write().clear();
+                 }
+             }
+         });
+diff --git a/ui/src/components/app/chat_delegate.rs b/ui/src/components/app/chat_delegate.rs
+index 46bc2b5e..c60f14d5 100644
+--- a/ui/src/components/app/chat_delegate.rs
++++ b/ui/src/components/app/chat_delegate.rs
+@@ -411,7 +411,10 @@ pub async fn send_delegate_request(
+ 
+     // Wait for the response with a timeout
+     // Use WASM-compatible sleep from util module
+-    let timeout = Box::pin(crate::util::sleep(std::time::Duration::from_secs(30)));
++    // Delegate runs locally on the same node, so responses should be near-instant.
++    // However, first-time WASM compilation on slow mobile devices can take several
++    // seconds. 10s balances responsiveness with device compatibility.
++    let timeout = Box::pin(crate::util::sleep(std::time::Duration::from_secs(10)));
+ 
+     match select(receiver, timeout).await {
+         Either::Left((response, _)) => match response {
+diff --git a/ui/src/components/app/document_title.rs b/ui/src/components/app/document_title.rs
+index 70f14b27..eb2e7fd8 100644
+--- a/ui/src/components/app/document_title.rs
++++ b/ui/src/components/app/document_title.rs
+@@ -86,7 +86,7 @@ fn get_current_room_name() -> Option<String> {
+     let current_room = CURRENT_ROOM.read();
+     let owner_key = current_room.owner_key?;
+ 
+-    let rooms = ROOMS.read();
++    let rooms = ROOMS.try_read().ok()?;
+     let room_data = rooms.map.get(&owner_key)?;
+ 
+     let sealed_name = &room_data
+@@ -104,7 +104,9 @@ fn get_current_room_name() -> Option<String> {
+ /// Count unread messages in a room.
+ /// Only counts display messages (non-action, non-deleted) from other users.
+ pub fn count_unread_messages_in_room(room_owner: &ed25519_dalek::VerifyingKey) -> usize {
+-    let rooms = ROOMS.read();
++    let Ok(rooms) = ROOMS.try_read() else {
++        return 0;
++    };
+     let Some(room_data) = rooms.map.get(room_owner) else {
+         return 0;
+     };
+@@ -139,7 +141,9 @@ pub fn count_unread_messages_in_room(room_owner: &ed25519_dalek::VerifyingKey) -
+ 
+ /// Count total unread messages across all rooms
+ pub fn count_total_unread_messages() -> usize {
+-    let rooms = ROOMS.read();
++    let Ok(rooms) = ROOMS.try_read() else {
++        return 0;
++    };
+     rooms.map.keys().map(count_unread_messages_in_room).sum()
+ }
+ 
+@@ -180,7 +184,9 @@ pub fn mark_current_room_as_read() {
+ 
+     // Get the latest message ID
+     let latest_message_id = {
+-        let rooms = ROOMS.read();
++        let Ok(rooms) = ROOMS.try_read() else {
++            return;
++        };
+         let Some(room_data) = rooms.map.get(&owner_key) else {
+             return;
+         };
+@@ -200,7 +206,9 @@ pub fn mark_current_room_as_read() {
+ 
+     // Check if we need to update
+     {
+-        let rooms = ROOMS.read();
++        let Ok(rooms) = ROOMS.try_read() else {
++            return;
++        };
+         if let Some(room_data) = rooms.map.get(&owner_key) {
+             if room_data.last_read_message_id.as_ref() == Some(&new_last_read_id) {
+                 return; // Already marked as read
+@@ -216,8 +224,8 @@ pub fn mark_current_room_as_read() {
+         }
+     });
+ 
+-    // Save to delegate
+-    wasm_bindgen_futures::spawn_local(async {
++    // Use safe_spawn_local to avoid re-entrant borrow of wasm-bindgen-futures
++    crate::util::safe_spawn_local(async {
+         if let Err(e) = save_rooms_to_delegate().await {
+             warn!("Failed to save rooms after marking as read: {}", e);
+         }
+@@ -283,8 +291,8 @@ pub fn DocumentTitleUpdater() -> Element {
+     let _current_room_key = current_room.owner_key;
+ 
+     // Track room data changes (for message count updates)
+-    let rooms = ROOMS.read();
+-    let _rooms_version = rooms.map.len(); // Simple trigger for reactivity
++    let rooms_len = ROOMS.try_read().map(|r| r.map.len()).unwrap_or(0);
++    let _rooms_version = rooms_len; // Simple trigger for reactivity
+ 
+     // Update title on changes
+     use_effect(move || {
+diff --git a/ui/src/components/app/freenet_api/response_handler/get_response.rs b/ui/src/components/app/freenet_api/response_handler/get_response.rs
+index fc4fe812..f30fa1f1 100644
+--- a/ui/src/components/app/freenet_api/response_handler/get_response.rs
++++ b/ui/src/components/app/freenet_api/response_handler/get_response.rs
+@@ -363,8 +363,7 @@ pub async fn handle_get_response(
+                 // Mark room as needing sync so it gets saved to delegate storage.
+                 // We do NOT trigger ProcessRooms because we haven't modified the
+                 // room state — membership will be published with the first message.
+-                use crate::components::app::NEEDS_SYNC;
+-                NEEDS_SYNC.write().insert(owner_vk);
++                crate::components::app::mark_needs_sync(owner_vk);
+             }
+         } else if is_existing_room {
+             // This is a refresh GET for an already-subscribed room (e.g., after wake from suspension)
+diff --git a/ui/src/components/app/freenet_api/room_synchronizer.rs b/ui/src/components/app/freenet_api/room_synchronizer.rs
+index d2d860ba..00709b7b 100644
+--- a/ui/src/components/app/freenet_api/room_synchronizer.rs
++++ b/ui/src/components/app/freenet_api/room_synchronizer.rs
+@@ -564,6 +564,7 @@ impl RoomSynchronizer {
+             std::collections::HashMap::new()
+         };
+ 
++        crate::util::debug_log(&format!("[sync] {} rooms need sync", rooms_to_sync.len()));
+         info!(
+             "Found {} rooms that need synchronization",
+             rooms_to_sync.len()
+@@ -582,8 +583,10 @@ impl RoomSynchronizer {
+             let client_request = ClientRequest::ContractOp(update_request);
+ 
+             if let Some(web_api) = WEB_API.write().as_mut() {
++                crate::util::debug_log("[sync] sending UPDATE via WebSocket...");
+                 match web_api.send(client_request).await {
+                     Ok(_) => {
++                        crate::util::debug_log("[sync] UPDATE sent OK");
+                         info!(
+                             "Successfully sent update for room: {:?}",
+                             MemberId::from(*room_vk)
+@@ -594,6 +597,7 @@ impl RoomSynchronizer {
+                         });
+                     }
+                     Err(e) => {
++                        crate::util::debug_log(&format!("[sync] UPDATE FAILED: {}", e));
+                         // Don't fail the entire process if one room fails
+                         error!(
+                             "Failed to send update for room {:?}: {}",
+@@ -603,6 +607,7 @@ impl RoomSynchronizer {
+                     }
+                 }
+             } else {
++                crate::util::debug_log("[sync] WebAPI unavailable!");
+                 // This shouldn't happen since we checked at the start
+                 warn!("WebAPI became unavailable during processing");
+             }
+diff --git a/ui/src/components/app/notifications.rs b/ui/src/components/app/notifications.rs
+index bb7767cd..0ccda145 100644
+--- a/ui/src/components/app/notifications.rs
++++ b/ui/src/components/app/notifications.rs
+@@ -172,7 +172,7 @@ pub fn request_permission_on_first_message() {
+     info!("Requesting notification permission on first message");
+     mark_prompted_for_permission();
+ 
+-    wasm_bindgen_futures::spawn_local(async {
++    crate::util::safe_spawn_local(async {
+         let granted = request_permission().await;
+         if granted {
+             info!("User granted notification permission");
+diff --git a/ui/src/components/app/sync_info.rs b/ui/src/components/app/sync_info.rs
+index 116a1fd3..464f23e3 100644
+--- a/ui/src/components/app/sync_info.rs
++++ b/ui/src/components/app/sync_info.rs
+@@ -122,7 +122,15 @@ impl SyncInfo {
+ 
+     pub fn rooms_awaiting_subscription(&mut self) -> HashMap<VerifyingKey, ChatRoomStateV1> {
+         let mut rooms_awaiting_subscription = HashMap::new();
+-        let rooms = ROOMS.read();
++        // Use try_read() to avoid panic when ROOMS is mutably borrowed.
++        // This can happen because Dioxus's write guard Drop notifies subscribers
++        // synchronously, which can trigger process_rooms() while the write guard
++        // is still being dropped. If ROOMS is borrowed, we skip this cycle —
++        // we'll be called again on the next ProcessRooms.
++        let Ok(rooms) = ROOMS.try_read() else {
++            debug!("ROOMS is currently borrowed, skipping rooms_awaiting_subscription");
++            return rooms_awaiting_subscription;
++        };
+         let current_time = now_ms();
+ 
+         for (key, room_data) in rooms.map.iter() {
+@@ -201,7 +209,10 @@ impl SyncInfo {
+         // }
+ 
+         // Second pass: check which rooms need updates
+-        let rooms = ROOMS.read();
++        let Ok(rooms) = ROOMS.try_read() else {
++            debug!("ROOMS is currently borrowed, skipping needs_to_send_update");
++            return rooms_needing_update;
++        };
+ 
+         debug!(
+             "Checking for rooms that need updates, total rooms: {}",
+diff --git a/ui/src/components/conversation.rs b/ui/src/components/conversation.rs
+index f74b94de..94c91754 100644
+--- a/ui/src/components/conversation.rs
++++ b/ui/src/components/conversation.rs
+@@ -1,7 +1,8 @@
++#[cfg(target_arch = "wasm32")]
+ use crate::components::app::notifications::request_permission_on_first_message;
+ use crate::components::app::receive_times::{format_delay, get_delay_secs};
+ use crate::components::app::{
+-    MobileView, CURRENT_ROOM, EDIT_ROOM_MODAL, MEMBER_INFO_MODAL, MOBILE_VIEW, NEEDS_SYNC, ROOMS,
++    MobileView, CURRENT_ROOM, EDIT_ROOM_MODAL, MEMBER_INFO_MODAL, MOBILE_VIEW, ROOMS,
+ };
+ use crate::room_data::SendMessageError;
+ use crate::util::ecies::{encrypt_with_symmetric_key, unseal_bytes_with_secrets};
+@@ -343,8 +344,13 @@ pub fn Conversation() -> Element {
+     let current_room_data = {
+         let current_room = CURRENT_ROOM.read();
+         if let Some(key) = current_room.owner_key {
+-            let rooms = ROOMS.read();
+-            rooms.map.get(&key).cloned()
++            // Use try_read() to avoid panic when ROOMS is mutably borrowed.
++            // Dioxus write guard Drop notifies subscribers synchronously on Firefox,
++            // which can re-enter this component while ROOMS is still borrowed.
++            ROOMS
++                .try_read()
++                .ok()
++                .and_then(|rooms| rooms.map.get(&key).cloned())
+         } else {
+             None
+         }
+@@ -364,7 +370,9 @@ pub fn Conversation() -> Element {
+         move || {
+             let current_room = CURRENT_ROOM.read();
+             if let Some(key) = current_room.owner_key {
+-                let rooms = ROOMS.read();
++                let Ok(rooms) = ROOMS.try_read() else {
++                    return "No Room Selected".to_string();
++                };
+                 if let Some(room_data) = rooms.map.get(&key) {
+                     let sealed_name = &room_data
+                         .room_state
+@@ -388,7 +396,9 @@ pub fn Conversation() -> Element {
+     let message_groups = use_memo(move || {
+         let current_room = CURRENT_ROOM.read();
+         if let Some(key) = current_room.owner_key {
+-            let rooms = ROOMS.read();
++            let Ok(rooms) = ROOMS.try_read() else {
++                return None;
++            };
+             if let Some(room_data) = rooms.map.get(&key) {
+                 let room_state = &room_data.room_state;
+                 // Check if there are any displayable messages
+@@ -434,7 +444,7 @@ pub fn Conversation() -> Element {
+         let should_scroll = *is_at_bottom.peek();
+         if should_scroll {
+             if let Some(container) = container {
+-                wasm_bindgen_futures::spawn_local(async move {
++                crate::util::safe_spawn_local(async move {
+                     let _ = container.scroll_to(ScrollBehavior::Smooth).await;
+                 });
+             }
+@@ -596,7 +606,7 @@ pub fn Conversation() -> Element {
+                             "Toggling reaction (clicked_same={}, had_existing={})",
+                             clicked_same, has_existing
+                         );
+-                        ROOMS.with_mut(|rooms| {
++                        let reaction_applied = ROOMS.with_mut(|rooms| {
+                             if let Some(room_data) = rooms.map.get_mut(&current_room) {
+                                 if let Err(e) = room_data.room_state.apply_delta(
+                                     &room_state_clone,
+@@ -606,11 +616,17 @@ pub fn Conversation() -> Element {
+                                     &Some(delta),
+                                 ) {
+                                     error!("Failed to apply reaction delta: {:?}", e);
++                                    false
+                                 } else {
+-                                    NEEDS_SYNC.write().insert(current_room);
++                                    true
+                                 }
++                            } else {
++                                false
+                             }
+                         });
++                        if reaction_applied {
++                            crate::components::app::mark_needs_sync(current_room);
++                        }
+                     }
+                 });
+             }
+@@ -683,7 +699,7 @@ pub fn Conversation() -> Element {
+                         ..Default::default()
+                     };
+                     info!("Sending delete action");
+-                    ROOMS.with_mut(|rooms| {
++                    let delete_applied = ROOMS.with_mut(|rooms| {
+                         if let Some(room_data) = rooms.map.get_mut(&current_room) {
+                             if let Err(e) = room_data.room_state.apply_delta(
+                                 &room_state_clone,
+@@ -693,11 +709,17 @@ pub fn Conversation() -> Element {
+                                 &Some(delta),
+                             ) {
+                                 error!("Failed to apply delete delta: {:?}", e);
++                                false
+                             } else {
+-                                NEEDS_SYNC.write().insert(current_room);
++                                true
+                             }
++                        } else {
++                            false
+                         }
+                     });
++                    if delete_applied {
++                        crate::components::app::mark_needs_sync(current_room);
++                    }
+                 });
+             }
+         }
+@@ -775,7 +797,7 @@ pub fn Conversation() -> Element {
+                         ..Default::default()
+                     };
+                     info!("Sending edit action");
+-                    ROOMS.with_mut(|rooms| {
++                    let edit_applied = ROOMS.with_mut(|rooms| {
+                         if let Some(room_data) = rooms.map.get_mut(&current_room) {
+                             if let Err(e) = room_data.room_state.apply_delta(
+                                 &room_state_clone,
+@@ -785,11 +807,17 @@ pub fn Conversation() -> Element {
+                                 &Some(delta),
+                             ) {
+                                 error!("Failed to apply edit delta: {:?}", e);
++                                false
+                             } else {
+-                                NEEDS_SYNC.write().insert(current_room);
++                                true
+                             }
++                        } else {
++                            false
+                         }
+                     });
++                    if edit_applied {
++                        crate::components::app::mark_needs_sync(current_room);
++                    }
+                 });
+             }
+         }
+@@ -797,7 +825,6 @@ pub fn Conversation() -> Element {
+ 
+     // Message sending handler - receives message text from MessageInput component
+     let handle_send_message = {
+-        let current_room_data = current_room_data.clone();
+         move |(message_text, reply_ctx): (String, Option<ReplyContext>)| {
+             // Always scroll to bottom when user sends their own message
+             is_at_bottom.set(true);
+@@ -806,8 +833,24 @@ pub fn Conversation() -> Element {
+                 warn!("Message is empty");
+                 return;
+             }
++            crate::util::debug_log(&format!(
++                "[send] start: {}...",
++                &message_text[..message_text.len().min(30)]
++            ));
++            let current_room_opt = CURRENT_ROOM.read().owner_key;
++            if current_room_opt.is_none() {
++                error!("Cannot send message: no room selected (CURRENT_ROOM is None)");
++                return;
++            }
++            // Re-read room data from ROOMS signal (don't rely on stale closure capture)
++            let fresh_room_data =
++                current_room_opt.and_then(|key| ROOMS.try_read().ok()?.map.get(&key).cloned());
++            if fresh_room_data.is_none() {
++                error!("Cannot send message: room data not loaded (ROOMS has no entry for current room)");
++                return;
++            }
+             if let (Some(current_room), Some(current_room_data)) =
+-                (CURRENT_ROOM.read().owner_key, current_room_data.clone())
++                (current_room_opt, fresh_room_data)
+             {
+                 // Clone what we need for the async block
+                 let room_key = current_room_data.room_key();
+@@ -902,12 +945,14 @@ pub fn Conversation() -> Element {
+                     }
+ 
+                     // Sign using delegate with fallback to local signing
++                    crate::util::debug_log("[send] signing message...");
+                     let signature = crate::signing::sign_message_with_fallback(
+                         room_key,
+                         message_bytes,
+                         &self_sk,
+                     )
+                     .await;
++                    crate::util::debug_log("[send] signed OK");
+ 
+                     let auth_message = AuthorizedMessageV1::with_signature(message, signature);
+ 
+@@ -998,25 +1043,78 @@ pub fn Conversation() -> Element {
+                         ..Default::default()
+                     };
+                     info!("Sending message: {:?}", auth_message);
+-                    ROOMS.with_mut(|rooms| {
+-                        if let Some(room_data) = rooms.map.get_mut(&current_room) {
+-                            if let Err(e) = room_data.room_state.apply_delta(
+-                                &room_state_clone,
+-                                &ChatRoomParametersV1 {
+-                                    owner: current_room,
+-                                },
+-                                &Some(delta),
+-                            ) {
+-                                error!("Failed to apply message delta: {:?}", e);
+-                            } else {
+-                                // Mark room as needing sync after message added
+-                                NEEDS_SYNC.write().insert(current_room);
+ 
+-                                // Request notification permission on first message
++                    crate::util::debug_log("[send] applying delta to local state...");
++                    // CRITICAL: ROOMS.with_mut() must NOT run inside a spawn_local
++                    // task poll on Firefox mobile. The Dioxus subscriber notifications
++                    // triggered by the write guard Drop can cause wasm-bindgen-futures
++                    // to re-entrantly poll the same task, panicking with
++                    // "RefCell already borrowed" at singlethread.rs:132.
++                    //
++                    // We use setTimeout(0) to break out of the task poll context,
++                    // running the ROOMS mutation in a clean execution context.
++                    #[cfg(target_arch = "wasm32")]
++                    {
++                        use wasm_bindgen::prelude::*;
++                        let cb = Closure::once_into_js(move || {
++                            let delta_applied = ROOMS.with_mut(|rooms| {
++                                if let Some(room_data) = rooms.map.get_mut(&current_room) {
++                                    if let Err(e) = room_data.room_state.apply_delta(
++                                        &room_state_clone,
++                                        &ChatRoomParametersV1 {
++                                            owner: current_room,
++                                        },
++                                        &Some(delta),
++                                    ) {
++                                        crate::util::debug_log(&format!(
++                                            "[send] delta FAILED: {:?}",
++                                            e
++                                        ));
++                                        error!("Failed to apply message delta: {:?}", e);
++                                        false
++                                    } else {
++                                        crate::util::debug_log("[send] delta applied OK");
++                                        true
++                                    }
++                                } else {
++                                    crate::util::debug_log("[send] room not found in ROOMS!");
++                                    false
++                                }
++                            });
++                            if delta_applied {
++                                crate::util::debug_log("[send] marking NEEDS_SYNC");
++                                crate::components::app::mark_needs_sync(current_room);
+                                 request_permission_on_first_message();
+                             }
++                        });
++                        web_sys::window()
++                            .expect("no window")
++                            .set_timeout_with_callback(&cb.into())
++                            .ok();
++                    }
++                    #[cfg(not(target_arch = "wasm32"))]
++                    {
++                        let delta_applied = ROOMS.with_mut(|rooms| {
++                            if let Some(room_data) = rooms.map.get_mut(&current_room) {
++                                if let Err(_e) = room_data.room_state.apply_delta(
++                                    &room_state_clone,
++                                    &ChatRoomParametersV1 {
++                                        owner: current_room,
++                                    },
++                                    &Some(delta),
++                                ) {
++                                    false
++                                } else {
++                                    true
++                                }
++                            } else {
++                                false
++                            }
++                        });
++                        if delta_applied {
++                            crate::components::app::mark_needs_sync(current_room);
+                         }
+-                    });
++                    }
+                 });
+             }
+         }
+@@ -1202,6 +1300,14 @@ pub fn Conversation() -> Element {
+                         }
+                     },
+                     None => rsx! {
++                        // Mobile: show hamburger to access room list even with no room selected
++                        div { class: "md:hidden flex-shrink-0 px-3 py-3 border-b border-border bg-panel",
++                            button {
++                                class: "p-2 rounded-lg text-text-muted hover:text-accent hover:bg-surface transition-colors",
++                                onclick: move |_| *MOBILE_VIEW.write() = MobileView::Rooms,
++                                Icon { icon: FaBars, width: 18, height: 18 }
++                            }
++                        }
+                         div { class: "flex-1 flex flex-col items-center justify-center text-center p-8",
+                             img {
+                                 class: "w-24 h-24 mb-6 opacity-50",
+diff --git a/ui/src/components/members.rs b/ui/src/components/members.rs
+index 3b5cc179..18903397 100644
+--- a/ui/src/components/members.rs
++++ b/ui/src/components/members.rs
+@@ -1,6 +1,6 @@
+ use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerStatus;
+ use crate::components::app::{
+-    MobileView, CURRENT_ROOM, MEMBER_INFO_MODAL, MOBILE_VIEW, NEEDS_SYNC, ROOMS, SYNC_STATUS,
++    MobileView, CURRENT_ROOM, MEMBER_INFO_MODAL, MOBILE_VIEW, ROOMS, SYNC_STATUS,
+ };
+ use crate::util::ecies::unseal_bytes_with_secrets;
+ use dioxus::prelude::*;
+@@ -177,7 +177,7 @@ pub fn MemberList() -> Element {
+     let members = use_memo(move || {
+         let room_owner = CURRENT_ROOM.read().owner_key?;
+ 
+-        let rooms_read = ROOMS.read();
++        let rooms_read = ROOMS.try_read().ok()?;
+         let room_data = rooms_read.map.get(&room_owner)?;
+         let room_state = room_data.room_state.clone();
+         let self_member_id: MemberId = room_data.self_sk.verifying_key().into();
+@@ -366,7 +366,9 @@ fn ExportIdentityModal(is_active: Signal<bool>) -> Element {
+         if *is_active.read() {
+             let room_owner = CURRENT_ROOM.read().owner_key;
+             if let Some(owner_key) = room_owner {
+-                let rooms_read = ROOMS.read();
++                let Ok(rooms_read) = ROOMS.try_read() else {
++                    return;
++                };
+                 if let Some(room_data) = rooms_read.map.get(&owner_key) {
+                     if let Some(ref authorized_member) = room_data.self_authorized_member {
+                         let export = IdentityExport {
+@@ -460,7 +462,9 @@ fn ImportIdentityModal(is_active: Signal<bool>) -> Element {
+ 
+                 // Check if we already have this room
+                 {
+-                    let rooms = ROOMS.read();
++                    let Ok(rooms) = ROOMS.try_read() else {
++                        return;
++                    };
+                     if rooms.map.contains_key(&owner_key) {
+                         error_msg.set(Some(
+                             "You already have an identity for this room.".to_string(),
+@@ -506,9 +510,7 @@ fn ImportIdentityModal(is_active: Signal<bool>) -> Element {
+                 });
+ 
+                 // Trigger a sync for the new room
+-                NEEDS_SYNC.with_mut(|needs_sync| {
+-                    needs_sync.insert(owner_key);
+-                });
++                crate::components::app::mark_needs_sync(owner_key);
+ 
+                 success_msg.set(Some("Identity imported! Syncing room state...".to_string()));
+                 error_msg.set(None);
+diff --git a/ui/src/components/members/invite_member_modal.rs b/ui/src/components/members/invite_member_modal.rs
+index bcec2149..868e25b3 100644
+--- a/ui/src/components/members/invite_member_modal.rs
++++ b/ui/src/components/members/invite_member_modal.rs
+@@ -50,7 +50,7 @@ pub fn InviteMemberModal(is_active: Signal<bool>) -> Element {
+             .read()
+             .owner_key
+             .as_ref()
+-            .and_then(|key| ROOMS.read().map.get(key).cloned())
++            .and_then(|key| ROOMS.try_read().ok()?.map.get(key).cloned())
+     });
+ 
+     let invitation_future = use_resource(move || {
+diff --git a/ui/src/components/members/member_info_modal.rs b/ui/src/components/members/member_info_modal.rs
+index 82a4e711..6f093e3a 100644
+--- a/ui/src/components/members/member_info_modal.rs
++++ b/ui/src/components/members/member_info_modal.rs
+@@ -20,11 +20,12 @@ pub fn MemberInfoModal() -> Element {
+             .read()
+             .owner_key
+             .as_ref()
+-            .and_then(|key| ROOMS.read().map.get(key).cloned())
++            .and_then(|key| ROOMS.try_read().ok()?.map.get(key).cloned())
+     });
+     let self_member_id: Memo<Option<MemberId>> = use_memo(move || {
+         ROOMS
+-            .read()
++            .try_read()
++            .ok()?
+             .map
+             .get(&CURRENT_ROOM.read().owner_key?)
+             .map(|r| MemberId::from(&r.self_sk.verifying_key()))
+diff --git a/ui/src/components/members/member_info_modal/ban_button.rs b/ui/src/components/members/member_info_modal/ban_button.rs
+index 1f8ce71c..6463c66a 100644
+--- a/ui/src/components/members/member_info_modal/ban_button.rs
++++ b/ui/src/components/members/member_info_modal/ban_button.rs
+@@ -1,4 +1,4 @@
+-use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, NEEDS_SYNC, ROOMS};
++use crate::components::app::{CURRENT_ROOM, MEMBER_INFO_MODAL, ROOMS};
+ use crate::room_data::RoomData;
+ use crate::util::get_current_system_time;
+ use dioxus::logger::tracing::{error, info};
+@@ -17,7 +17,7 @@ pub fn BanButton(member_to_ban: MemberId, is_downstream: bool, nickname: String)
+             .read()
+             .owner_key
+             .as_ref()
+-            .and_then(|key| ROOMS.read().map.get(key).cloned())
++            .and_then(|key| ROOMS.try_read().ok()?.map.get(key).cloned())
+     });
+ 
+     let mut show_confirmation = use_signal(|| false);
+@@ -111,7 +111,7 @@ pub fn BanButton(member_to_ban: MemberId, is_downstream: bool, nickname: String)
+                 });
+ 
+                 // Mark room as needing sync to propagate ban and rotation
+-                NEEDS_SYNC.write().insert(current_room);
++                crate::components::app::mark_needs_sync(current_room);
+                 info!("Marked room for synchronization after ban");
+             });
+         }
+diff --git a/ui/src/components/members/member_info_modal/nickname_field.rs b/ui/src/components/members/member_info_modal/nickname_field.rs
+index 6dd8b012..02c93056 100644
+--- a/ui/src/components/members/member_info_modal/nickname_field.rs
++++ b/ui/src/components/members/member_info_modal/nickname_field.rs
+@@ -1,4 +1,4 @@
+-use crate::components::app::{CURRENT_ROOM, NEEDS_SYNC, ROOMS};
++use crate::components::app::{CURRENT_ROOM, ROOMS};
+ use crate::util::ecies::{seal_bytes, unseal_bytes_with_secrets};
+ use dioxus::logger::tracing::*;
+ use dioxus::prelude::*;
+@@ -18,16 +18,17 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
+     let (self_signing_key, room_secrets, current_secret_opt) = {
+         let current_room = CURRENT_ROOM.read();
+         if let Some(key) = current_room.owner_key.as_ref() {
+-            let rooms = ROOMS.read();
+-            rooms
+-                .map
+-                .get(key)
+-                .map(|room_data| {
+-                    (
+-                        Some(room_data.self_sk.clone()),
+-                        room_data.secrets.clone(),
+-                        room_data.get_secret().map(|(s, v)| (*s, v)),
+-                    )
++            ROOMS
++                .try_read()
++                .ok()
++                .and_then(|rooms| {
++                    rooms.map.get(key).map(|room_data| {
++                        (
++                            Some(room_data.self_sk.clone()),
++                            room_data.secrets.clone(),
++                            room_data.get_secret().map(|(s, v)| (*s, v)),
++                        )
++                    })
+                 })
+                 .unwrap_or((None, HashMap::new(), None))
+         } else {
+@@ -82,7 +83,9 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
+                     AuthorizedMemberInfo::new_with_member_key(new_member_info, &signing_key);
+                 // Check if user needs to re-add themselves (pruned for inactivity)
+                 let members_delta = {
+-                    let rooms = ROOMS.read();
++                    let Ok(rooms) = ROOMS.try_read() else {
++                        return;
++                    };
+                     let current_room = CURRENT_ROOM.read();
+                     if let (Some(owner_key), Some(room_data)) = (
+                         current_room.owner_key,
+@@ -142,8 +145,9 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
+                 let owner_key = CURRENT_ROOM.read().owner_key;
+ 
+                 if let Some(owner_key) = owner_key {
+-                    // Use with_mut for atomic update
+-                    ROOMS.with_mut(|rooms| {
++                    // IMPORTANT: NEEDS_SYNC.write() MUST be outside ROOMS.with_mut()
++                    // to avoid re-entrant borrow panic (use_effect → ProcessRooms → ROOMS.read)
++                    let applied = ROOMS.with_mut(|rooms| {
+                         if let Some(room_data) = rooms.map.get_mut(&owner_key) {
+                             info!(
+                                 "State before applying nickname delta: {:?}",
+@@ -155,18 +159,22 @@ pub fn NicknameField(member_info: AuthorizedMemberInfo) -> Element {
+                                 &Some(delta),
+                             ) {
+                                 error!("Failed to apply delta: {:?}", e);
++                                false
+                             } else {
+                                 info!(
+                                     "State after applying nickname delta: {:?}",
+                                     room_data.room_state
+                                 );
+-                                // Mark room as needing sync after nickname change
+-                                NEEDS_SYNC.write().insert(owner_key);
++                                true
+                             }
+                         } else {
+                             warn!("Room state not found for current room");
++                            false
+                         }
+                     });
++                    if applied {
++                        crate::components::app::mark_needs_sync(owner_key);
++                    }
+                 }
+             }
+         }
+diff --git a/ui/src/components/room_list.rs b/ui/src/components/room_list.rs
+index 516cfb68..de846113 100644
+--- a/ui/src/components/room_list.rs
++++ b/ui/src/components/room_list.rs
+@@ -58,7 +58,9 @@ fn format_build_time_local() -> String {
+ pub fn RoomList() -> Element {
+     // Memoize the room list to avoid reading signals during render
+     let room_items = use_memo(move || {
+-        let rooms = ROOMS.read();
++        let Ok(rooms) = ROOMS.try_read() else {
++            return Vec::new();
++        };
+         let current_room_key = CURRENT_ROOM.read().owner_key;
+ 
+         rooms
+diff --git a/ui/src/components/room_list/create_room_modal.rs b/ui/src/components/room_list/create_room_modal.rs
+index 9d422463..36a24b53 100644
+--- a/ui/src/components/room_list/create_room_modal.rs
++++ b/ui/src/components/room_list/create_room_modal.rs
+@@ -1,4 +1,4 @@
+-use crate::components::app::{CREATE_ROOM_MODAL, CURRENT_ROOM, NEEDS_SYNC, ROOMS};
++use crate::components::app::{CREATE_ROOM_MODAL, CURRENT_ROOM, ROOMS};
+ use dioxus::prelude::*;
+ use ed25519_dalek::SigningKey;
+ 
+@@ -20,6 +20,8 @@ pub fn CreateRoomModal() -> Element {
+         // Generate key outside the borrow
+         info!("🔵 Generating signing key...");
+         let self_sk = SigningKey::generate(&mut rand::thread_rng());
++        // Keep a clone of the signing key for delegate storage (self_sk is moved into room creation)
++        let sk_clone = self_sk.clone();
+         let nick = nickname.read().clone();
+         let private = false; // Private rooms temporarily disabled
+         info!(
+@@ -34,6 +36,19 @@ pub fn CreateRoomModal() -> Element {
+             ROOMS.with_mut(|rooms| rooms.create_new_room_with_name(self_sk, name, nick, private));
+         info!("🔵 Room created with key: {:?}", new_room_key);
+ 
++        // Store signing key in delegate so it can sign messages on behalf of this room
++        let room_key_bytes = new_room_key.to_bytes();
++        crate::util::safe_spawn_local(async move {
++            use crate::signing::store_signing_key;
++            use dioxus::logger::tracing::{error, info};
++            info!("Storing signing key in delegate for new room");
++            if let Err(e) = store_signing_key(room_key_bytes, &sk_clone).await {
++                error!("Failed to store signing key in delegate: {}", e);
++            } else {
++                info!("Signing key stored in delegate for new room");
++            }
++        });
++
+         // Update current room
+         info!("🔵 Updating CURRENT_ROOM...");
+         CURRENT_ROOM.with_mut(|current_room| {
+@@ -43,7 +58,7 @@ pub fn CreateRoomModal() -> Element {
+ 
+         // Mark room as needing sync (this will trigger use_effect in app.rs)
+         info!("🔵 Marking room for synchronization...");
+-        NEEDS_SYNC.write().insert(new_room_key);
++        crate::components::app::mark_needs_sync(new_room_key);
+         info!("🔵 Room marked for sync");
+ 
+         // Reset and close modal
+diff --git a/ui/src/components/room_list/edit_room_modal.rs b/ui/src/components/room_list/edit_room_modal.rs
+index 590f9cc0..64f3106e 100644
+--- a/ui/src/components/room_list/edit_room_modal.rs
++++ b/ui/src/components/room_list/edit_room_modal.rs
+@@ -1,6 +1,6 @@
+ use super::room_name_field::RoomNameField;
+ use crate::components::app::chat_delegate::save_rooms_to_delegate;
+-use crate::components::app::{CURRENT_ROOM, EDIT_ROOM_MODAL, NEEDS_SYNC, ROOMS};
++use crate::components::app::{CURRENT_ROOM, EDIT_ROOM_MODAL, ROOMS};
+ use crate::util::ecies::{seal_bytes, unseal_bytes_with_secrets};
+ use dioxus::logger::tracing::{error, info};
+ use dioxus::prelude::*;
+@@ -21,13 +21,18 @@ pub fn EditRoomModal() -> Element {
+     // Memoize the room being edited
+     let editing_room = use_memo(move || {
+         EDIT_ROOM_MODAL.read().room.and_then(|editing_room_vk| {
+-            ROOMS.read().map.iter().find_map(|(room_vk, room_data)| {
+-                if &editing_room_vk == room_vk {
+-                    Some(room_data.clone())
+-                } else {
+-                    None
+-                }
+-            })
++            ROOMS
++                .try_read()
++                .ok()?
++                .map
++                .iter()
++                .find_map(|(room_vk, room_data)| {
++                    if &editing_room_vk == room_vk {
++                        Some(room_data.clone())
++                    } else {
++                        None
++                    }
++                })
+         })
+     });
+ 
+@@ -200,7 +205,7 @@ pub fn EditRoomModal() -> Element {
+                                                                 onclick: move |_| {
+                                                                     if let Some(current_room) = EDIT_ROOM_MODAL.read().room {
+                                                                         info!("Rotating secret for room");
+-                                                                        ROOMS.with_mut(|rooms| {
++                                                                        let rotated = ROOMS.with_mut(|rooms| {
+                                                                             if let Some(room_data) = rooms.map.get_mut(&current_room) {
+                                                                                 match room_data.rotate_secret() {
+                                                                                     Ok(secrets_delta) => {
+@@ -216,14 +221,18 @@ pub fn EditRoomModal() -> Element {
+                                                                                             &Some(delta),
+                                                                                         ) {
+                                                                                             error!("Failed to apply rotation delta: {}", e);
++                                                                                            false
+                                                                                         } else {
+-                                                                                            NEEDS_SYNC.write().insert(current_room);
++                                                                                            true
+                                                                                         }
+                                                                                     }
+-                                                                                    Err(e) => error!("Failed to rotate secret: {}", e),
++                                                                                    Err(e) => { error!("Failed to rotate secret: {}", e); false }
+                                                                                 }
+-                                                                            }
++                                                                            } else { false }
+                                                                         });
++                                                                        if rotated {
++                                                                            crate::components::app::mark_needs_sync(current_room);
++                                                                        }
+                                                                     }
+                                                                 },
+                                                                 Icon { icon: FaRotate, width: 14, height: 14 }
+@@ -327,10 +336,14 @@ pub fn EditRoomModal() -> Element {
+ fn RoomDescriptionField(config: Configuration, is_owner: bool) -> Element {
+     let initial_desc = {
+         let owner_key = CURRENT_ROOM.read().owner_key;
+-        let rooms = ROOMS.read();
+-        let secrets = owner_key
+-            .and_then(|key| rooms.map.get(&key))
+-            .map(|room_data| room_data.secrets.clone())
++        let secrets = ROOMS
++            .try_read()
++            .ok()
++            .and_then(|rooms| {
++                owner_key
++                    .and_then(|key| rooms.map.get(&key))
++                    .map(|room_data| room_data.secrets.clone())
++            })
+             .unwrap_or_default();
+         config
+             .display
+@@ -403,7 +416,7 @@ fn RoomDescriptionField(config: Configuration, is_owner: bool) -> Element {
+                 ..Default::default()
+             };
+ 
+-            ROOMS.with_mut(|rooms| {
++            let applied = ROOMS.with_mut(|rooms| {
+                 if let Some(room_data) = rooms.map.get_mut(&owner_key) {
+                     match ComposableState::apply_delta(
+                         &mut room_data.room_state,
+@@ -413,12 +426,20 @@ fn RoomDescriptionField(config: Configuration, is_owner: bool) -> Element {
+                     ) {
+                         Ok(_) => {
+                             info!("Room description updated successfully");
+-                            NEEDS_SYNC.write().insert(owner_key);
++                            true
++                        }
++                        Err(e) => {
++                            error!("Failed to apply description delta: {:?}", e);
++                            false
+                         }
+-                        Err(e) => error!("Failed to apply description delta: {:?}", e),
+                     }
++                } else {
++                    false
+                 }
+             });
++            if applied {
++                crate::components::app::mark_needs_sync(owner_key);
++            }
+         });
+     };
+ 
+@@ -533,7 +554,7 @@ fn NumericConfigField(
+                 ..Default::default()
+             };
+ 
+-            ROOMS.with_mut(|rooms| {
++            let applied = ROOMS.with_mut(|rooms| {
+                 if let Some(room_data) = rooms.map.get_mut(&owner_key) {
+                     match ComposableState::apply_delta(
+                         &mut room_data.room_state,
+@@ -543,12 +564,20 @@ fn NumericConfigField(
+                     ) {
+                         Ok(_) => {
+                             info!("{label} updated successfully");
+-                            NEEDS_SYNC.write().insert(owner_key);
++                            true
++                        }
++                        Err(e) => {
++                            error!("Failed to apply {label} delta: {:?}", e);
++                            false
+                         }
+-                        Err(e) => error!("Failed to apply {label} delta: {:?}", e),
+                     }
++                } else {
++                    false
+                 }
+             });
++            if applied {
++                crate::components::app::mark_needs_sync(owner_key);
++            }
+         });
+     };
+ 
+@@ -630,7 +659,7 @@ fn MaxMembersField(
+                 ..Default::default()
+             };
+ 
+-            ROOMS.with_mut(|rooms| {
++            let applied = ROOMS.with_mut(|rooms| {
+                 if let Some(room_data) = rooms.map.get_mut(&owner_key) {
+                     match ComposableState::apply_delta(
+                         &mut room_data.room_state,
+@@ -640,12 +669,20 @@ fn MaxMembersField(
+                     ) {
+                         Ok(_) => {
+                             info!("max_members updated successfully");
+-                            NEEDS_SYNC.write().insert(owner_key);
++                            true
++                        }
++                        Err(e) => {
++                            error!("Failed to apply max_members delta: {:?}", e);
++                            false
+                         }
+-                        Err(e) => error!("Failed to apply max_members delta: {:?}", e),
+                     }
++                } else {
++                    false
+                 }
+             });
++            if applied {
++                crate::components::app::mark_needs_sync(owner_key);
++            }
+         });
+     };
+ 
+diff --git a/ui/src/components/room_list/receive_invitation_modal.rs b/ui/src/components/room_list/receive_invitation_modal.rs
+index 321f5c67..9b9fa2cb 100644
+--- a/ui/src/components/room_list/receive_invitation_modal.rs
++++ b/ui/src/components/room_list/receive_invitation_modal.rs
+@@ -1,5 +1,5 @@
+ use crate::components::app::freenet_api::freenet_synchronizer::SynchronizerMessage;
+-use crate::components::app::{NEEDS_SYNC, PENDING_INVITES, ROOMS, SYNCHRONIZER};
++use crate::components::app::{PENDING_INVITES, ROOMS, SYNCHRONIZER};
+ use crate::components::members::Invitation;
+ use crate::invites::{PendingRoomJoin, PendingRoomStatus};
+ use crate::room_data::Rooms;
+@@ -272,8 +272,11 @@ fn render_subscribed_state(
+ 
+ /// Renders the invitation options based on the user's membership status
+ fn render_invitation_options(inv: Invitation, invitation: Signal<Option<Invitation>>) -> Element {
+-    let (current_key_is_member, invited_member_exists) =
+-        check_membership_status(&inv, &ROOMS.read());
++    let Ok(rooms) = ROOMS.try_read() else {
++        return rsx! {};
++    };
++    let (current_key_is_member, invited_member_exists) = check_membership_status(&inv, &rooms);
++    drop(rooms);
+ 
+     if current_key_is_member {
+         render_already_member(invitation)
+@@ -364,7 +367,7 @@ fn render_restore_access_option(
+                             }
+                         });
+                         // Mark room as needing sync after restoring member access
+-                        NEEDS_SYNC.write().insert(room);
++                        crate::components::app::mark_needs_sync(room);
+                         clear_invitation_from_storage();
+                         invitation.set(None);
+                     }
+diff --git a/ui/src/components/room_list/room_name_field.rs b/ui/src/components/room_list/room_name_field.rs
+index 90681174..63b99a03 100644
+--- a/ui/src/components/room_list/room_name_field.rs
++++ b/ui/src/components/room_list/room_name_field.rs
+@@ -1,4 +1,4 @@
+-use crate::components::app::{CURRENT_ROOM, NEEDS_SYNC, ROOMS};
++use crate::components::app::{CURRENT_ROOM, ROOMS};
+ use crate::util::ecies::{seal_bytes, unseal_bytes_with_secrets};
+ use dioxus::logger::tracing::*;
+ use dioxus::prelude::*;
+@@ -14,10 +14,14 @@ pub fn RoomNameField(config: Configuration, is_owner: bool) -> Element {
+     // Extract and decrypt the room name using version-aware decryption
+     let initial_name = {
+         let owner_key = CURRENT_ROOM.read().owner_key;
+-        let rooms = ROOMS.read();
+-        let secrets = owner_key
+-            .and_then(|key| rooms.map.get(&key))
+-            .map(|room_data| room_data.secrets.clone())
++        let secrets = ROOMS
++            .try_read()
++            .ok()
++            .and_then(|rooms| {
++                owner_key
++                    .and_then(|key| rooms.map.get(&key))
++                    .map(|room_data| room_data.secrets.clone())
++            })
+             .unwrap_or_default();
+         match unseal_bytes_with_secrets(&config.display.name, &secrets) {
+             Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+@@ -92,7 +96,7 @@ pub fn RoomNameField(config: Configuration, is_owner: bool) -> Element {
+                     ..Default::default()
+                 };
+ 
+-                ROOMS.with_mut(|rooms| {
++                let applied = ROOMS.with_mut(|rooms| {
+                     if let Some(room_data) = rooms.map.get_mut(&owner_key) {
+                         info!("Applying delta to room state");
+                         match ComposableState::apply_delta(
+@@ -103,13 +107,20 @@ pub fn RoomNameField(config: Configuration, is_owner: bool) -> Element {
+                         ) {
+                             Ok(_) => {
+                                 info!("Delta applied successfully");
+-                                // Mark room as needing sync after name change
+-                                NEEDS_SYNC.write().insert(owner_key);
++                                true
++                            }
++                            Err(e) => {
++                                error!("Failed to apply delta: {:?}", e);
++                                false
+                             }
+-                            Err(e) => error!("Failed to apply delta: {:?}", e),
+                         }
++                    } else {
++                        false
+                     }
+                 });
++                if applied {
++                    crate::components::app::mark_needs_sync(owner_key);
++                }
+             });
+         } else {
+             error!("Room name is empty");
+diff --git a/ui/src/main.rs b/ui/src/main.rs
+index 2bb73216..140af807 100644
+--- a/ui/src/main.rs
++++ b/ui/src/main.rs
+@@ -51,7 +51,6 @@ unsafe extern "Rust" fn __getrandom_v02_custom(
+ fn main() {
+     dioxus::logger::initialize_default();
+ 
+-    // Register the notification test function on the window object for debugging
+     #[cfg(target_arch = "wasm32")]
+     {
+         use wasm_bindgen::prelude::*;
+@@ -62,6 +61,46 @@ fn main() {
+             fn log(s: &str);
+         }
+ 
++        // Install a panic hook that shows a visible error overlay on the page.
++        // On mobile browsers, console output is invisible, so WASM panics would
++        // cause a blank screen with no feedback. This overlay lets the user
++        // see and report the crash message.
++        std::panic::set_hook(Box::new(|info| {
++            let msg = info.to_string();
++            // Log to console for desktop debugging
++            web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&msg));
++            // Create a visible overlay on the page
++            if let Some(window) = web_sys::window() {
++                if let Some(document) = window.document() {
++                    if let Ok(overlay) = document.create_element("div") {
++                        overlay
++                            .set_attribute(
++                                "style",
++                                "position:fixed;top:0;left:0;right:0;bottom:0;\
++                                 background:rgba(0,0,0,0.92);color:#ff6b6b;\
++                                 padding:24px;z-index:999999;font-family:monospace;\
++                                 font-size:14px;overflow:auto;white-space:pre-wrap;\
++                                 word-break:break-all;",
++                            )
++                            .ok();
++                        let html = format!(
++                            "<h2 style='color:#ff6b6b;margin-top:0'>River crashed</h2>\
++                             <p style='color:#ccc'>Please report this error:</p>\
++                             <pre style='color:#fff;background:#333;padding:12px;\
++                             border-radius:4px;overflow:auto;max-height:60vh'>{}</pre>\
++                             <p style='color:#888;margin-top:16px'>Tap and hold the \
++                             error text above to copy it. Refresh the page to restart.</p>",
++                            msg.replace('<', "&lt;").replace('>', "&gt;")
++                        );
++                        overlay.set_inner_html(&html);
++                        if let Some(body) = document.body() {
++                            body.append_child(&overlay).ok();
++                        }
++                    }
++                }
++            }
++        }));
++
+         // Register river_test_notification on window for easy console access
+         if let Some(window) = web_sys::window() {
+             let test_fn = Closure::wrap(Box::new(|| {
+diff --git a/ui/src/signing.rs b/ui/src/signing.rs
+index 66993699..7c97cbdb 100644
+--- a/ui/src/signing.rs
++++ b/ui/src/signing.rs
+@@ -244,9 +244,14 @@ pub async fn sign_message_with_fallback(
+     message_bytes: Vec<u8>,
+     fallback_key: &SigningKey,
+ ) -> Signature {
++    crate::util::debug_log("[sign] requesting delegate signature...");
+     match sign_message(room_key, message_bytes.clone()).await {
+-        Ok(sig) => sig,
++        Ok(sig) => {
++            crate::util::debug_log("[sign] delegate signed OK");
++            sig
++        }
+         Err(e) => {
++            crate::util::debug_log(&format!("[sign] delegate FAILED: {}, using fallback", e));
+             warn!("Delegate signing failed, using fallback: {}", e);
+             fallback_key.sign(&message_bytes)
+         }
+diff --git a/ui/src/util.rs b/ui/src/util.rs
+index 0acb2170..6124741d 100644
+--- a/ui/src/util.rs
++++ b/ui/src/util.rs
+@@ -8,6 +8,37 @@ use std::time::*;
+ #[cfg(target_arch = "wasm32")]
+ use wasm_bindgen::prelude::*;
+ 
++/// Spawn an async task safely from any context (including inside another task's poll).
++///
++/// On Firefox mobile, calling `spawn_local` from inside a wasm-bindgen-futures task
++/// poll causes a RefCell re-entrant borrow panic (singlethread.rs:132). This helper
++/// defers the spawn via `setTimeout(0)` to break out of the current call stack,
++/// ensuring the TASKS RefCell is not borrowed when spawn_local runs.
++#[cfg(target_arch = "wasm32")]
++pub fn safe_spawn_local<F>(f: F)
++where
++    F: std::future::Future<Output = ()> + 'static,
++{
++    // We need to wrap the future in a Box to make it 'static and sendable via closure
++    let boxed: std::pin::Pin<Box<dyn std::future::Future<Output = ()>>> = Box::pin(f);
++    let cb = Closure::once_into_js(move || {
++        wasm_bindgen_futures::spawn_local(boxed);
++    });
++    web_sys::window()
++        .expect("no window")
++        .set_timeout_with_callback(&cb.into())
++        .ok();
++}
++
++/// Non-WASM fallback — just spawns normally (no-op since there's no async runtime)
++#[cfg(not(target_arch = "wasm32"))]
++pub fn safe_spawn_local<F>(_f: F)
++where
++    F: std::future::Future<Output = ()> + 'static,
++{
++    // No-op on non-WASM
++}
++
+ #[cfg(target_arch = "wasm32")]
+ #[wasm_bindgen(inline_js = "
+ export function get_current_time() {
+@@ -158,6 +189,143 @@ pub fn from_cbor_slice<T: serde::de::DeserializeOwned>(data: &[u8]) -> T {
+     ciborium::de::from_reader(data).unwrap()
+ }
+ 
++/// Check if debug overlay is enabled via `?debug=1` query parameter.
++#[cfg(target_arch = "wasm32")]
++fn is_debug_enabled() -> bool {
++    // Cache the result in a static to avoid repeated URL parsing
++    use std::sync::OnceLock;
++    static ENABLED: OnceLock<bool> = OnceLock::new();
++    *ENABLED.get_or_init(|| {
++        web_sys::window()
++            .and_then(|w| w.location().search().ok())
++            .map(|s| {
++                web_sys::UrlSearchParams::new_with_str(&s)
++                    .ok()
++                    .and_then(|p| p.get("debug"))
++                    .map(|v| v == "1" || v == "true")
++                    .unwrap_or(false)
++            })
++            .unwrap_or(false)
++    })
++}
++
++/// Append a debug message to a floating on-screen log overlay.
++/// Only active when `?debug=1` is in the URL query string.
++/// On mobile browsers where console is inaccessible, this lets the user
++/// see (and screenshot) what the app is doing during message send, etc.
++#[cfg(target_arch = "wasm32")]
++pub fn debug_log(msg: &str) {
++    use dioxus::logger::tracing::info;
++    info!("{}", msg);
++
++    if !is_debug_enabled() {
++        return;
++    }
++
++    let Some(window) = web_sys::window() else {
++        return;
++    };
++    let Some(document) = window.document() else {
++        return;
++    };
++
++    // Create or find the debug container (wrapper with toggle button + log)
++    let container = match document.get_element_by_id("river-debug-container") {
++        Some(el) => el,
++        None => {
++            let el = document.create_element("div").unwrap();
++            el.set_id("river-debug-container");
++            el.set_attribute(
++                "style",
++                "position:fixed;bottom:0;left:0;right:0;z-index:999998;\
++                 pointer-events:auto;",
++            )
++            .ok();
++
++            // Toggle button
++            let btn = document.create_element("div").unwrap();
++            btn.set_id("river-debug-toggle");
++            btn.set_attribute(
++                "style",
++                "background:#222;color:#0f0;font-family:monospace;font-size:11px;\
++                 padding:2px 8px;cursor:pointer;text-align:right;border-top:1px solid #333;\
++                 user-select:none;-webkit-user-select:none;",
++            )
++            .ok();
++            btn.set_inner_html("[debug] tap to minimize");
++            btn.set_attribute(
++                "onclick",
++                "var log=document.getElementById('river-debug-log');\
++                 var btn=document.getElementById('river-debug-toggle');\
++                 if(log.style.display==='none'){\
++                   log.style.display='block';btn.innerHTML='[debug] tap to minimize';\
++                 }else{\
++                   log.style.display='none';btn.innerHTML='[debug] tap to expand';\
++                 }",
++            )
++            .ok();
++            el.append_child(&btn).ok();
++
++            // Log area
++            let log = document.create_element("div").unwrap();
++            log.set_id("river-debug-log");
++            log.set_attribute(
++                "style",
++                "max-height:25vh;background:rgba(0,0,0,0.85);color:#0f0;\
++                 font-family:monospace;font-size:11px;overflow:auto;\
++                 padding:4px 8px;white-space:pre-wrap;word-break:break-all;",
++            )
++            .ok();
++            el.append_child(&log).ok();
++
++            if let Some(body) = document.body() {
++                body.append_child(&el).ok();
++            }
++            el
++        }
++    };
++
++    // Get the log element
++    let Some(overlay) = document.get_element_by_id("river-debug-log") else {
++        return;
++    };
++    let _ = container; // keep container alive
++
++    // Timestamp
++    let now = js_sys::Date::new_0();
++    let ts = format!(
++        "{:02}:{:02}:{:02}",
++        now.get_hours(),
++        now.get_minutes(),
++        now.get_seconds()
++    );
++
++    // Append the new line (keep last 50 lines)
++    let current = overlay.inner_html();
++    let lines: Vec<&str> = current.lines().collect();
++    let trimmed = if lines.len() > 49 {
++        lines[lines.len() - 49..].join("\n")
++    } else {
++        current.clone()
++    };
++    let new_content = format!(
++        "{}{}{} {}",
++        trimmed,
++        if trimmed.is_empty() { "" } else { "\n" },
++        ts,
++        msg.replace('<', "&lt;").replace('>', "&gt;")
++    );
++    overlay.set_inner_html(&new_content);
++
++    // Auto-scroll to bottom
++    overlay.set_scroll_top(overlay.scroll_height());
++}
++
++#[cfg(not(target_arch = "wasm32"))]
++pub fn debug_log(msg: &str) {
++    dioxus::logger::tracing::info!("{}", msg);
++}
++
+ pub fn owner_vk_to_contract_key(owner_vk: &VerifyingKey) -> ContractKey {
+     let params = ChatRoomParametersV1 { owner: *owner_vk };
+     let params_bytes = to_cbor_vec(&params);
+-- 
+2.53.0
+

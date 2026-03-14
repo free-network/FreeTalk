@@ -1,0 +1,620 @@
+From c7cef0ef9ff7276775ceb1fe5ba918a71f6f727d Mon Sep 17 00:00:00 2001
+From: "nacho.d.g" <iduartgomez@gmail.com>
+Date: Sun, 8 Mar 2026 22:59:32 +0100
+Subject: [PATCH 50/69] docs: add River-specific local-dev skill for Claude
+ Code (#153)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+* docs: add River-specific local-dev skill for Claude Code
+
+River-specific build, publish, and debug workflows including:
+- Build commands and fast iteration loop (local-republish.sh)
+- Debug overlay (?debug=1) and panic overlay
+- Delegate signing flow debugging
+- Firefox mobile Dioxus RefCell re-entrancy patterns and fixes
+
+General Freenet local dev content (node management, fdev, debugging)
+lives in the freenet-agent-skills plugin (freenet/freenet-agent-skills#18).
+
+* docs: remove redundant "River" / "River-specific" references from skill
+
+The skill lives in the river repo — no need to qualify everything as
+River-specific. Also removed hardcoded repo paths from commands.
+
+* docs: make local-dev skill OS-agnostic
+
+Remove macOS-specific assumptions. Provide log directory examples for
+both macOS and Linux, use generic keyboard shortcuts.
+
+* docs: add local-republish.sh and Dioxus WASM signal safety rules
+
+- Add scripts/local-republish.sh for fast build-publish-test iteration
+- Add Dioxus WASM signal safety rules to AGENTS.md (try_read,
+  safe_spawn_local, setTimeout deferral patterns learned from Firefox
+  mobile debugging)
+
+* docs: add Playwright MCP instructions for automated local dev testing
+
+- Add interactive Playwright MCP section to AGENTS.md with usage patterns
+  for verifying UI changes, testing message send, mobile simulation
+- Add automated verification section to local-dev skill with iteration loop
+- Track .claude/settings.local.json with Playwright plugin enabled
+
+* fix: use settings.json instead of settings.local.json
+
+settings.json is the shared project config; settings.local.json is
+user-local and should not be committed.
+---
+ .claude/settings.json             |   5 +
+ .claude/skills/local-dev/SKILL.md | 281 ++++++++++++++++++++++++++++++
+ AGENTS.md                         |  96 ++++++++++
+ scripts/local-republish.sh        | 141 +++++++++++++++
+ 4 files changed, 523 insertions(+)
+ create mode 100644 .claude/settings.json
+ create mode 100644 .claude/skills/local-dev/SKILL.md
+ create mode 100755 scripts/local-republish.sh
+
+diff --git a/.claude/settings.json b/.claude/settings.json
+new file mode 100644
+index 00000000..1bcd18fa
+--- /dev/null
++++ b/.claude/settings.json
+@@ -0,0 +1,5 @@
++{
++  "enabledPlugins": {
++    "playwright@claude-plugins-official": true
++  }
++}
+diff --git a/.claude/skills/local-dev/SKILL.md b/.claude/skills/local-dev/SKILL.md
+new file mode 100644
+index 00000000..76977218
+--- /dev/null
++++ b/.claude/skills/local-dev/SKILL.md
+@@ -0,0 +1,281 @@
++---
++name: local-dev
++description: Build, publish, and debug workflows for local development. Use when iterating on UI, debugging message sending, or testing on mobile devices.
++---
++
++# Local Development
++
++Build, publish, and debug workflows. For general Freenet local node management,
++contract publishing, and debugging patterns, see the `local-dev` skill in the
++[freenet-agent-skills](https://github.com/freenet/freenet-agent-skills) plugin.
++
++## Quick Start
++
++### Prerequisites
++
++```bash
++which freenet fdev dx
++rustup target add wasm32-unknown-unknown
++```
++
++### One-time setup
++
++```bash
++# 1. Build the web-container-tool (native, not cross-compiled)
++cargo build --release -p web-container-tool
++
++# 2. Build the web container contract WASM
++cargo build --release --target wasm32-unknown-unknown -p web-container-contract
++
++# 3. Generate test keys
++mkdir -p test-contract
++target/release/web-container-tool generate --output test-contract/test-keys.toml
++
++# 4. Start an isolated test node (in a separate terminal or background)
++#    Choose an appropriate log directory for your OS:
++#      macOS:  ~/Library/Logs/freenet-test-node
++#      Linux:  ~/.local/share/freenet-test-node/logs
++LOG_DIR=~/Library/Logs/freenet-test-node   # adjust for your OS
++mkdir -p "$LOG_DIR"
++freenet network \
++  --network-port 31338 \
++  --ws-api-port 7510 \
++  --ws-api-address 0.0.0.0 \
++  --is-gateway \
++  --skip-load-from-network \
++  --data-dir ~/freenet-test-node/data \
++  --public-network-address 127.0.0.1 \
++  --log-dir "$LOG_DIR" \
++  --log-level debug
++```
++
++### Fast iteration script
++
++```bash
++# Full rebuild + republish (~15s):
++./scripts/local-republish.sh
++
++# Skip UI build if only repackaging (~2s):
++./scripts/local-republish.sh --skip-build
++
++# Target a different port:
++./scripts/local-republish.sh --port 7509
++```
++
++The script outputs desktop and phone URLs after publishing. Use Playwright
++MCP tools to verify the result without opening a manual browser — see
++"Automated verification with Playwright MCP" below.
++
++## Build Commands
++
++### Individual components
++
++```bash
++cargo build --release --target wasm32-unknown-unknown -p room-contract  # Room contract WASM
++cargo build --release --target wasm32-unknown-unknown -p chat-delegate   # Chat delegate WASM
++cargo build --release --target wasm32-unknown-unknown -p web-container-contract  # Web container
++(cd ui && dx build --release)                                            # UI (Dioxus)
++```
++
++### Development mode
++
++```bash
++cargo make dev                     # dx serve with hot reload (localhost:8080)
++cargo make dev-example             # dx serve with example data (no network needed)
++```
++
++## Fast Iteration Loop
++
++### UI changes only (fastest)
++
++```bash
++# 1. Make your UI change in ui/src/
++# 2. Rebuild + republish:
++./scripts/local-republish.sh
++# 3. Hard-refresh browser (Cmd+Shift+R / Ctrl+Shift+R)
++```
++
++### Contract changes
++
++```bash
++# 1. Rebuild contract
++cargo build --release --target wasm32-unknown-unknown -p room-contract
++
++# 2. Copy to UI public dir (UI embeds contract WASM)
++cp target/wasm32-unknown-unknown/release/room_contract.wasm ui/public/contracts/
++
++# 3. Full rebuild + publish
++./scripts/local-republish.sh
++```
++
++### Delegate changes
++
++```bash
++# 1. Rebuild delegate (UI includes delegate via include_bytes!)
++cargo build --release --target wasm32-unknown-unknown -p chat-delegate
++
++# 2. Rebuild UI (picks up new delegate) + publish
++./scripts/local-republish.sh
++```
++
++## Manual publish
++
++The `cargo make` publish tasks cross-compile the web-container-tool for
++`x86_64-unknown-linux-gnu`. On other platforms, use `local-republish.sh`
++or run the steps manually:
++
++```bash
++# 1. Build UI
++(cd ui && dx build --release)
++
++# 2. Compress
++(cd target/dx/river-ui/release/web/public && tar -cJf ../../../../../webapp/webapp.tar.xz *)
++
++# 3. Sign with test keys
++target/release/web-container-tool sign \
++  --input target/webapp/webapp.tar.xz \
++  --output target/webapp/webapp-test.metadata \
++  --parameters target/webapp/webapp-test.parameters \
++  --key-file test-contract/test-keys.toml \
++  --version $(( $(date +%s) / 60 ))
++
++# 4. Publish
++fdev --port 7510 execute put \
++  --code target/wasm32-unknown-unknown/release/web_container_contract.wasm \
++  --parameters target/webapp/webapp-test.parameters \
++  contract \
++  --webapp-archive target/webapp/webapp.tar.xz \
++  --webapp-metadata target/webapp/webapp-test.metadata
++```
++
++## Debugging
++
++### Automated verification with Playwright MCP
++
++The Playwright MCP plugin is enabled (`.claude/settings.local.json`). Use it
++to verify UI changes without manually opening a browser.
++
++**After publishing to a local node:**
++1. `browser_navigate` → URL from `local-republish.sh` output
++2. `browser_snapshot` → verify layout and content render correctly
++3. `browser_fill_form` + `browser_click` → test message sending
++4. `browser_console_messages` → check for WASM panics or errors
++5. `browser_resize` → test mobile breakpoints (767px, 480px)
++
++**Against example data (no node needed):**
++```bash
++cargo make build-ui-example-no-sync
++cd target/dx/river-ui/release/web/public && python3 -m http.server 8082 &
++```
++Then `browser_navigate` → `http://127.0.0.1:8082/`
++
++**Typical iteration loop:**
++1. Edit UI code
++2. `./scripts/local-republish.sh`
++3. `browser_navigate` to published URL
++4. `browser_snapshot` to verify
++5. `browser_console_messages` to check for errors
++
++### Debug overlay
++
++Built-in debug overlay activated via `?debug=1` query parameter. Shows
++timestamped log messages on-screen with a minimize/expand toggle — essential
++for mobile where console is inaccessible.
++
++```
++http://{IP}:7510/v1/contract/web/{CONTRACT_ID}/?debug=1
++```
++
++Use `crate::util::debug_log("msg")` to log to the overlay. Does nothing
++without `?debug=1`.
++
++### Panic overlay
++
++A WASM panic hook creates a visible red error overlay showing the panic
++message. Appears automatically on any crash, no query param needed.
++
++### Delegate signing flow
++
++Message sending uses a delegate-based signing architecture:
++
++1. **Room creation** → `create_room_modal.rs` generates `SigningKey`, stores in ROOMS signal, and calls `store_signing_key()` to save it in the chat delegate
++2. **Message send** → UI calls `sign_message_with_fallback(room_key, msg, fallback_sk)`
++3. **Delegate signing** → `send_delegate_request(SignMessage{...})` → delegate looks up `signing_key:{origin}:{room_key}` → returns signature
++4. **Fallback** → If delegate fails, signs locally with `fallback_sk.sign()`
++5. **Delta applied** → Message added to local state → `NEEDS_SYNC` set → `ProcessRooms` → UPDATE sent
++
++Key debugging points:
++- Node logs show `"Sign request for room, signature created: true/false"` — if false, delegate doesn't have the key
++- Browser console shows fallback path: `"Delegate signing failed, using fallback"`
++- If no UPDATE appears in node logs after signing, check if WebSocket is still connected
++
++### Check contract state via riverctl
++
++```bash
++riverctl --node-url ws://127.0.0.1:7510/v1/contract/command?encodingProtocol=native room list
++```
++
++### Timeline analysis for message send
++
++1. `SignMessage received` → delegate got the sign request
++2. `signature created: true/false` → delegate had (or didn't have) the key
++3. `Update { key: ... }` → UPDATE arrived at node
++4. `ResultRouter received result` → UPDATE processed, result sent back to client
++
++If step 1 happens but step 3 doesn't, the browser died between signing and sending the UPDATE.
++
++### Firefox mobile: Dioxus RefCell re-entrant borrow panics
++
++Firefox mobile runs Dioxus signal subscriber notifications synchronously
++during Drop, unlike Chrome/Safari which defer to microtask boundaries. This
++causes `RefCell already borrowed` panics in WASM at three levels:
++
++1. **Dioxus signal re-entrancy** — `ROOMS.with_mut()` Drop triggers subscriber
++   notifications that cascade into `ROOMS.read()`. Fix: use `try_read()` for
++   all reactive signal reads. `try_read()` still registers Dioxus subscriptions
++   (confirmed in Dioxus 0.7.x source) but returns `Err` instead of panicking.
++
++2. **wasm-bindgen-futures task re-entrancy** — `spawn_local` inside a polled
++   future causes re-entrant `Task::run()` at `singlethread.rs:132`. Fix: use
++   `safe_spawn_local()` helper (in `util.rs`) that wraps spawn_local in
++   `setTimeout(0)` to break out of the WASM call stack.
++
++3. **Signal mutation inside spawn_local** — `ROOMS.with_mut()` inside a
++   spawn_local task triggers notifications that re-queue the same task. Fix:
++   move signal mutations out of spawn_local via `setTimeout(0)`.
++
++**Key pattern for safe signal writes in WASM:**
++```rust
++// WRONG — can cause re-entrant borrow in Firefox
++spawn_local(async {
++    // ... async work ...
++    ROOMS.with_mut(|rooms| { /* mutate */ });
++});
++
++// RIGHT — defer mutation to clean execution context
++#[cfg(target_arch = "wasm32")]
++{
++    let cb = Closure::once_into_js(move || {
++        ROOMS.with_mut(|rooms| { /* mutate */ });
++    });
++    web_sys::window().unwrap()
++        .set_timeout_with_callback(&cb.into()).ok();
++}
++```
++
++**Important:** Signal clears in `use_effect` must be synchronous, not deferred.
++Deferring a clear that the effect subscribes to causes an infinite loop.
++
++See `mark_needs_sync()` in `app.rs` and `safe_spawn_local()` in `util.rs`
++for canonical examples.
++
++### Common issues
++
++| Symptom | Cause | Fix |
++|---------|-------|-----|
++| Messages fail to send (new room) | Signing key not stored in delegate | Fixed: `create_room_modal.rs` now calls `store_signing_key` after room creation |
++| "signature created: false" in node logs | Delegate can't find signing key for room | Ensure `StoreSigningKey` is sent after room creation; fallback signs locally |
++| Mobile send appears stuck | Browser suspends WASM when screen locks | Keep phone screen active; delegate signing avoids long async chains |
++| `RefCell already borrowed` on Firefox mobile | Dioxus signal re-entrant borrow during Drop | Use `try_read()` instead of `read()` for reactive signal access |
++| Crash at `singlethread.rs:132` | spawn_local inside polled future on Firefox | Use `safe_spawn_local()` to defer via setTimeout(0) |
++| Blank page after code change (no panic) | Infinite loop from deferred signal clear | Keep signal clears synchronous in use_effect; only defer spawns |
+diff --git a/AGENTS.md b/AGENTS.md
+index b3f608aa..ae090e10 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -95,6 +95,45 @@ npx playwright test --project=mobile-safari --grep "Mobile"
+ - `ui/tests/` — Layout/visual tests against `dx build` with example data (runs in CI)
+ - `e2e-test/` — Integration tests against a real Freenet node (manual)
+ 
++### Interactive Playwright MCP (for debugging and verification)
++
++The Playwright MCP plugin is enabled in `.claude/settings.local.json`. Use it
++to interactively test the UI against a running local node — no manual browser
++needed.
++
++**Testing against example data (no Freenet node required):**
++```bash
++# Build and serve with example data
++cargo make build-ui-example-no-sync
++cd target/dx/river-ui/release/web/public && python3 -m http.server 8082 &
++```
++Then use Playwright MCP tools:
++1. `browser_navigate` → `http://127.0.0.1:8082/`
++2. `browser_snapshot` → inspect DOM state, verify layout
++3. `browser_click` / `browser_fill_form` → interact with UI elements
++4. `browser_console_messages` → check for WASM panics or JS errors
++
++**Testing against a local Freenet node (full integration):**
++```bash
++# Publish to local node first
++./scripts/local-republish.sh
++# Script outputs the URL, e.g.:
++#   http://127.0.0.1:7510/v1/contract/web/{CONTRACT_ID}/
++```
++Then use Playwright MCP tools to navigate to the published URL. This tests
++the full stack: WASM ↔ WebSocket ↔ Freenet node ↔ contract/delegate.
++
++**Common verification tasks with Playwright MCP:**
++- **After UI changes**: Navigate, take snapshot, verify layout renders correctly
++- **After message send fixes**: Fill message input, click send, verify message appears
++- **After crash fixes**: Navigate, send message, check `browser_console_messages` for panics
++- **Mobile simulation**: Use `browser_resize` to test responsive breakpoints (767px, 480px, 320px)
++- **Debug overlay**: Navigate to `?debug=1` URL, verify overlay appears and logs render
++
++**When to use Playwright MCP vs Playwright test suite:**
++- **MCP** (interactive): Exploratory testing, debugging specific issues, verifying a fix before publishing
++- **Test suite** (`npx playwright test`): Regression testing across all browsers/viewports before publishing
++
+ ### Code Quality
+ ```bash
+ cargo make clippy
+@@ -283,6 +322,63 @@ Both the UI and riverctl detect this automatically via `regenerate_contract_key(
+ This ensures any client can re-PUT old state bytes and the new WASM's `validate_state()` accepts it,
+ which is critical for the permissionless contract migration system described above.
+ 
++## Dioxus WASM Signal Safety Rules
++
++The UI runs as single-threaded WASM. Firefox mobile runs Dioxus signal subscriber
++notifications synchronously during Drop, causing `RefCell already borrowed` panics.
++These rules prevent re-entrant borrow crashes.
++
++### Always use `try_read()` for reactive signal reads
++
++```rust
++// WRONG — panics if signal is being written
++let rooms = ROOMS.read();
++
++// RIGHT — returns Err instead of panicking, still registers Dioxus subscriptions
++let Ok(rooms) = ROOMS.try_read() else { return; };
++```
++
++### Never call `spawn_local` inside a polled future
++
++Use `safe_spawn_local()` (in `util.rs`) which defers via `setTimeout(0)`:
++
++```rust
++// WRONG — re-entrant Task::run() panic on Firefox at singlethread.rs:132
++wasm_bindgen_futures::spawn_local(async { ... });
++
++// RIGHT
++crate::util::safe_spawn_local(async { ... });
++```
++
++### Never mutate signals inside `spawn_local`
++
++Move signal mutations out of async tasks via `setTimeout(0)`:
++
++```rust
++// WRONG — triggers re-entrant borrow in Firefox
++spawn_local(async {
++    ROOMS.with_mut(|rooms| { /* mutate */ });
++});
++
++// RIGHT — defer mutation to clean execution context
++#[cfg(target_arch = "wasm32")]
++{
++    let cb = Closure::once_into_js(move || {
++        ROOMS.with_mut(|rooms| { /* mutate */ });
++    });
++    web_sys::window().unwrap()
++        .set_timeout_with_callback(&cb.into()).ok();
++}
++```
++
++See `mark_needs_sync()` in `app.rs` and `safe_spawn_local()` in `util.rs`.
++
++### Never defer signal clears in `use_effect`
++
++Signal clears that the effect subscribes to must be synchronous. Deferring
++causes an infinite loop (set remains non-empty → effect re-runs → defers
++clear → effect re-runs...).
++
+ ## PR Expectations
+ - Follow Conventional Commit style for PR titles (e.g., `fix(ui): correct room timestamp format`).
+ - Include a brief description of test coverage in the PR body.
+diff --git a/scripts/local-republish.sh b/scripts/local-republish.sh
+new file mode 100755
+index 00000000..26a320b3
+--- /dev/null
++++ b/scripts/local-republish.sh
+@@ -0,0 +1,141 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Fast local republish script for River UI iteration.
++# Usage: ./scripts/local-republish.sh [--port PORT] [--skip-build]
++#
++# Prerequisites (one-time):
++#   cargo build --release -p web-container-tool
++#   cargo build --release --target wasm32-unknown-unknown -p web-container-contract
++#   mkdir -p test-contract
++#   target/release/web-container-tool generate --output test-contract/test-keys.toml
++#
++# Start test node (one-time):
++#   freenet network --network-port 31338 --ws-api-port 7510 \
++#     --ws-api-address 0.0.0.0 --is-gateway --skip-load-from-network \
++#     --id test-node --public-network-address 127.0.0.1
++
++cd "$(dirname "$0")/.."
++
++PORT=7510
++SKIP_BUILD=false
++
++while [[ $# -gt 0 ]]; do
++    case $1 in
++        --port) PORT="$2"; shift 2 ;;
++        --skip-build) SKIP_BUILD=true; shift ;;
++        *) echo "Unknown arg: $1"; exit 1 ;;
++    esac
++done
++
++# Verify prerequisites
++if [ ! -f "test-contract/test-keys.toml" ]; then
++    echo "ERROR: No test keys. Run: target/release/web-container-tool generate --output test-contract/test-keys.toml"
++    exit 1
++fi
++
++if [ ! -f "target/wasm32-unknown-unknown/release/web_container_contract.wasm" ]; then
++    echo "ERROR: No web container WASM. Run: cargo build --release --target wasm32-unknown-unknown -p web-container-contract"
++    exit 1
++fi
++
++# Compute test contract ID early (needed for base_path)
++# We need parameters to exist first — if they don't, do a preliminary sign to generate them
++if [ ! -f "target/webapp/webapp-test.parameters" ]; then
++    # Need at least a dummy sign to get parameters file; will re-sign after build
++    if [ -f "target/webapp/webapp.tar.xz" ]; then
++        target/release/web-container-tool sign \
++            --input target/webapp/webapp.tar.xz \
++            --output target/webapp/webapp-test.metadata \
++            --parameters target/webapp/webapp-test.parameters \
++            --key-file test-contract/test-keys.toml \
++            --version 1 2>/dev/null
++    fi
++fi
++
++if [ -f "target/webapp/webapp-test.parameters" ]; then
++    CONTRACT_ID=$(fdev get-contract-id \
++        --code target/wasm32-unknown-unknown/release/web_container_contract.wasm \
++        --parameters target/webapp/webapp-test.parameters 2>/dev/null || echo "")
++elif [ -f "test-contract/contract-id.txt" ]; then
++    CONTRACT_ID=$(cat test-contract/contract-id.txt)
++else
++    CONTRACT_ID=""
++fi
++
++# Step 1: Build UI (unless --skip-build)
++if [ "$SKIP_BUILD" = false ]; then
++    echo "==> Building UI..."
++
++    # Set base_path for test contract so assets resolve correctly
++    DIOXUS_TOML="ui/Dioxus.toml"
++    PROD_ID="raAqMhMG7KUpXBU2SxgCQ3Vh4PYjttxdSWd9ftV7RLv"
++
++    if [ -n "$CONTRACT_ID" ]; then
++        BASE_PATH="v1/contract/web/${CONTRACT_ID}"
++    else
++        BASE_PATH="v1/contract/web/${PROD_ID}"
++    fi
++
++    # Uncomment and set base_path for this build
++    # Handle both commented (#base_path = ...) and uncommented (base_path = ...) states
++    if grep -q "^#base_path" "$DIOXUS_TOML"; then
++        # Currently commented — uncomment and set test ID
++        perl -pi -e "s|^#base_path\s*=\s*\".*\"|base_path = \"${BASE_PATH}\"|" "$DIOXUS_TOML"
++    elif grep -q "^base_path" "$DIOXUS_TOML"; then
++        # Currently uncommented — just update the value
++        perl -pi -e "s|^base_path\s*=\s*\".*\"|base_path = \"${BASE_PATH}\"|" "$DIOXUS_TOML"
++    fi
++
++    # Build, then restore Dioxus.toml
++    restore_dioxus() {
++        # Re-comment with production ID
++        perl -pi -e "s|^base_path\s*=\s*\".*\"|#base_path = \"v1/contract/web/${PROD_ID}\"|" "$DIOXUS_TOML"
++    }
++    trap restore_dioxus EXIT
++
++    (cd ui && dx build --release)
++
++    # Restore immediately (trap is backup)
++    restore_dioxus
++    trap - EXIT
++fi
++
++# Step 2: Compress
++echo "==> Compressing webapp..."
++mkdir -p target/webapp
++(cd target/dx/river-ui/release/web/public && tar -cJf ../../../../../webapp/webapp.tar.xz *)
++
++# Step 3: Sign with test keys
++VERSION=$(( $(date +%s) / 60 ))
++echo "==> Signing (version $VERSION)..."
++target/release/web-container-tool sign \
++    --input target/webapp/webapp.tar.xz \
++    --output target/webapp/webapp-test.metadata \
++    --parameters target/webapp/webapp-test.parameters \
++    --key-file test-contract/test-keys.toml \
++    --version "$VERSION"
++
++# Step 4: Get contract ID (re-read after sign, in case first run)
++CONTRACT_ID=$(fdev get-contract-id \
++    --code target/wasm32-unknown-unknown/release/web_container_contract.wasm \
++    --parameters target/webapp/webapp-test.parameters 2>/dev/null)
++
++echo "$CONTRACT_ID" > test-contract/contract-id.txt
++
++# Step 5: Publish
++echo "==> Publishing to localhost:$PORT..."
++fdev --port "$PORT" execute put \
++    --code target/wasm32-unknown-unknown/release/web_container_contract.wasm \
++    --parameters target/webapp/webapp-test.parameters \
++    contract \
++    --webapp-archive target/webapp/webapp.tar.xz \
++    --webapp-metadata target/webapp/webapp-test.metadata
++
++echo ""
++echo "==> Published: $CONTRACT_ID"
++echo "    Desktop: http://127.0.0.1:${PORT}/v1/contract/web/${CONTRACT_ID}/"
++LAN_IP=$(ifconfig en0 2>/dev/null | grep "inet " | awk '{print $2}' || echo "YOUR_LAN_IP")
++echo "    Phone:   http://${LAN_IP}:${PORT}/v1/contract/web/${CONTRACT_ID}/"
++echo ""
++echo "Hard-refresh browser to see changes (Cmd+Shift+R)"
+-- 
+2.53.0
+

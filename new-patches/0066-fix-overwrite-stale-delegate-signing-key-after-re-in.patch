@@ -1,0 +1,41 @@
+From ed45a04258f7e5d80dd236c22d8d2ed232b23a92 Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Fri, 13 Mar 2026 15:02:36 -0500
+Subject: [PATCH 66/69] fix: overwrite stale delegate signing key after
+ re-invitation
+
+When a user is re-invited to a room, the delegate retains the old signing
+key. migrate_signing_key() detected the mismatch but returned false instead
+of overwriting, leaving the stale key in place. Since sign_message_with_fallback()
+tries the delegate first and the delegate "succeeds" (with the wrong key),
+messages fail signature verification on all peers.
+
+Fix: fall through to the store_signing_key path when a key mismatch is
+detected, overwriting the stale key with the current one.
+
+Closes #165
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ ui/src/signing.rs | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/ui/src/signing.rs b/ui/src/signing.rs
+index 7c97cbdb..07a76fcd 100644
+--- a/ui/src/signing.rs
++++ b/ui/src/signing.rs
+@@ -189,8 +189,9 @@ pub async fn migrate_signing_key(room_key: RoomKey, signing_key: &SigningKey) ->
+                 info!("Signing key already migrated to delegate for room");
+                 return true;
+             } else {
+-                warn!("Delegate has different key for room - using local signing");
+-                return false;
++                // Delegate has a stale key (e.g. from before re-invitation).
++                // Overwrite it so delegate signing produces valid signatures.
++                warn!("Delegate has stale key for room - overwriting with current key");
+             }
+         }
+         Ok(None) => {
+-- 
+2.53.0
+

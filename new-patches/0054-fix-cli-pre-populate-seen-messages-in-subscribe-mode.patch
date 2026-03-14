@@ -1,0 +1,73 @@
+From 098991345ddd317abc8e35cc54c7f36eaba4d6ce Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Tue, 10 Mar 2026 21:50:08 -0500
+Subject: [PATCH 54/69] fix(cli): pre-populate seen messages in subscribe mode
+ to avoid dumping history
+
+When using `riverctl message stream --subscribe`, the first subscription
+update could arrive as a full state, causing all existing messages to be
+printed as "new" since seen_messages was empty. Now we always fetch the
+current room state before subscribing and mark all existing messages as
+seen.
+
+Also increased the SUBSCRIBE response timeout from 10s to 30s to
+accommodate slower gateways.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ cli/src/api.rs | 26 +++++++++++++++++---------
+ 1 file changed, 17 insertions(+), 9 deletions(-)
+
+diff --git a/cli/src/api.rs b/cli/src/api.rs
+index 5fd26b52..1d85d7df 100644
+--- a/cli/src/api.rs
++++ b/cli/src/api.rs
+@@ -2333,18 +2333,26 @@ impl ApiClient {
+         let mut new_message_count = 0;
+         let start_time = std::time::Instant::now();
+ 
+-        // Show initial messages if requested
+-        if initial_messages > 0 {
++        // Always fetch current room state to pre-populate seen_messages,
++        // so that the first subscription update (which may be a full state)
++        // doesn't dump all existing messages as "new".
++        {
+             let room_state = self.get_room(room_owner_key, false).await?;
+-
+-            // Use display_messages() to filter out action/deleted messages (matches `message list`)
+             let all_msgs: Vec<_> = room_state.recent_messages.display_messages().collect();
+-            let start = all_msgs.len().saturating_sub(initial_messages);
+ 
+-            for msg in &all_msgs[start..] {
++            // Show the last N messages if requested
++            let display_start = if initial_messages > 0 {
++                all_msgs.len().saturating_sub(initial_messages)
++            } else {
++                all_msgs.len() // display nothing, but still mark all as seen
++            };
++
++            for (i, msg) in all_msgs.iter().enumerate() {
+                 let msg_id = format!("{:?}:{:?}", msg.message.author, msg.message.time);
+                 seen_messages.insert(msg_id);
+-                Self::output_message(&room_state, msg, room_owner_key, &format)?;
++                if i >= display_start {
++                    Self::output_message(&room_state, msg, room_owner_key, &format)?;
++                }
+             }
+         }
+ 
+@@ -2363,9 +2371,9 @@ impl ApiClient {
+                 .await
+                 .map_err(|e| anyhow!("Failed to send SUBSCRIBE request: {}", e))?;
+ 
+-            // Wait for subscription response
++            // Wait for subscription response (30s to accommodate slow gateways)
+             let response = match tokio::time::timeout(
+-                std::time::Duration::from_secs(10),
++                std::time::Duration::from_secs(30),
+                 web_api.recv(),
+             )
+             .await
+-- 
+2.53.0
+

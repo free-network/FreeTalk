@@ -1,0 +1,157 @@
+From 09878fb07332faa0621f525c33eb2857e8c82d4a Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Fri, 6 Mar 2026 14:20:38 -0600
+Subject: [PATCH 29/69] fix(ui): use execCommand fallback for clipboard copy in
+ sandboxed iframe
+
+The Freenet gateway iframe sandbox doesn't include allow-clipboard-write,
+so navigator.clipboard.write_text() fails and freezes the UI. Replace all
+4 clipboard usages with a shared copy_to_clipboard() utility that uses
+document.execCommand('copy') via a temporary textarea, which works in
+sandboxed iframes.
+
+Fixes #135 (third bullet - copy buttons lock up interface)
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../conversation/not_member_notification.rs   | 11 ++------
+ ui/src/components/members.rs                  |  5 +---
+ .../components/members/invite_member_modal.rs | 25 +++++--------------
+ ui/src/util.rs                                | 24 ++++++++++++++++++
+ 4 files changed, 33 insertions(+), 32 deletions(-)
+
+diff --git a/ui/src/components/conversation/not_member_notification.rs b/ui/src/components/conversation/not_member_notification.rs
+index 2df09324..c3fcd737 100644
+--- a/ui/src/components/conversation/not_member_notification.rs
++++ b/ui/src/components/conversation/not_member_notification.rs
+@@ -3,8 +3,6 @@ use dioxus_free_icons::icons::fa_solid_icons::FaCopy;
+ use dioxus_free_icons::Icon;
+ use ed25519_dalek::VerifyingKey;
+ use river_core::crypto_values::CryptoValue;
+-use wasm_bindgen::JsCast;
+-use web_sys;
+ 
+ #[component]
+ pub fn NotMemberNotification(user_verifying_key: VerifyingKey) -> Element {
+@@ -13,13 +11,8 @@ pub fn NotMemberNotification(user_verifying_key: VerifyingKey) -> Element {
+     let mut button_text = use_signal(|| "Copy".to_string());
+ 
+     let copy_to_clipboard = move |_| {
+-        if let Some(window) = web_sys::window() {
+-            if let Ok(navigator) = window.navigator().dyn_into::<web_sys::Navigator>() {
+-                let clipboard = navigator.clipboard();
+-                let _ = clipboard.write_text(&encoded_key.read());
+-                button_text.set("Copied!".to_string());
+-            }
+-        }
++        crate::util::copy_to_clipboard(&encoded_key.read());
++        button_text.set("Copied!".to_string());
+     };
+ 
+     rsx! {
+diff --git a/ui/src/components/members.rs b/ui/src/components/members.rs
+index 97cff34d..ad002308 100644
+--- a/ui/src/components/members.rs
++++ b/ui/src/components/members.rs
+@@ -383,10 +383,7 @@ fn ExportIdentityModal(is_active: Signal<bool>) -> Element {
+ 
+     let handle_copy = move |_| {
+         let text = token_text.read().clone();
+-        if let Some(window) = web_sys::window() {
+-            let clipboard = window.navigator().clipboard();
+-            let _ = clipboard.write_text(&text);
+-        }
++        crate::util::copy_to_clipboard(&text);
+     };
+ 
+     rsx! {
+diff --git a/ui/src/components/members/invite_member_modal.rs b/ui/src/components/members/invite_member_modal.rs
+index 58708d76..bcec2149 100644
+--- a/ui/src/components/members/invite_member_modal.rs
++++ b/ui/src/components/members/invite_member_modal.rs
+@@ -8,7 +8,6 @@ use dioxus_free_icons::Icon;
+ use ed25519_dalek::SigningKey;
+ use river_core::room_state::member::{AuthorizedMember, Member};
+ use std::rc::Rc;
+-use wasm_bindgen::JsCast;
+ 
+ /// Fallback URL for non-browser environments or when window.location is unavailable
+ const FALLBACK_BASE_URL: &str =
+@@ -223,28 +222,16 @@ fn InvitationContent(
+     let invitation_url_for_clipboard = invitation_url.clone();
+ 
+     let copy_message_to_clipboard = move |_| {
+-        if let Some(window) = web_sys::window() {
+-            if let Ok(navigator) = window.navigator().dyn_into::<web_sys::Navigator>() {
+-                let clipboard = navigator.clipboard();
+-                let _ = clipboard.write_text(&invitation_text_for_clipboard);
+-                copy_msg_text.set("Copied!".to_string());
+-                // Reset the other button
+-                copy_link_text.set("Copy Link".to_string());
+-            }
+-        }
++        crate::util::copy_to_clipboard(&invitation_text_for_clipboard);
++        copy_msg_text.set("Copied!".to_string());
++        copy_link_text.set("Copy Link".to_string());
+     };
+ 
+     let copy_link_to_clipboard = {
+         move |_| {
+-            if let Some(window) = web_sys::window() {
+-                if let Ok(navigator) = window.navigator().dyn_into::<web_sys::Navigator>() {
+-                    let clipboard = navigator.clipboard();
+-                    let _ = clipboard.write_text(&invitation_url_for_clipboard);
+-                    copy_link_text.set("Copied!".to_string());
+-                    // Reset the other button
+-                    copy_msg_text.set("Copy Message".to_string());
+-                }
+-            }
++            crate::util::copy_to_clipboard(&invitation_url_for_clipboard);
++            copy_link_text.set("Copied!".to_string());
++            copy_msg_text.set("Copy Message".to_string());
+         }
+     };
+ 
+diff --git a/ui/src/util.rs b/ui/src/util.rs
+index 1ef21e17..0acb2170 100644
+--- a/ui/src/util.rs
++++ b/ui/src/util.rs
+@@ -30,11 +30,35 @@ export function format_full_datetime_local(timestamp_ms) {
+         hour12: false
+     });
+ }
++export function js_copy_to_clipboard(text) {
++    // execCommand('copy') works in sandboxed iframes without allow-clipboard-write
++    const ta = document.createElement('textarea');
++    ta.value = text;
++    ta.style.position = 'fixed';
++    ta.style.left = '-9999px';
++    document.body.appendChild(ta);
++    ta.select();
++    document.execCommand('copy');
++    document.body.removeChild(ta);
++}
+ ")]
+ extern "C" {
+     fn get_current_time() -> f64;
+     fn format_time_local(timestamp_ms: f64) -> String;
+     fn format_full_datetime_local(timestamp_ms: f64) -> String;
++    fn js_copy_to_clipboard(text: &str);
++}
++
++/// Copy text to clipboard. Works in sandboxed iframes where the Clipboard API is blocked.
++pub fn copy_to_clipboard(text: &str) {
++    #[cfg(target_arch = "wasm32")]
++    {
++        js_copy_to_clipboard(text);
++    }
++    #[cfg(not(target_arch = "wasm32"))]
++    {
++        let _ = text;
++    }
+ }
+ 
+ pub fn get_current_system_time() -> SystemTime {
+-- 
+2.53.0
+

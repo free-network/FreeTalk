@@ -1,0 +1,109 @@
+From 6d6b73e46bb343bf13bb373a5838e105dd7684a4 Mon Sep 17 00:00:00 2001
+From: "nacho.d.g" <iduartgomez@gmail.com>
+Date: Thu, 5 Mar 2026 23:27:02 +0100
+Subject: [PATCH 22/69] fix(ui): use locally cached contract code instead of
+ fetching from network (#132)
+
+Relay nodes that receive state via UPDATE broadcasts don't have the
+WASM code (only PUT provides it), causing GET requests with
+return_contract_code=true to fail ~45% of the time. Since the room
+contract WASM is already compiled into the binary via include_bytes!,
+we can use return_contract_code=false to request only the state.
+
+On the first attempt, return_contract_code is set to false. If the
+GET times out and the invitation is retried (retry_count >= 1), falls
+back to return_contract_code=true in case there's a code mismatch.
+
+https://claude.ai/code/session_013QNAEZJEoEWNJR7Wu6vvJH
+
+Co-authored-by: Claude <noreply@anthropic.com>
+---
+ .../app/freenet_api/room_synchronizer.rs      | 29 ++++++++++++++++---
+ .../room_list/receive_invitation_modal.rs     |  1 +
+ ui/src/invites.rs                             |  4 +++
+ 3 files changed, 30 insertions(+), 4 deletions(-)
+
+diff --git a/ui/src/components/app/freenet_api/room_synchronizer.rs b/ui/src/components/app/freenet_api/room_synchronizer.rs
+index 90a4c567..4990778f 100644
+--- a/ui/src/components/app/freenet_api/room_synchronizer.rs
++++ b/ui/src/components/app/freenet_api/room_synchronizer.rs
+@@ -222,6 +222,7 @@ impl RoomSynchronizer {
+                     if let Some(join) = pending.map.get_mut(&vk) {
+                         join.status = PendingRoomStatus::PendingSubscription;
+                         join.subscribing_since = None;
++                        join.retry_count += 1;
+                     }
+                 });
+                 SYNC_INFO
+@@ -275,17 +276,37 @@ impl RoomSynchronizer {
+                 });
+ 
+                 // Update pending invite status to prevent re-processing on concurrent calls
+-                PENDING_INVITES.with_mut(|pending| {
++                // and read the retry count to decide whether to request contract code
++                let retry_count = PENDING_INVITES.with_mut(|pending| {
+                     if let Some(join) = pending.map.get_mut(&owner_vk) {
+                         join.status = PendingRoomStatus::Subscribing;
+                         join.subscribing_since = Some(now_ms());
++                        join.retry_count
++                    } else {
++                        0
+                     }
+                 });
+ 
+-                // Create a get request without subscription (will subscribe after response)
++                // Use locally bundled contract code instead of fetching from the network.
++                // Relay nodes that received state via UPDATE broadcasts don't have the
++                // WASM code (only PUT provides it), so fetch_contract=true fails ~45% of
++                // the time. Since the WASM is already compiled into the binary via
++                // ROOM_CONTRACT_WASM, we only need the state.
++                //
++                // Fallback: if the first attempt timed out (retry_count >= 1), request
++                // the contract code from the network in case there's a version mismatch.
++                let request_code = retry_count >= 1;
++                if request_code {
++                    warn!(
++                        "Retry #{} for {:?}, falling back to return_contract_code=true",
++                        retry_count,
++                        MemberId::from(owner_vk)
++                    );
++                }
++
+                 let get_request = ContractRequest::Get {
+-                    key: *contract_key.id(),    // GET uses ContractInstanceId
+-                    return_contract_code: true, // I think this should be false but apparently that was triggering a bug
++                    key: *contract_key.id(),
++                    return_contract_code: request_code,
+                     subscribe: false,
+                     blocking_subscribe: false,
+                 };
+diff --git a/ui/src/components/room_list/receive_invitation_modal.rs b/ui/src/components/room_list/receive_invitation_modal.rs
+index f63e36b1..321f5c67 100644
+--- a/ui/src/components/room_list/receive_invitation_modal.rs
++++ b/ui/src/components/room_list/receive_invitation_modal.rs
+@@ -472,6 +472,7 @@ fn accept_invitation(inv: Invitation, nickname: String) {
+                 preferred_nickname: nickname.clone(),
+                 status: PendingRoomStatus::PendingSubscription,
+                 subscribing_since: None,
++                retry_count: 0,
+             },
+         );
+     });
+diff --git a/ui/src/invites.rs b/ui/src/invites.rs
+index c85205c4..ad39dc8a 100644
+--- a/ui/src/invites.rs
++++ b/ui/src/invites.rs
+@@ -48,6 +48,10 @@ pub struct PendingRoomJoin {
+     /// Timestamp (ms since epoch) when the status moved to `Subscribing`,
+     /// used to detect stuck invitations that need retry.
+     pub subscribing_since: Option<f64>,
++    /// Number of times this invitation GET has been retried after timeout.
++    /// On retry_count >= 1, falls back to requesting contract code from the
++    /// network in case the local copy is stale.
++    pub retry_count: u32,
+ }
+ 
+ /// Status of a pending room join request
+-- 
+2.53.0
+

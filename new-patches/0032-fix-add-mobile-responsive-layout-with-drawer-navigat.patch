@@ -1,0 +1,239 @@
+From 6a7601c0a2e4d7861cf1bbf6710b2a1a924fa29b Mon Sep 17 00:00:00 2001
+From: Ignacio Duart <iduartgomez@gmail.com>
+Date: Sat, 7 Mar 2026 09:39:49 +0100
+Subject: [PATCH 32/69] fix: add mobile-responsive layout with drawer
+ navigation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The three-column layout (RoomList + Conversation + MemberList) was
+completely broken on mobile — fixed-width sidebars (w-64 + w-56 = 480px)
+exceeded mobile viewport widths causing overlap.
+
+- Add mobile header bar with hamburger (rooms) and members toggle buttons
+- Sidebars show as full-screen overlays on mobile, hidden by default
+- Use md: breakpoint to preserve desktop 3-column layout unchanged
+- Close rooms drawer automatically when a room is selected
+- Hide logo in sidebar on mobile (shown in mobile header instead)
+- Remove stale CSS media query targeting non-existent class names
+
+Fixes #141
+---
+ ui/assets/main.css             | 20 ++------
+ ui/src/components/app.rs       | 92 ++++++++++++++++++++++++++++++++--
+ ui/src/components/members.rs   |  2 +-
+ ui/src/components/room_list.rs | 10 ++--
+ 4 files changed, 98 insertions(+), 26 deletions(-)
+
+diff --git a/ui/assets/main.css b/ui/assets/main.css
+index 372aa2c1..5bafe65c 100644
+--- a/ui/assets/main.css
++++ b/ui/assets/main.css
+@@ -632,34 +632,22 @@ span[title$="reaction(s)"] {
+     to { opacity: 1; }
+ }
+ 
++/* Mobile welcome message adjustments */
+ @media (max-width: 768px) {
+-    .chat-container {
+-        flex-direction: column;
+-    }
+-    
+-    .room-list, .member-list {
+-        width: 100%;
+-        max-height: 200px;
+-    }
+-    
+-    .main-chat {
+-        height: calc(100vh - 400px);
+-    }
+-    
+     .welcome-message {
+         margin: 10px;
+         padding: 1rem;
+     }
+-    
++
+     .welcome-message img {
+         width: 80px;
+         margin-bottom: 1rem;
+     }
+-    
++
+     .welcome-message h1 {
+         font-size: 1.5rem;
+     }
+-    
++
+     .welcome-message p {
+         font-size: 1rem;
+     }
+diff --git a/ui/src/components/app.rs b/ui/src/components/app.rs
+index 69321122..e341fb3d 100644
+--- a/ui/src/components/app.rs
++++ b/ui/src/components/app.rs
+@@ -22,12 +22,23 @@ use crate::room_data::{CurrentRoom, Rooms};
+ use dioxus::document::{Link, Stylesheet};
+ use dioxus::logger::tracing::{debug, error, info};
+ use dioxus::prelude::*;
++use dioxus_free_icons::icons::fa_solid_icons::{FaBars, FaUsers, FaXmark};
++use dioxus_free_icons::Icon;
+ use ed25519_dalek::VerifyingKey;
+ use freenet_stdlib::client_api::WebApi;
+ use river_core::room_state::member::MemberId;
+ use wasm_bindgen_futures::spawn_local;
+ use web_sys::window;
+ 
++/// Which panel is open as an overlay on mobile. None = conversation only.
++#[derive(Clone, Copy, PartialEq)]
++pub enum MobilePanel {
++    Rooms,
++    Members,
++}
++
++pub static MOBILE_PANEL: GlobalSignal<Option<MobilePanel>> = Global::new(|| None);
++
+ pub static ROOMS: GlobalSignal<Rooms> = Global::new(initial_rooms);
+ pub static CURRENT_ROOM: GlobalSignal<CurrentRoom> =
+     Global::new(|| CurrentRoom { owner_key: None });
+@@ -177,12 +188,83 @@ pub fn App() -> Element {
+         Stylesheet { href: asset!("/assets/styles.css") }
+         Stylesheet { href: asset!("/assets/main.css") }
+ 
+-        // Main chat layout - grid with fixed sidebars and flexible center
+-        div { class: "flex h-screen bg-bg overflow-hidden",
+-            RoomList {}
+-            Conversation {}
+-            MemberList {}
++        // Outer wrapper: flex-col for mobile header + main content
++        div { class: "flex flex-col h-screen relative",
++
++        // Mobile header bar (hidden on md+)
++        div { class: "md:hidden flex items-center justify-between px-3 py-2 bg-panel border-b border-border flex-shrink-0",
++            button {
++                class: "p-2 rounded-lg text-text-muted hover:text-accent hover:bg-surface transition-colors",
++                onclick: move |_| {
++                    let current = *MOBILE_PANEL.read();
++                    *MOBILE_PANEL.write() = match current {
++                        Some(MobilePanel::Rooms) => None,
++                        _ => Some(MobilePanel::Rooms),
++                    };
++                },
++                if *MOBILE_PANEL.read() == Some(MobilePanel::Rooms) {
++                    Icon { icon: FaXmark, width: 20, height: 20 }
++                } else {
++                    Icon { icon: FaBars, width: 20, height: 20 }
++                }
++            }
++            img {
++                class: "w-8 h-8",
++                src: asset!("/assets/river_logo.svg"),
++                alt: "River"
++            }
++            button {
++                class: "p-2 rounded-lg text-text-muted hover:text-accent hover:bg-surface transition-colors",
++                onclick: move |_| {
++                    let current = *MOBILE_PANEL.read();
++                    *MOBILE_PANEL.write() = match current {
++                        Some(MobilePanel::Members) => None,
++                        _ => Some(MobilePanel::Members),
++                    };
++                },
++                if *MOBILE_PANEL.read() == Some(MobilePanel::Members) {
++                    Icon { icon: FaXmark, width: 20, height: 20 }
++                } else {
++                    Icon { icon: FaUsers, width: 20, height: 20 }
++                }
++            }
+         }
++
++        // Main chat layout
++        div { class: "flex flex-1 min-h-0 bg-bg overflow-hidden",
++            // Desktop: always visible sidebar. Mobile: overlay when active.
++            div {
++                class: {
++                    let mobile_rooms = *MOBILE_PANEL.read() == Some(MobilePanel::Rooms);
++                    if mobile_rooms {
++                        "absolute inset-0 top-[49px] z-30 md:relative md:inset-auto md:top-auto md:z-auto md:block"
++                    } else {
++                        "hidden md:block"
++                    }
++                },
++                RoomList {}
++            }
++
++            // Conversation: always visible
++            div { class: "flex-1 flex flex-col min-w-0",
++                Conversation {}
++            }
++
++            // Desktop: always visible sidebar. Mobile: overlay when active.
++            div {
++                class: {
++                    let mobile_members = *MOBILE_PANEL.read() == Some(MobilePanel::Members);
++                    if mobile_members {
++                        "absolute inset-0 top-[49px] z-30 md:relative md:inset-auto md:top-auto md:z-auto md:block"
++                    } else {
++                        "hidden md:block"
++                    }
++                },
++                MemberList {}
++            }
++        }
++
++        } // close outer flex-col wrapper
+         EditRoomModal {}
+         MemberInfoModal {}
+         CreateRoomModal {}
+diff --git a/ui/src/components/members.rs b/ui/src/components/members.rs
+index 958683c2..e2f986c7 100644
+--- a/ui/src/components/members.rs
++++ b/ui/src/components/members.rs
+@@ -243,7 +243,7 @@ pub fn MemberList() -> Element {
+     }
+ 
+     rsx! {
+-        aside { class: "w-56 flex-shrink-0 bg-panel border-l border-border flex flex-col",
++        aside { class: "w-full h-full md:w-56 flex-shrink-0 bg-panel border-l border-border flex flex-col",
+             // Header
+             div { class: "px-4 py-3 border-b border-border flex-shrink-0",
+                 h2 { class: "text-sm font-semibold text-text-muted uppercase tracking-wide flex items-center gap-2",
+diff --git a/ui/src/components/room_list.rs b/ui/src/components/room_list.rs
+index 738ca584..d874d6ee 100644
+--- a/ui/src/components/room_list.rs
++++ b/ui/src/components/room_list.rs
+@@ -5,7 +5,7 @@ pub(crate) mod room_name_field;
+ 
+ use crate::components::app::chat_delegate::save_rooms_to_delegate;
+ use crate::components::app::document_title::mark_current_room_as_read;
+-use crate::components::app::{CREATE_ROOM_MODAL, CURRENT_ROOM, ROOMS};
++use crate::components::app::{CREATE_ROOM_MODAL, CURRENT_ROOM, MOBILE_PANEL, ROOMS};
+ use crate::room_data::CurrentRoom;
+ use crate::util::ecies::unseal_bytes_with_secrets;
+ use dioxus::logger::tracing::error;
+@@ -84,9 +84,9 @@ pub fn RoomList() -> Element {
+     });
+ 
+     rsx! {
+-        aside { class: "w-64 flex-shrink-0 bg-panel border-r border-border flex flex-col overflow-y-auto",
+-            // Logo (explicit h-24 to match w-24 since SVG is square, prevents CLS)
+-            div { class: "p-4 flex justify-center",
++        aside { class: "w-full h-full md:w-64 flex-shrink-0 bg-panel border-r border-border flex flex-col overflow-y-auto",
++            // Logo (hidden on mobile — shown in mobile header instead)
++            div { class: "p-4 hidden md:flex justify-center",
+                 img {
+                     class: "w-24 h-24",
+                     src: asset!("/assets/river_logo.svg"),
+@@ -130,6 +130,8 @@ pub fn RoomList() -> Element {
+                                 onclick: move |_| {
+                                     *CURRENT_ROOM.write() = CurrentRoom { owner_key: Some(room_key) };
+                                     mark_current_room_as_read();
++                                    // Close mobile drawer
++                                    *MOBILE_PANEL.write() = None;
+                                     spawn(async move {
+                                         if let Err(e) = save_rooms_to_delegate().await {
+                                             error!("Failed to save current room selection: {}", e);
+-- 
+2.53.0
+

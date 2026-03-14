@@ -26,6 +26,7 @@ use freenet_stdlib::{
     },
 };
 use river_core::board_state::member::MemberId;
+use river_core::board_state::member_info::MemberInfoV1;
 use river_core::board_state::message::{BoardMessageBody, MessageId};
 use river_core::board_state::privacy::PrivacyMode;
 use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1, ChatBoardStateV1Delta};
@@ -70,7 +71,6 @@ impl BoardSynchronizer {
 
                 // Capture data for notifications before we modify board_data
                 let self_member_id: MemberId = board_data.self_sk.verifying_key().into();
-                let member_info = board_data.board_state.member_info.clone();
                 let board_secrets = board_data.secrets.clone();
 
                 // Clone the state to avoid borrowing issues
@@ -139,11 +139,13 @@ impl BoardSynchronizer {
                             let msg_ids: Vec<_> = messages.iter().map(|m| m.id()).collect();
                             record_receive_times(&msg_ids);
 
+                            // Use updated member_info (after delta applied) so new sender nicknames are included
+                            let updated_member_info = board_data.board_state.member_info.clone();
                             notify_new_messages(
                                 owner_vk,
                                 &messages,
                                 self_member_id,
-                                &member_info,
+                                &updated_member_info,
                                 &board_secrets,
                             );
 
@@ -610,6 +612,8 @@ impl BoardSynchronizer {
 
         // Will be populated inside with_mut if new messages are detected
         let mut pending_notification: Option<(Vec<_>, MemberId)> = None;
+        // Updated member_info captured after state merge (so new sender nicknames are included)
+        let mut updated_member_info: Option<MemberInfoV1> = None;
         let board_owner_copy = *board_owner_vk;
 
         BOARDS.with_mut(|boards| {
@@ -740,6 +744,8 @@ impl BoardSynchronizer {
                                 // true arrival moment.
 
                                 // Store for notification after with_mut completes
+                                // Capture member_info from the UPDATED state so new sender nicknames are included
+                                updated_member_info = Some(board_data.board_state.member_info.clone());
                                 pending_notification = Some((new_messages, self_id));
                             } else {
                                 info!(
@@ -783,9 +789,11 @@ impl BoardSynchronizer {
         update_document_title();
 
         // Now safe to call notify_new_messages (it calls boards.read() internally)
-        if let (Some((new_messages, self_id)), Some(member_info)) =
-            (pending_notification, member_info_clone)
-        {
+        // Use updated_member_info (captured after state merge) so new sender nicknames are included
+        if let (Some((new_messages, self_id)), Some(member_info)) = (
+            pending_notification,
+            updated_member_info.or(member_info_clone),
+        ) {
             notify_new_messages(
                 &board_owner_copy,
                 &new_messages,

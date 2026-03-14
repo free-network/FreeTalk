@@ -1,0 +1,159 @@
+From 90ebbaac2e63f18390c298638053070c1a158bc4 Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Fri, 6 Mar 2026 19:48:44 -0600
+Subject: [PATCH 31/69] fix(ui): use updated member_info for notifications so
+ sender name is correct
+
+The notification system was capturing member_info BEFORE applying the
+state delta, so when a new member sent a message (with their member_info
+included in the same delta), the notification would show "Someone"
+instead of their actual nickname. Fix both code paths (apply_delta and
+update_room_state) to use member_info from the updated state.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ ui/assets/tailwind.css                        | 24 +++++++++++++++++++
+ ui/src/components/app.rs                      |  2 +-
+ .../app/freenet_api/room_synchronizer.rs      | 18 ++++++++++----
+ .../components/conversation/message_input.rs  |  9 +++++--
+ 4 files changed, 45 insertions(+), 8 deletions(-)
+
+diff --git a/ui/assets/tailwind.css b/ui/assets/tailwind.css
+index 7f4d82fc..956b9793 100644
+--- a/ui/assets/tailwind.css
++++ b/ui/assets/tailwind.css
+@@ -144,6 +144,30 @@ html, body {
+   color: rgba(0, 0, 0, 0.8);
+ }
+ 
++/* iOS Safari viewport and touch fixes */
++
++/* Use fixed positioning for the app root to prevent iOS Safari's
++   virtual keyboard from desynchronizing touch coordinates.
++   When iOS shows the keyboard, it visually scrolls the page but
++   100vh doesn't change, causing overflow-hidden containers to have
++   "dead" touch zones. Fixed positioning anchors to the visual viewport. */
++.app-root {
++  position: fixed;
++  inset: 0;
++}
++
++/* Disable 300ms tap delay on all interactive elements.
++   iOS Safari delays click events to detect double-tap-to-zoom;
++   touch-action: manipulation disables this for faster response. */
++button, a, input, textarea, select, [role="button"] {
++  touch-action: manipulation;
++}
++
++/* Ensure smooth momentum scrolling on iOS for scrollable containers */
++.overflow-y-auto, .overflow-auto {
++  -webkit-overflow-scrolling: touch;
++}
++
+ /* Scrollbar styling */
+ ::-webkit-scrollbar {
+   width: 8px;
+diff --git a/ui/src/components/app.rs b/ui/src/components/app.rs
+index 69321122..906cf59e 100644
+--- a/ui/src/components/app.rs
++++ b/ui/src/components/app.rs
+@@ -178,7 +178,7 @@ pub fn App() -> Element {
+         Stylesheet { href: asset!("/assets/main.css") }
+ 
+         // Main chat layout - grid with fixed sidebars and flexible center
+-        div { class: "flex h-screen bg-bg overflow-hidden",
++        div { class: "flex bg-bg overflow-hidden app-root",
+             RoomList {}
+             Conversation {}
+             MemberList {}
+diff --git a/ui/src/components/app/freenet_api/room_synchronizer.rs b/ui/src/components/app/freenet_api/room_synchronizer.rs
+index 4990778f..d2d860ba 100644
+--- a/ui/src/components/app/freenet_api/room_synchronizer.rs
++++ b/ui/src/components/app/freenet_api/room_synchronizer.rs
+@@ -28,6 +28,7 @@ use freenet_stdlib::{
+     },
+ };
+ use river_core::room_state::member::MemberId;
++use river_core::room_state::member_info::MemberInfoV1;
+ use river_core::room_state::message::{MessageId, RoomMessageBody};
+ use river_core::room_state::privacy::PrivacyMode;
+ use river_core::room_state::{ChatRoomParametersV1, ChatRoomStateV1, ChatRoomStateV1Delta};
+@@ -72,7 +73,6 @@ impl RoomSynchronizer {
+ 
+                 // Capture data for notifications before we modify room_data
+                 let self_member_id: MemberId = room_data.self_sk.verifying_key().into();
+-                let member_info = room_data.room_state.member_info.clone();
+                 let room_secrets = room_data.secrets.clone();
+ 
+                 // Clone the state to avoid borrowing issues
+@@ -141,11 +141,13 @@ impl RoomSynchronizer {
+                             let msg_ids: Vec<_> = messages.iter().map(|m| m.id()).collect();
+                             record_receive_times(&msg_ids);
+ 
++                            // Use updated member_info (after delta applied) so new sender nicknames are included
++                            let updated_member_info = room_data.room_state.member_info.clone();
+                             notify_new_messages(
+                                 owner_vk,
+                                 &messages,
+                                 self_member_id,
+-                                &member_info,
++                                &updated_member_info,
+                                 &room_secrets,
+                             );
+ 
+@@ -651,6 +653,8 @@ impl RoomSynchronizer {
+ 
+         // Will be populated inside with_mut if new messages are detected
+         let mut pending_notification: Option<(Vec<_>, MemberId)> = None;
++        // Updated member_info captured after state merge (so new sender nicknames are included)
++        let mut updated_member_info: Option<MemberInfoV1> = None;
+         let room_owner_copy = *room_owner_vk;
+ 
+         ROOMS.with_mut(|rooms| {
+@@ -785,6 +789,8 @@ impl RoomSynchronizer {
+                                 }
+ 
+                                 // Store for notification after with_mut completes
++                                // Capture member_info from the UPDATED state so new sender nicknames are included
++                                updated_member_info = Some(room_data.room_state.member_info.clone());
+                                 pending_notification = Some((new_messages, self_id));
+                             } else {
+                                 info!(
+@@ -828,9 +834,11 @@ impl RoomSynchronizer {
+         update_document_title();
+ 
+         // Now safe to call notify_new_messages (it calls ROOMS.read() internally)
+-        if let (Some((new_messages, self_id)), Some(member_info)) =
+-            (pending_notification, member_info_clone)
+-        {
++        // Use updated_member_info (captured after state merge) so new sender nicknames are included
++        if let (Some((new_messages, self_id)), Some(member_info)) = (
++            pending_notification,
++            updated_member_info.or(member_info_clone),
++        ) {
+             notify_new_messages(
+                 &room_owner_copy,
+                 &new_messages,
+diff --git a/ui/src/components/conversation/message_input.rs b/ui/src/components/conversation/message_input.rs
+index ea09c57e..28a1e9e1 100644
+--- a/ui/src/components/conversation/message_input.rs
++++ b/ui/src/components/conversation/message_input.rs
+@@ -145,8 +145,13 @@ pub fn MessageInput(
+                         }
+                     }
+                     button {
+-                        r#type: "submit",
+-                        class: "px-5 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
++                        r#type: "button",
++                        class: "px-5 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
++                        // Use explicit onclick instead of form submit — on iOS Safari,
++                        // tapping a submit button while the keyboard is visible causes
++                        // the keyboard to dismiss first, which triggers a viewport resize
++                        // that cancels the click→submit event chain.
++                        onclick: move |_| send_message(),
+                         "Send"
+                     }
+                 }
+-- 
+2.53.0
+

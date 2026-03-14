@@ -1,0 +1,26 @@
+From d7d3add2444feffde8e1eb56b14aad02514b0f0e Mon Sep 17 00:00:00 2001
+From: Ignacio Duart <iduartgomez@gmail.com>
+Date: Thu, 12 Mar 2026 17:44:47 +0100
+Subject: [PATCH 57/69] build: use published freenet-stdlib 0.3.1 instead of
+ local path dep
+
+---
+ delegates/chat-delegate/Cargo.toml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/delegates/chat-delegate/Cargo.toml b/delegates/chat-delegate/Cargo.toml
+index b7269d74..28b6548a 100644
+--- a/delegates/chat-delegate/Cargo.toml
++++ b/delegates/chat-delegate/Cargo.toml
+@@ -9,7 +9,7 @@ freenet-main-delegate = []
+ 
+ [dependencies]
+ ciborium.workspace = true
+-freenet-stdlib = { path = "/Volumes/PRO-G40/projects/freenet-stdlib/rust", features = ["contract"] }
++freenet-stdlib = { version = "0.3.1", features = ["contract"] }
+ bs58 = { workspace = true }
+ serde = { workspace = true, features = ["derive"] }
+ river-core.workspace = true
+-- 
+2.53.0
+

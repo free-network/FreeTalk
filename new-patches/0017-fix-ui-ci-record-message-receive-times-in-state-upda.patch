@@ -1,0 +1,283 @@
+From 47f5d577ca21d0c93c0d85f89aca9bef07a2982a Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Tue, 3 Mar 2026 22:59:56 -0600
+Subject: [PATCH 17/69] fix(ui,ci): record message receive times in state
+ updates and add delegate migration CI (#125)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+* fix(ui,ci): record message receive times in state updates and add delegate migration CI
+
+Message receive times were only recorded in apply_delta (subscription deltas),
+but River subscribes with summary: None, so the node always sends UpdateData::State.
+This meant receive times were never recorded and tooltip delays never showed.
+
+Also fixes CI red (missing `gateway` field in NetworkArgs) and adds a CI workflow
+to detect delegate WASM changes without corresponding LEGACY_DELEGATES migration entries.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* chore: simplify CI and comment in PR #125
+
+- Cache b3sum binary and skip reinstall when cached in delegate migration CI
+- Condense receive-times comment to match style of nearby code
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: address review feedback — skip receive times on initial sync, harden CI
+
+- Only record receive times after initial sync is complete, avoiding
+  false propagation delays for messages that arrived while offline
+- Add cargo clean between base/PR builds to prevent incremental build
+  artifacts from causing false negatives in delegate migration check
+- Strengthen LEGACY_DELEGATES grep to require added lines (not just mentions)
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix(ci): narrow check-wasm-sync trigger to exclude test files
+
+The path trigger `contracts/room-contract/**` was matching test file
+changes (e.g., test_utils.rs), causing false positives. Narrowed to
+`contracts/room-contract/src/**` and `Cargo.toml` which are the only
+paths that affect the compiled WASM.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .github/workflows/build.yml                   |  6 ++
+ .github/workflows/check-cli-wasm.yml          |  8 +-
+ .../workflows/check-delegate-migration.yml    | 83 +++++++++++++++++++
+ AGENTS.md                                     | 17 ++++
+ .../room-contract/tests/common/test_utils.rs  |  1 +
+ .../app/freenet_api/room_synchronizer.rs      | 18 ++--
+ 6 files changed, 124 insertions(+), 9 deletions(-)
+ create mode 100644 .github/workflows/check-delegate-migration.yml
+
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index 56774854..b027a1c5 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -80,6 +80,12 @@ jobs:
+         CARGO_TARGET_DIR: ${{ github.workspace }}/target
+       run: cargo test --package room-contract
+ 
++    - name: Test delegate key
++      env:
++        RUST_MIN_STACK: 8388608
++        CARGO_TARGET_DIR: ${{ github.workspace }}/target
++      run: cargo test -p river-core --test delegate_key_test
++
+   claude-ci-analysis:
+     name: Claude CI Analysis
+ 
+diff --git a/.github/workflows/check-cli-wasm.yml b/.github/workflows/check-cli-wasm.yml
+index 0cc3d623..7db4580f 100644
+--- a/.github/workflows/check-cli-wasm.yml
++++ b/.github/workflows/check-cli-wasm.yml
+@@ -3,14 +3,16 @@ name: Check CLI WASM Sync
+ on:
+   pull_request:
+     paths:
+-      - 'contracts/room-contract/**'
++      - 'contracts/room-contract/src/**'
++      - 'contracts/room-contract/Cargo.toml'
+       - 'ui/public/contracts/room_contract.wasm'
+       - 'cli/contracts/room_contract.wasm'
+       - 'cli/Cargo.toml'
+   push:
+     branches: [main]
+     paths:
+-      - 'contracts/room-contract/**'
++      - 'contracts/room-contract/src/**'
++      - 'contracts/room-contract/Cargo.toml'
+       - 'ui/public/contracts/room_contract.wasm'
+       - 'cli/contracts/room_contract.wasm'
+       - 'cli/Cargo.toml'
+@@ -36,7 +38,7 @@ jobs:
+         run: |
+           # Check if WASM-related files changed in this PR/push
+           WASM_CHANGED=false
+-          if git diff HEAD~1 --name-only 2>/dev/null | grep -qE '(contracts/room-contract/|ui/public/contracts/room_contract\.wasm|cli/contracts/room_contract\.wasm)'; then
++          if git diff HEAD~1 --name-only 2>/dev/null | grep -qE '(contracts/room-contract/src/|contracts/room-contract/Cargo\.toml|ui/public/contracts/room_contract\.wasm|cli/contracts/room_contract\.wasm)'; then
+             WASM_CHANGED=true
+           fi
+ 
+diff --git a/.github/workflows/check-delegate-migration.yml b/.github/workflows/check-delegate-migration.yml
+new file mode 100644
+index 00000000..1cd56f88
+--- /dev/null
++++ b/.github/workflows/check-delegate-migration.yml
+@@ -0,0 +1,83 @@
++name: Check Delegate Migration
++
++on:
++  pull_request:
++
++env:
++  CARGO_TERM_COLOR: always
++
++jobs:
++  check-delegate-migration:
++    runs-on: freenet-default-runner
++    steps:
++    - uses: actions/checkout@v3
++      with:
++        submodules: recursive
++        fetch-depth: 0
++
++    - name: Install Rust
++      uses: dtolnay/rust-toolchain@stable
++      with:
++        targets: wasm32-unknown-unknown
++
++    - name: Cache cargo
++      uses: actions/cache@v3
++      with:
++        path: |
++          ~/.cargo/registry
++          ~/.cargo/git
++          ~/.cargo/bin/b3sum
++        key: ${{ runner.os }}-cargo-delegate-check-${{ hashFiles('**/Cargo.lock') }}
++        restore-keys: |
++          ${{ runner.os }}-cargo-delegate-check-
++
++    - name: Install b3sum
++      run: command -v b3sum || cargo install b3sum --locked
++
++    - name: Build delegate WASM on base branch
++      run: |
++        git checkout ${{ github.event.pull_request.base.sha }}
++        git submodule update --init --recursive
++        cargo build --release --target wasm32-unknown-unknown -p chat-delegate
++        BASE_HASH=$(b3sum target/wasm32-unknown-unknown/release/chat_delegate.wasm | cut -d' ' -f1)
++        echo "BASE_HASH=$BASE_HASH" >> $GITHUB_ENV
++        echo "Base delegate WASM hash: $BASE_HASH"
++
++    - name: Clean delegate build artifacts
++      run: cargo clean -p chat-delegate --release --target wasm32-unknown-unknown
++
++    - name: Build delegate WASM on PR branch
++      run: |
++        git checkout ${{ github.event.pull_request.head.sha }}
++        git submodule update --init --recursive
++        cargo build --release --target wasm32-unknown-unknown -p chat-delegate
++        PR_HASH=$(b3sum target/wasm32-unknown-unknown/release/chat_delegate.wasm | cut -d' ' -f1)
++        echo "PR_HASH=$PR_HASH" >> $GITHUB_ENV
++        echo "PR delegate WASM hash: $PR_HASH"
++
++    - name: Check migration entry
++      run: |
++        if [ "$BASE_HASH" = "$PR_HASH" ]; then
++          echo "Delegate WASM unchanged — no migration needed."
++          exit 0
++        fi
++
++        echo "WARNING: Delegate WASM hash changed!"
++        echo "  Base: $BASE_HASH"
++        echo "  PR:   $PR_HASH"
++        echo ""
++
++        # Check if LEGACY_DELEGATES had lines added (not just commented/removed)
++        if git diff ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} -- delegates/chat-delegate/src/lib.rs | grep -qE '^\+.*LEGACY_DELEGATES|^\+.*code_hash'; then
++          echo "LEGACY_DELEGATES was modified with additions — migration entry likely added."
++          exit 0
++        fi
++
++        echo "ERROR: Delegate WASM changed but LEGACY_DELEGATES in delegates/chat-delegate/src/lib.rs was NOT updated."
++        echo ""
++        echo "When the delegate WASM changes, you MUST add a migration entry to LEGACY_DELEGATES"
++        echo "with the OLD delegate's code_hash. Otherwise, existing users will lose their room"
++        echo "membership and have to be re-invited."
++        echo ""
++        echo "See MEMORY.md 'Delegate & Contract WASM Migration' section for details."
++        exit 1
+diff --git a/AGENTS.md b/AGENTS.md
+index 2a59b4db..e4119cc0 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -128,6 +128,23 @@ curl -s http://127.0.0.1:7509/v1/contract/web/raAqMhMG7KUpXBU2SxgCQ3Vh4PYjttxdSW
+   - `ui/src/util/ecies.rs`, `ui/src/room_data.rs`
+   - `common/tests/private_room_test.rs`
+ 
++## Delegate Migration
++
++When delegate WASM changes (due to code changes in `delegates/chat-delegate/` or `common/`), the delegate key changes. Without a migration entry, existing users lose room membership.
++
++### .reg File Format
++- `byte[0]` = version (`01`)
++- `bytes[1..33]` = code_hash (BLAKE3 of raw WASM)
++- `bytes[33..37]` = params_len (little-endian u32)
++- `bytes[37..]` = params bytes
++- Filename = `base58(delegate_key)`
++
++### Key Facts
++- **DelegateKey equality** checks BOTH `key` AND `code_hash` fields — wrong code_hash means the node can't find the delegate even if key bytes match
++- **WASM on disk is versioned**: `store_delegate()` wraps raw WASM with `to_bytes_versioned()`. Hashing `.wasm` files from the delegates directory gives DIFFERENT results than hashing raw WASM. The code_hash in `.reg` files is authoritative.
++- **Delegate key formula**: `BLAKE3(BLAKE3(wasm) || params)` — both steps use BLAKE3
++- **CI check**: The `check-delegate-migration` workflow detects WASM changes without corresponding `LEGACY_DELEGATES` updates
++
+ ## Testing Notes
+ - Run `cd common && cargo test private_room` when modifying encryption or secret distribution.
+ - Use `cargo make test` before every PR to ensure all components still build and pass tests.
+diff --git a/contracts/room-contract/tests/common/test_utils.rs b/contracts/room-contract/tests/common/test_utils.rs
+index 0fe00e63..26b42d4f 100644
+--- a/contracts/room-contract/tests/common/test_utils.rs
++++ b/contracts/room-contract/tests/common/test_utils.rs
+@@ -75,6 +75,7 @@ pub async fn base_node_test_config_with_rng(
+             is_gateway,
+             skip_load_from_network: true,
+             gateways: Some(gateways),
++            gateway: None,
+             location: Some(location),
+             ignore_protocol_checking: true,
+             address: Some(Ipv4Addr::LOCALHOST.into()),
+diff --git a/ui/src/components/app/freenet_api/room_synchronizer.rs b/ui/src/components/app/freenet_api/room_synchronizer.rs
+index c622e7fc..90a4c567 100644
+--- a/ui/src/components/app/freenet_api/room_synchronizer.rs
++++ b/ui/src/components/app/freenet_api/room_synchronizer.rs
+@@ -6,7 +6,9 @@ use crate::components::app::document_title::{
+     mark_current_room_as_read, update_document_title, DOCUMENT_VISIBLE,
+ };
+ use crate::components::app::freenet_api::constants::INVITATION_TIMEOUT_MS;
+-use crate::components::app::notifications::{mark_initial_sync_complete, notify_new_messages};
++use crate::components::app::notifications::{
++    mark_initial_sync_complete, notify_new_messages, INITIAL_SYNC_COMPLETE,
++};
+ use crate::components::app::receive_times::record_receive_times;
+ use crate::components::app::sync_info::{now_ms, RoomSyncStatus, SYNC_INFO};
+ use crate::components::app::{CURRENT_ROOM, PENDING_INVITES, ROOMS, WEB_API};
+@@ -727,6 +729,9 @@ impl RoomSynchronizer {
+                                 .update_last_synced_state(room_owner_vk, &room_data.room_state);
+                         });
+ 
++                        // Check if initial sync was already complete before this update
++                        let was_sync_complete = INITIAL_SYNC_COMPLETE.read().contains(room_owner_vk);
++
+                         // Mark initial sync complete for this room (enables notifications)
+                         mark_initial_sync_complete(room_owner_vk);
+ 
+@@ -751,11 +756,12 @@ impl RoomSynchronizer {
+                                     MemberId::from(*room_owner_vk)
+                                 );
+ 
+-                                // Note: we do NOT record receive times here. Full state
+-                                // updates don't reflect real-time arrival — we don't know
+-                                // when these messages actually propagated to our node.
+-                                // Only apply_delta (subscription deltas) captures the
+-                                // true arrival moment.
++                                // Only record receive times after initial sync — during
++                                // initial load, messages may have arrived long ago
++                                if was_sync_complete {
++                                    let new_msg_ids: Vec<_> = new_messages.iter().map(|m| m.id()).collect();
++                                    record_receive_times(&new_msg_ids);
++                                }
+ 
+                                 // Store for notification after with_mut completes
+                                 pending_notification = Some((new_messages, self_id));
+-- 
+2.53.0
+

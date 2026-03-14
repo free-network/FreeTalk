@@ -1,0 +1,25 @@
+From de3986bf51e3054e152e6a3bba867538dd6b972a Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Thu, 5 Mar 2026 13:13:40 -0600
+Subject: [PATCH 21/69] chore: bump riverctl to v0.1.40 for crates.io publish
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ cli/Cargo.toml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/cli/Cargo.toml b/cli/Cargo.toml
+index 37e90f92..650f3886 100644
+--- a/cli/Cargo.toml
++++ b/cli/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "riverctl"
+-version = "0.1.39"
++version = "0.1.40"
+ edition = "2021"
+ authors = ["Freenet Project"]
+ description = "Command-line interface for River decentralized chat on Freenet"
+-- 
+2.53.0
+

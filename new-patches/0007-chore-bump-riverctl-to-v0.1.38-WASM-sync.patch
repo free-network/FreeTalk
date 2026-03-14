@@ -1,0 +1,24 @@
+From 9fc0d75795e520fe5c55333ff215df95dd7311b3 Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Fri, 27 Feb 2026 18:19:34 -0600
+Subject: [PATCH 07/69] chore: bump riverctl to v0.1.38 (WASM sync)
+
+---
+ cli/Cargo.toml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/cli/Cargo.toml b/cli/Cargo.toml
+index 5c215316..d0ec2ce5 100644
+--- a/cli/Cargo.toml
++++ b/cli/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "riverctl"
+-version = "0.1.37"
++version = "0.1.38"
+ edition = "2021"
+ authors = ["Freenet Project"]
+ description = "Command-line interface for River decentralized chat on Freenet"
+-- 
+2.53.0
+

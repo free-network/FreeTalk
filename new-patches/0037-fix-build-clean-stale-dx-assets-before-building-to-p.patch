@@ -1,0 +1,48 @@
+From 7d3ba65ed400485f34d15843b80953b10ba1cf2c Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Sat, 7 Mar 2026 10:31:37 -0600
+Subject: [PATCH 37/69] fix(build): clean stale dx assets before building to
+ prevent bloated webapp
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Dioxus dx build accumulates content-hashed .wasm and .js files across
+builds in the assets directory. Since compress-webapp packages everything
+with `tar *`, stale files were included — inflating the archive from
+~800KB to 3.4MB (29 WASM copies instead of 1). Clean the assets
+directory before each build.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ Makefile.toml | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile.toml b/Makefile.toml
+index 9f35aa72..d7e656f2 100644
+--- a/Makefile.toml
++++ b/Makefile.toml
+@@ -144,9 +144,19 @@ script = '''
+ touch ui/src/main.rs
+ '''
+ 
++[tasks.clean-stale-assets]
++private = true
++description = "Remove stale hashed assets from dx output to prevent bloated webapp archives"
++script = '''
++ASSETS_DIR="target/dx/river-ui/${BUILD_PROFILE}/web/public/assets"
++if [ -d "$ASSETS_DIR" ]; then
++    rm -rf "$ASSETS_DIR"
++fi
++'''
++
+ [tasks.build-ui-with-cleanup]
+ description = "Build the Dioxus UI and clean up afterwards"
+-dependencies = ["touch-ui-files", "build-ui", "comment-base-path"]
++dependencies = ["clean-stale-assets", "touch-ui-files", "build-ui", "comment-base-path"]
+ 
+ 
+ [tasks.compress-webapp]
+-- 
+2.53.0
+

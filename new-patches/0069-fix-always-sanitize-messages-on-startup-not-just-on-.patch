@@ -1,0 +1,109 @@
+From c1735851bf269e25b2bc003a4e4cfc9b95ffc096 Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Fri, 13 Mar 2026 15:53:11 -0500
+Subject: [PATCH 69/69] fix: always sanitize messages on startup, not just on
+ stale key overwrite
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Bad messages persisted in delegate storage survive across sessions. The
+previous fix only ran remove_unverifiable_messages when StaleKeyOverwritten
+was returned, but once the key is fixed, subsequent startups return
+AlreadyCurrent and skip sanitization — leaving the bad messages to block
+UPDATEs indefinitely.
+
+Now sanitize on every successful migration regardless of result. This is
+a one-time per-room cost at startup (iterate messages, verify signatures).
+Only triggers mark_needs_sync if messages were actually removed.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../app/freenet_api/response_handler.rs       | 23 +++++++++--------
+ .../response_handler/get_response.rs          | 25 +++++++++++--------
+ 2 files changed, 26 insertions(+), 22 deletions(-)
+
+diff --git a/ui/src/components/app/freenet_api/response_handler.rs b/ui/src/components/app/freenet_api/response_handler.rs
+index 483c886e..15b0c3b2 100644
+--- a/ui/src/components/app/freenet_api/response_handler.rs
++++ b/ui/src/components/app/freenet_api/response_handler.rs
+@@ -398,22 +398,23 @@ impl ResponseHandler {
+                                                                     .await;
+ 
+                                                                         if result != crate::signing::MigrationResult::Failed {
++                                                                            let mut sanitized = false;
+                                                                             ROOMS.with_mut(|rooms| {
+                                                                             if let Some(room_data) = rooms.map.get_mut(&room_key_copy) {
+                                                                                 room_data.key_migrated_to_delegate = true;
+-                                                                                if result == crate::signing::MigrationResult::StaleKeyOverwritten {
+-                                                                                    let params = river_core::room_state::ChatRoomParametersV1 {
+-                                                                                        owner: room_key_copy,
+-                                                                                    };
+-                                                                                    crate::signing::remove_unverifiable_messages(
+-                                                                                        &mut room_data.room_state,
+-                                                                                        &params,
+-                                                                                    );
+-                                                                                }
++                                                                                // Always sanitize — bad messages may persist in delegate
++                                                                                // storage from before the key was fixed
++                                                                                let params = river_core::room_state::ChatRoomParametersV1 {
++                                                                                    owner: room_key_copy,
++                                                                                };
++                                                                                let removed = crate::signing::remove_unverifiable_messages(
++                                                                                    &mut room_data.room_state,
++                                                                                    &params,
++                                                                                );
++                                                                                sanitized = removed > 0;
+                                                                             }
+                                                                         });
+-                                                                            // Ensure sanitized state is saved to delegate and synced
+-                                                                            if result == crate::signing::MigrationResult::StaleKeyOverwritten {
++                                                                            if sanitized {
+                                                                                 crate::components::app::mark_needs_sync(room_key_copy);
+                                                                             }
+                                                                         }
+diff --git a/ui/src/components/app/freenet_api/response_handler/get_response.rs b/ui/src/components/app/freenet_api/response_handler/get_response.rs
+index c9e00b63..4e0fcd3d 100644
+--- a/ui/src/components/app/freenet_api/response_handler/get_response.rs
++++ b/ui/src/components/app/freenet_api/response_handler/get_response.rs
+@@ -351,23 +351,26 @@ pub async fn handle_get_response(
+                     let result =
+                         crate::signing::migrate_signing_key(room_key, &signing_key_clone).await;
+                     if result != crate::signing::MigrationResult::Failed {
++                        let mut sanitized = false;
+                         ROOMS.with_mut(|rooms| {
+                             if let Some(room_data) = rooms.map.get_mut(&owner_vk) {
+                                 room_data.key_migrated_to_delegate = true;
+-                                if result == crate::signing::MigrationResult::StaleKeyOverwritten {
+-                                    let params = river_core::room_state::ChatRoomParametersV1 {
+-                                        owner: owner_vk,
+-                                    };
+-                                    crate::signing::remove_unverifiable_messages(
+-                                        &mut room_data.room_state,
+-                                        &params,
+-                                    );
+-                                }
++                                // Always sanitize — bad messages may persist in delegate
++                                // storage from before the key was fixed
++                                let params = river_core::room_state::ChatRoomParametersV1 {
++                                    owner: owner_vk,
++                                };
++                                let removed = crate::signing::remove_unverifiable_messages(
++                                    &mut room_data.room_state,
++                                    &params,
++                                );
++                                sanitized = removed > 0;
+                                 info!("Signing key migrated to delegate for new room");
+                             }
+                         });
+-                        // Ensure sanitized state is saved to delegate and synced to contract
+-                        crate::components::app::mark_needs_sync(owner_vk);
++                        if sanitized {
++                            crate::components::app::mark_needs_sync(owner_vk);
++                        }
+                     }
+                 });
+ 
+-- 
+2.53.0
+

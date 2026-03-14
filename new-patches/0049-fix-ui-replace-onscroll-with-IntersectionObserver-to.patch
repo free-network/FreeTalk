@@ -1,0 +1,159 @@
+From 67a6086ace32516b96ebd6ba708cd5befe5a9806 Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Sun, 8 Mar 2026 16:36:14 -0500
+Subject: [PATCH 49/69] fix(ui): replace onscroll with IntersectionObserver to
+ eliminate scroll jank (#154)
+
+* fix(ui): replace onscroll with IntersectionObserver to eliminate scroll jank
+
+Replace the per-scroll-event DOM queries (scrollTop/clientHeight/scrollHeight)
+with an IntersectionObserver on a sentinel div at the bottom of the chat
+container. The observer fires only on intersection changes, eliminating
+all JavaScript work during normal scrolling.
+
+Closes #151
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: remove unnecessary relative class from scroll container
+
+Code-first review finding: the `relative` class on the scroll container
+was not needed for IntersectionObserver functionality and was adding
+unnecessary positioning context.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* fix: use rootMargin instead of 100px sentinel, fix misleading comment
+
+Address skeptical review findings:
+- Use rootMargin "0px 0px 100px 0px" with a 1px sentinel instead of a
+  100px-tall div, eliminating extra scrollable whitespace
+- Fix misleading comment about observer cleanup to accurately document
+  that it relies on Conversation being mounted once (CSS show/hide)
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ ui/Cargo.toml                     |  3 ++
+ ui/src/components/conversation.rs | 74 ++++++++++++++++++++++++++-----
+ 2 files changed, 66 insertions(+), 11 deletions(-)
+
+diff --git a/ui/Cargo.toml b/ui/Cargo.toml
+index 2ae37322..ce42d62f 100644
+--- a/ui/Cargo.toml
++++ b/ui/Cargo.toml
+@@ -39,6 +39,9 @@ web-sys = { workspace = true, features = [
+     "CssStyleDeclaration",
+     "HtmlElement",
+     "HtmlTextAreaElement",
++    "IntersectionObserver",
++    "IntersectionObserverEntry",
++    "IntersectionObserverInit",
+     "Navigator",
+     "Notification",
+     "NotificationOptions",
+diff --git a/ui/src/components/conversation.rs b/ui/src/components/conversation.rs
+index 94c91754..fd93da70 100644
+--- a/ui/src/components/conversation.rs
++++ b/ui/src/components/conversation.rs
+@@ -438,6 +438,61 @@ pub fn Conversation() -> Element {
+         None
+     });
+ 
++    // Use IntersectionObserver to track whether the user is near the bottom of the
++    // chat scroll container.  This replaces the old `onscroll` handler that performed
++    // DOM queries (scrollTop / clientHeight / scrollHeight) on every scroll event,
++    // causing visible scroll-bar jank on mobile (issue #151).
++    //
++    // A 1px invisible sentinel div sits at the bottom of the scroll content.
++    // A rootMargin of "0px 0px 100px 0px" expands the detection zone 100px above
++    // the sentinel, so the user is considered "at the bottom" when within 100px of
++    // the end.  The observer fires only on intersection changes, so there is zero
++    // work during normal scrolling.
++    #[cfg(target_arch = "wasm32")]
++    use_effect(move || {
++        use wasm_bindgen::prelude::*;
++
++        let Some(window) = web_sys::window() else {
++            return;
++        };
++        let Some(document) = window.document() else {
++            return;
++        };
++        let Some(sentinel) = document.get_element_by_id("bottom-sentinel") else {
++            return;
++        };
++        let Some(root) = document.get_element_by_id("chat-scroll-container") else {
++            return;
++        };
++
++        let cb = Closure::wrap(Box::new(move |entries: js_sys::Array| {
++            if let Some(entry) = entries
++                .get(0)
++                .dyn_ref::<web_sys::IntersectionObserverEntry>()
++            {
++                is_at_bottom.set(entry.is_intersecting());
++            }
++        }) as Box<dyn FnMut(js_sys::Array)>);
++
++        let options = web_sys::IntersectionObserverInit::new();
++        options.set_root(Some(&root));
++        // Expand detection zone 100px below the viewport edge so the user is
++        // considered "at bottom" when within 100px of the sentinel.
++        options.set_root_margin("0px 0px 100px 0px");
++        options.set_threshold(&JsValue::from_f64(0.0));
++
++        if let Ok(observer) =
++            web_sys::IntersectionObserver::new_with_options(cb.as_ref().unchecked_ref(), &options)
++        {
++            observer.observe(&sentinel);
++            // Leak the closure so it lives as long as the observer.  The Conversation
++            // component is mounted once and never unmounted (hidden/shown via CSS),
++            // so this leak is bounded.  Dioxus use_effect has no cleanup return, so
++            // explicit disconnect is not possible here.
++            cb.forget();
++        }
++    });
++
+     // Trigger scroll to bottom when recent messages change (only if user is near bottom)
+     use_effect(move || {
+         let container = last_chat_element();
+@@ -1173,17 +1228,6 @@ pub fn Conversation() -> Element {
+                 div {
+                     class: "h-full overflow-y-auto",
+                     id: "chat-scroll-container",
+-                    onscroll: move |_| {
+-                        if let Some(window) = web_sys::window() {
+-                            if let Some(doc) = window.document() {
+-                                if let Some(el) = doc.get_element_by_id("chat-scroll-container") {
+-                                    let at_bottom = el.scroll_top() + el.client_height()
+-                                        >= el.scroll_height() - 100;
+-                                    is_at_bottom.set(at_bottom);
+-                                }
+-                            }
+-                        }
+-                    },
+                     div { class: "max-w-4xl mx-auto px-4 py-4",
+                     {
+                         // Use memoized message groups to avoid expensive re-computation on keystrokes
+@@ -1252,6 +1296,14 @@ pub fn Conversation() -> Element {
+                         }
+                     }
+                 }
++                    // Invisible sentinel near the bottom of the scroll container.
++                    // An IntersectionObserver watches this element instead of using
++                    // onscroll, which avoids per-scroll-event DOM queries that cause
++                    // scroll jank on mobile (see issue #151).
++                    div {
++                        id: "bottom-sentinel",
++                        class: "h-px pointer-events-none",
++                    }
+             }
+             }
+ 
+-- 
+2.53.0
+

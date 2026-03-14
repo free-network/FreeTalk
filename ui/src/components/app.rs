@@ -186,15 +186,17 @@ pub fn App() -> Element {
         Stylesheet { href: asset!("/assets/styles.css") }
         Stylesheet { href: asset!("/assets/main.css") }
 
-        // Main layout with router
-        BoardList {}
-        TopBar {}
-        Router::<Route> {}
-        MemberList {}
-        EditBoardModal {}
-        MemberInfoModal {}
-        CreateBoardModal {}
-        DocumentTitleUpdater {}
+        // Main layout with router - app-root fixes iOS Safari viewport issues
+        div { class: "flex bg-bg overflow-hidden app-root",
+            BoardList {}
+            TopBar {}
+            Router::<Route> {}
+            MemberList {}
+            EditBoardModal {}
+            MemberInfoModal {}
+            CreateBoardModal {}
+            DocumentTitleUpdater {}
+        }
     }
 }
 

@@ -1,0 +1,94 @@
+From 5de07d9c61205deb50c88bec40c665449d375a79 Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Tue, 10 Mar 2026 10:55:49 -0500
+Subject: [PATCH 52/69] fix(ui): replace autofocus with onmounted focus for
+ sandboxed iframe compatibility (#161)
+
+fix(ui): replace autofocus with onmounted focus for sandboxed iframe compatibility
+---
+ ui/src/components/conversation.rs                      |  7 ++++++-
+ ui/src/components/members/member_info_modal.rs         |  7 ++++++-
+ .../components/room_list/receive_invitation_modal.rs   | 10 ++++++----
+ 3 files changed, 18 insertions(+), 6 deletions(-)
+
+diff --git a/ui/src/components/conversation.rs b/ui/src/components/conversation.rs
+index fd93da70..5a509c04 100644
+--- a/ui/src/components/conversation.rs
++++ b/ui/src/components/conversation.rs
+@@ -1576,7 +1576,12 @@ fn MessageGroupComponent(
+                                                             if is_self { "bg-white/10 text-white placeholder-white/50 border border-white/20" } else { "bg-bg text-text border border-border" }
+                                                         ),
+                                                         value: "{edit_text}",
+-                                                        autofocus: true,
++                                                        onmounted: move |cx| {
++                                                            let element = cx.data();
++                                                            wasm_bindgen_futures::spawn_local(async move {
++                                                                let _ = element.set_focus(true).await;
++                                                            });
++                                                        },
+                                                         oninput: move |e| edit_text.set(e.value().clone()),
+                                                     }
+                                                     div { class: "flex justify-end gap-3 mt-3",
+diff --git a/ui/src/components/members/member_info_modal.rs b/ui/src/components/members/member_info_modal.rs
+index 6f093e3a..ae4a16ac 100644
+--- a/ui/src/components/members/member_info_modal.rs
++++ b/ui/src/components/members/member_info_modal.rs
+@@ -152,7 +152,12 @@ pub fn MemberInfoModal() -> Element {
+             div {
+                 class: "fixed inset-0 z-50 flex items-center justify-center",
+                 tabindex: "0",
+-                autofocus: true,
++                onmounted: move |cx| {
++                    let element = cx.data();
++                    wasm_bindgen_futures::spawn_local(async move {
++                        let _ = element.set_focus(true).await;
++                    });
++                },
+                 onkeydown: move |evt: KeyboardEvent| {
+                     if evt.key() == Key::Escape || evt.key() == Key::Enter {
+                         evt.prevent_default();
+diff --git a/ui/src/components/room_list/receive_invitation_modal.rs b/ui/src/components/room_list/receive_invitation_modal.rs
+index 9b9fa2cb..68d61894 100644
+--- a/ui/src/components/room_list/receive_invitation_modal.rs
++++ b/ui/src/components/room_list/receive_invitation_modal.rs
+@@ -230,7 +230,6 @@ fn render_error_state(
+                 class: "flex gap-3",
+                 button {
+                     class: "px-4 py-2 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-colors",
+-                    autofocus: true,
+                     onmounted: move |cx| {
+                         let element = cx.data();
+                         wasm_bindgen_futures::spawn_local(async move {
+@@ -316,7 +315,6 @@ fn render_already_member(mut invitation: Signal<Option<Invitation>>) -> Element
+         p { class: "text-text mb-4", "You are already a member of this room with your current key." }
+         button {
+             class: "px-4 py-2 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-colors",
+-            autofocus: true,
+             onmounted: move |cx| {
+                 let element = cx.data();
+                 wasm_bindgen_futures::spawn_local(async move {
+@@ -344,7 +342,6 @@ fn render_restore_access_option(
+             class: "flex gap-3",
+             button {
+                 class: "px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white font-medium rounded-lg transition-colors",
+-                autofocus: true,
+                 onmounted: move |cx| {
+                     let element = cx.data();
+                     wasm_bindgen_futures::spawn_local(async move {
+@@ -409,7 +406,12 @@ fn render_new_invitation(inv: Invitation, mut invitation: Signal<Option<Invitati
+                 class: "w-full px-3 py-2 bg-surface border border-border rounded-lg text-text placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent",
+                 r#type: "text",
+                 value: "{nickname}",
+-                autofocus: true,
++                onmounted: move |cx| {
++                    let element = cx.data();
++                    wasm_bindgen_futures::spawn_local(async move {
++                        let _ = element.set_focus(true).await;
++                    });
++                },
+                 oninput: move |evt| nickname.set(evt.value().clone()),
+                 onkeydown: move |evt: KeyboardEvent| {
+                     if evt.key() == Key::Enter && !nickname.read().trim().is_empty() {
+-- 
+2.53.0
+

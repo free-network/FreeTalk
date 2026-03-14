@@ -1,0 +1,42 @@
+From 3f48011e5238a9ebee43e6fb0b76e91c3f073df0 Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Sat, 7 Mar 2026 10:15:36 -0600
+Subject: [PATCH 36/69] chore(ui): remove unused MobilePanel enum and icon
+ imports
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ ui/src/components/app.rs | 11 -----------
+ 1 file changed, 11 deletions(-)
+
+diff --git a/ui/src/components/app.rs b/ui/src/components/app.rs
+index db3409a5..906cf59e 100644
+--- a/ui/src/components/app.rs
++++ b/ui/src/components/app.rs
+@@ -22,23 +22,12 @@ use crate::room_data::{CurrentRoom, Rooms};
+ use dioxus::document::{Link, Stylesheet};
+ use dioxus::logger::tracing::{debug, error, info};
+ use dioxus::prelude::*;
+-use dioxus_free_icons::icons::fa_solid_icons::{FaBars, FaUsers, FaXmark};
+-use dioxus_free_icons::Icon;
+ use ed25519_dalek::VerifyingKey;
+ use freenet_stdlib::client_api::WebApi;
+ use river_core::room_state::member::MemberId;
+ use wasm_bindgen_futures::spawn_local;
+ use web_sys::window;
+ 
+-/// Which panel is open as an overlay on mobile. None = conversation only.
+-#[derive(Clone, Copy, PartialEq)]
+-pub enum MobilePanel {
+-    Rooms,
+-    Members,
+-}
+-
+-pub static MOBILE_PANEL: GlobalSignal<Option<MobilePanel>> = Global::new(|| None);
+-
+ pub static ROOMS: GlobalSignal<Rooms> = Global::new(initial_rooms);
+ pub static CURRENT_ROOM: GlobalSignal<CurrentRoom> =
+     Global::new(|| CurrentRoom { owner_key: None });
+-- 
+2.53.0
+

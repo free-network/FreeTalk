@@ -1,0 +1,244 @@
+From cb56960f54aa311d7c923dddf5a088592f9962df Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Fri, 13 Mar 2026 15:39:17 -0500
+Subject: [PATCH 67/69] fix: purge messages signed with stale key after
+ delegate key overwrite
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When migrate_signing_key() overwrites a stale delegate key, any messages
+in local state that were signed with the old key have invalid signatures.
+The contract rejects the entire UPDATE because of these bad messages,
+blocking all new messages from being sent.
+
+Changes:
+- migrate_signing_key() now returns MigrationResult enum instead of bool,
+  distinguishing AlreadyCurrent/StaleKeyOverwritten/Stored/Failed
+- New remove_unverifiable_messages() function verifies all message
+  signatures in local state and removes invalid ones
+- Both callers of migrate_signing_key() call remove_unverifiable_messages()
+  when a stale key was overwritten
+
+This is UI-only — no delegate/contract WASM changes.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../app/freenet_api/response_handler.rs       | 14 +++-
+ .../response_handler/get_response.rs          | 13 ++-
+ ui/src/signing.rs                             | 83 ++++++++++++++++---
+ 3 files changed, 94 insertions(+), 16 deletions(-)
+
+diff --git a/ui/src/components/app/freenet_api/response_handler.rs b/ui/src/components/app/freenet_api/response_handler.rs
+index 61cbcf07..f1322c28 100644
+--- a/ui/src/components/app/freenet_api/response_handler.rs
++++ b/ui/src/components/app/freenet_api/response_handler.rs
+@@ -391,17 +391,25 @@ impl ResponseHandler {
+                                                                 let room_key_copy = *room_key;
+                                                                 wasm_bindgen_futures::spawn_local(
+                                                                     async move {
+-                                                                        let migrated = crate::signing::migrate_signing_key(
++                                                                        let result = crate::signing::migrate_signing_key(
+                                                                         delegate_room_key,
+                                                                         &signing_key,
+                                                                     )
+                                                                     .await;
+ 
+-                                                                        if migrated {
+-                                                                            // Mark the room as migrated
++                                                                        if result != crate::signing::MigrationResult::Failed {
+                                                                             ROOMS.with_mut(|rooms| {
+                                                                             if let Some(room_data) = rooms.map.get_mut(&room_key_copy) {
+                                                                                 room_data.key_migrated_to_delegate = true;
++                                                                                if result == crate::signing::MigrationResult::StaleKeyOverwritten {
++                                                                                    let params = river_core::room_state::ChatRoomParametersV1 {
++                                                                                        owner: room_key_copy,
++                                                                                    };
++                                                                                    crate::signing::remove_unverifiable_messages(
++                                                                                        &mut room_data.room_state,
++                                                                                        &params,
++                                                                                    );
++                                                                                }
+                                                                             }
+                                                                         });
+                                                                         }
+diff --git a/ui/src/components/app/freenet_api/response_handler/get_response.rs b/ui/src/components/app/freenet_api/response_handler/get_response.rs
+index f30fa1f1..1c95ba8f 100644
+--- a/ui/src/components/app/freenet_api/response_handler/get_response.rs
++++ b/ui/src/components/app/freenet_api/response_handler/get_response.rs
+@@ -348,12 +348,21 @@ pub async fn handle_get_response(
+                 let signing_key_clone = self_sk.clone();
+                 wasm_bindgen_futures::spawn_local(async move {
+                     let room_key = owner_vk.to_bytes();
+-                    let migrated =
++                    let result =
+                         crate::signing::migrate_signing_key(room_key, &signing_key_clone).await;
+-                    if migrated {
++                    if result != crate::signing::MigrationResult::Failed {
+                         ROOMS.with_mut(|rooms| {
+                             if let Some(room_data) = rooms.map.get_mut(&owner_vk) {
+                                 room_data.key_migrated_to_delegate = true;
++                                if result == crate::signing::MigrationResult::StaleKeyOverwritten {
++                                    let params = river_core::room_state::ChatRoomParametersV1 {
++                                        owner: owner_vk,
++                                    };
++                                    crate::signing::remove_unverifiable_messages(
++                                        &mut room_data.room_state,
++                                        &params,
++                                    );
++                                }
+                                 info!("Signing key migrated to delegate for new room");
+                             }
+                         });
+diff --git a/ui/src/signing.rs b/ui/src/signing.rs
+index 07a76fcd..aa5285ff 100644
+--- a/ui/src/signing.rs
++++ b/ui/src/signing.rs
+@@ -11,6 +11,21 @@ use crate::components::app::chat_delegate::{generate_request_id, send_delegate_r
+ use dioxus::logger::tracing::{info, warn};
+ use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
+ use river_core::chat_delegate::{ChatDelegateRequestMsg, ChatDelegateResponseMsg, RoomKey};
++use river_core::room_state::ChatRoomParametersV1;
++use river_core::ChatRoomStateV1;
++
++/// Result of a signing key migration attempt.
++#[derive(Debug, PartialEq)]
++pub enum MigrationResult {
++    /// Key already matched in delegate, no changes needed.
++    AlreadyCurrent,
++    /// Stale key was overwritten with current key.
++    StaleKeyOverwritten,
++    /// Key was stored for the first time.
++    Stored,
++    /// Migration failed.
++    Failed,
++}
+ 
+ /// Store a signing key in the delegate for a room.
+ ///
+@@ -178,33 +193,39 @@ fn extract_signature(
+ 
+ /// Migrate a signing key to the delegate if not already present.
+ ///
+-/// Returns true if migration was successful or key already exists in delegate.
+-/// Returns false if migration failed (fallback to local signing should be used).
+-pub async fn migrate_signing_key(room_key: RoomKey, signing_key: &SigningKey) -> bool {
++/// Returns a `MigrationResult` indicating what happened:
++/// - `AlreadyCurrent`: key matched, no action needed
++/// - `StaleKeyOverwritten`: old key was replaced (caller should sanitize local messages)
++/// - `Stored`: key was stored for the first time
++/// - `Failed`: migration failed (fallback to local signing should be used)
++pub async fn migrate_signing_key(room_key: RoomKey, signing_key: &SigningKey) -> MigrationResult {
+     // Check if key already exists in delegate
+-    match get_public_key(room_key).await {
++    let was_stale = match get_public_key(room_key).await {
+         Ok(Some(existing_vk)) => {
+             // Verify it matches our key
+             if existing_vk == signing_key.verifying_key() {
+                 info!("Signing key already migrated to delegate for room");
+-                return true;
++                return MigrationResult::AlreadyCurrent;
+             } else {
+                 // Delegate has a stale key (e.g. from before re-invitation).
+                 // Overwrite it so delegate signing produces valid signatures.
+                 warn!("Delegate has stale key for room - overwriting with current key");
++                true
+             }
+         }
+         Ok(None) => {
+             // Key not in delegate, try to store it
+             info!("Migrating signing key to delegate for room");
++            false
+         }
+         Err(e) => {
+             warn!(
+                 "Failed to check delegate for existing key: {} - will try to store",
+                 e
+             );
++            false
+         }
+-    }
++    };
+ 
+     // Store the key
+     match store_signing_key(room_key, signing_key).await {
+@@ -213,19 +234,23 @@ pub async fn migrate_signing_key(room_key: RoomKey, signing_key: &SigningKey) ->
+             match get_public_key(room_key).await {
+                 Ok(Some(stored_vk)) if stored_vk == signing_key.verifying_key() => {
+                     info!("Successfully migrated signing key to delegate");
+-                    true
++                    if was_stale {
++                        MigrationResult::StaleKeyOverwritten
++                    } else {
++                        MigrationResult::Stored
++                    }
+                 }
+                 Ok(Some(_)) => {
+                     warn!("Stored key doesn't match - using local signing");
+-                    false
++                    MigrationResult::Failed
+                 }
+                 Ok(None) => {
+                     warn!("Key not found after storing - using local signing");
+-                    false
++                    MigrationResult::Failed
+                 }
+                 Err(e) => {
+                     warn!("Failed to verify stored key: {} - using local signing", e);
+-                    false
++                    MigrationResult::Failed
+                 }
+             }
+         }
+@@ -234,11 +259,47 @@ pub async fn migrate_signing_key(room_key: RoomKey, signing_key: &SigningKey) ->
+                 "Failed to store signing key in delegate: {} - using local signing",
+                 e
+             );
+-            false
++            MigrationResult::Failed
+         }
+     }
+ }
+ 
++/// Remove messages with invalid signatures from local room state.
++///
++/// This should be called after overwriting a stale delegate signing key,
++/// to purge any messages that were signed with the old (wrong) key.
++/// Without this, the invalid messages block all UPDATEs to the contract
++/// because the contract verifies all message signatures.
++pub fn remove_unverifiable_messages(
++    state: &mut ChatRoomStateV1,
++    parameters: &ChatRoomParametersV1,
++) -> usize {
++    let owner_id = parameters.owner_id();
++    let members_by_id = state.members.members_by_member_id();
++    let before = state.recent_messages.messages.len();
++
++    state.recent_messages.messages.retain(|message| {
++        let verifying_key = if message.message.author == owner_id {
++            &parameters.owner
++        } else if let Some(member) = members_by_id.get(&message.message.author) {
++            &member.member.member_vk
++        } else {
++            // Author not in members list — remove
++            return false;
++        };
++        message.validate(verifying_key).is_ok()
++    });
++
++    let removed = before - state.recent_messages.messages.len();
++    if removed > 0 {
++        warn!(
++            "Removed {} message(s) with invalid signatures from local state",
++            removed
++        );
++    }
++    removed
++}
++
+ /// Sign message bytes with delegate, falling back to local signing if delegate fails.
+ pub async fn sign_message_with_fallback(
+     room_key: RoomKey,
+-- 
+2.53.0
+

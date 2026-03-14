@@ -1,0 +1,38 @@
+From 49abd74ae1bfeaa73313c300e33482464b6e1c79 Mon Sep 17 00:00:00 2001
+From: Ian Clarke <sanity@users.noreply.github.com>
+Date: Sat, 7 Mar 2026 09:02:29 -0600
+Subject: [PATCH 33/69] fix(ui): render message content in div instead of span
+ for valid HTML
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The markdown-to-HTML conversion wraps messages in <p> tags (block
+elements), but they were rendered inside a <span> (inline element).
+This is invalid HTML — browsers close the span before the <p>,
+breaking rendering of block content including line breaks (<br />).
+
+Changing the container from span to div makes the nesting valid and
+restores newline rendering in messages.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ ui/src/components/conversation.rs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ui/src/components/conversation.rs b/ui/src/components/conversation.rs
+index 629b3687..57fc363d 100644
+--- a/ui/src/components/conversation.rs
++++ b/ui/src/components/conversation.rs
+@@ -1491,7 +1491,7 @@ fn MessageGroupComponent(
+                                                             }
+                                                         }
+                                                     },
+-                                                    span {
++                                                    div {
+                                                         class: "prose prose-sm dark:prose-invert max-w-none",
+                                                         dangerous_inner_html: "{msg.content_html}"
+                                                     }
+-- 
+2.53.0
+
