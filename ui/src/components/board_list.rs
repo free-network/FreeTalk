@@ -96,7 +96,7 @@ pub fn BoardList() -> Element {
     });
 
     rsx! {
-        div { class: "relative",
+        div { class: "w-full",
             // Dropdown trigger button - current board display
             div { class: "flex justify-center",
                 button {
@@ -127,73 +127,75 @@ pub fn BoardList() -> Element {
                 }
 
                 // Dropdown menu - centered like the button
-                div { class: "absolute left-1/2 -translate-x-1/2 top-full z-20 bg-panel shadow-lg rounded-b-xl overflow-hidden",
-                    style: "min-width: 60vw;",
+                div { class: "flex justify-center z-20",
+                    div { class: "bg-panel shadow-lg rounded-b-xl overflow-hidden",
+                        style: "min-width: 60vw;",
 
-                    // Board list
-                    div { class: "max-h-96 overflow-y-auto",
-                        {board_items.read().iter().map(|(board_key, board_name, is_current)| {
-                            let board_key = *board_key;
-                            let board_name = board_name.clone();
-                            let is_current = *is_current;
-                            rsx! {
-                                button {
-                                    key: "{board_key:?}",
-                                    class: format!(
-                                        "w-full flex items-center gap-4 px-6 py-4 transition-colors {}",
-                                        if is_current {
-                                            "bg-accent/10 text-accent"
-                                        } else {
-                                            "text-text hover:bg-surface"
-                                        }
-                                    ),
-                                    onclick: move |_| {
-                                        // Navigate to board URL using hash (component is outside Router context)
-                                        let board_id = bs58::encode(board_key.as_bytes()).into_string();
-                                        if let Some(win) = window() {
-                                            let _ = win.location().set_hash(&format!("/board/{}", board_id));
-                                        }
-                                        mark_current_board_as_read();
-                                        is_open.set(false);
-                                        spawn(async move {
-                                            if let Err(e) = save_boards_to_delegate().await {
-                                                error!("Failed to save current board selection: {}", e);
+                        // Board list
+                        div { class: "max-h-96 overflow-y-auto",
+                            {board_items.read().iter().map(|(board_key, board_name, is_current)| {
+                                let board_key = *board_key;
+                                let board_name = board_name.clone();
+                                let is_current = *is_current;
+                                rsx! {
+                                    button {
+                                        key: "{board_key:?}",
+                                        class: format!(
+                                            "w-full flex items-center gap-4 px-6 py-4 transition-colors {}",
+                                            if is_current {
+                                                "bg-accent/10 text-accent"
+                                            } else {
+                                                "text-text hover:bg-surface"
                                             }
-                                        });
-                                    },
-                                    Icon {
-                                        width: 32,
-                                        height: 32,
-                                        icon: FaComments,
-                                        class: if is_current { "text-accent" } else { "text-text-muted" }
+                                        ),
+                                        onclick: move |_| {
+                                            // Navigate to board URL using hash (component is outside Router context)
+                                            let board_id = bs58::encode(board_key.as_bytes()).into_string();
+                                            if let Some(win) = window() {
+                                                let _ = win.location().set_hash(&format!("/board/{}", board_id));
+                                            }
+                                            mark_current_board_as_read();
+                                            is_open.set(false);
+                                            spawn(async move {
+                                                if let Err(e) = save_boards_to_delegate().await {
+                                                    error!("Failed to save current board selection: {}", e);
+                                                }
+                                            });
+                                        },
+                                        Icon {
+                                            width: 32,
+                                            height: 32,
+                                            icon: FaComments,
+                                            class: if is_current { "text-accent" } else { "text-text-muted" }
+                                        }
+                                        span { class: "flex-1 text-left text-2xl truncate", "{board_name}" }
                                     }
-                                    span { class: "flex-1 text-left text-2xl truncate", "{board_name}" }
+                                }
+                            }).collect::<Vec<_>>().into_iter()}
+
+                            // Empty state
+                            if board_items.read().is_empty() {
+                                div { class: "px-6 py-8 text-xl text-text-muted text-center",
+                                    "No boards yet"
                                 }
                             }
-                        }).collect::<Vec<_>>().into_iter()}
-
-                        // Empty state
-                        if board_items.read().is_empty() {
-                            div { class: "px-6 py-8 text-xl text-text-muted text-center",
-                                "No boards yet"
-                            }
                         }
-                    }
 
-                    // Create board button
-                    button {
-                        class: "w-full flex items-center gap-4 px-6 py-4 border-t border-border text-text-muted hover:text-accent hover:bg-surface transition-colors",
-                        onclick: move |_| {
-                            CREATE_BOARD_MODAL.write().show = true;
-                            is_open.set(false);
-                        },
-                        Icon { width: 32, height: 32, icon: FaPlus }
-                        span { class: "text-2xl", "Create Board" }
-                    }
+                        // Create board button
+                        button {
+                            class: "w-full flex items-center gap-4 px-6 py-4 border-t border-border text-text-muted hover:text-accent hover:bg-surface transition-colors",
+                            onclick: move |_| {
+                                CREATE_BOARD_MODAL.write().show = true;
+                                is_open.set(false);
+                            },
+                            Icon { width: 32, height: 32, icon: FaPlus }
+                            span { class: "text-2xl", "Create Board" }
+                        }
 
-                    // Build info footer
-                    div { class: "px-6 py-2 border-t border-border text-sm text-text-muted text-center",
-                        {"Built: "} {format_build_time_local()}
+                        // Build info footer
+                        div { class: "px-6 py-2 border-t border-border text-sm text-text-muted text-center",
+                            {"Built: "} {format_build_time_local()}
+                        }
                     }
                 }
             }
