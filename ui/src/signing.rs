@@ -209,8 +209,9 @@ pub async fn migrate_signing_key(board_key: BoardKey, signing_key: &SigningKey) 
                 info!("Signing key already migrated to delegate for board");
                 return true;
             } else {
-                warn!("Delegate has different key for board - using local signing");
-                return false;
+                // Delegate has a stale key (e.g. from before re-invitation).
+                // Overwrite it so delegate signing produces valid signatures.
+                warn!("Delegate has stale key for board - overwriting with current key");
             }
         }
         Ok(None) => {
