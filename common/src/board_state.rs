@@ -2,6 +2,7 @@ pub mod admin;
 pub mod ban;
 pub mod configuration;
 pub mod content;
+pub mod identity;
 pub mod member;
 pub mod member_info;
 pub mod message;
