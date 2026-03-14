@@ -80,6 +80,6 @@ toolchain = "nightly"
 # We need to pin specific versions to resolve dependency conflicts
 
 # Patch freenet-stdlib to fix ErrorEvent.filename undefined bug
-# See: new-patches/freenet-stdlib-fix-filename.patch
+# Apply with: cd /tmp && git clone https://github.com/freenet/freenet-stdlib.git && cd freenet-stdlib && git apply /path/to/new-patches/freenet-stdlib-fix-filename.patch
 [patch.crates-io]
-freenet-stdlib = { path = "/home/maciej/freenet-stdlib-patched/rust" }
+freenet-stdlib = { path = "/tmp/freenet-stdlib/rust" }
