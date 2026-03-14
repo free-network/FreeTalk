@@ -7,21 +7,30 @@ use web_sys::window;
 pub fn CreateBoardModal() -> Element {
     let mut board_name = use_signal(String::new);
     let mut nickname = use_signal(String::new);
+    let mut error_msg = use_signal(|| None::<String>);
+
     let create_board = move |_| {
         use dioxus::logger::tracing::info;
         info!("🔵 Create board button clicked");
 
         let name = board_name.read().clone();
-        if name.is_empty() {
-            info!("🔴 Board name is empty, returning");
+        if name.trim().is_empty() {
+            error_msg.set(Some("Board name cannot be empty".to_string()));
             return;
         }
+
+        let nick = nickname.read().clone();
+        if nick.trim().is_empty() {
+            error_msg.set(Some("Nickname cannot be empty".to_string()));
+            return;
+        }
+
+        error_msg.set(None);
         info!("🔵 Board name: {}", name);
 
         // Generate key outside the borrow
         info!("🔵 Generating signing key...");
         let self_sk = SigningKey::generate(&mut rand::thread_rng());
-        let nick = nickname.read().clone();
         let private = false; // Private boards temporarily disabled
         info!(
             "🔵 Creating {} board with nickname: {}",
@@ -90,6 +99,13 @@ pub fn CreateBoardModal() -> Element {
 
                 // Body
                 div { class: "px-6 py-4 space-y-4",
+                    // Error message
+                    if let Some(err) = error_msg.read().as_ref() {
+                        div { class: "p-3 bg-error-bg border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400",
+                            "{err}"
+                        }
+                    }
+
                     div {
                         label { class: "block text-sm font-medium text-text mb-1", "Board Name" }
                         input {
