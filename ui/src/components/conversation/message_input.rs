@@ -68,10 +68,10 @@ pub fn PostInput(
     rsx! {
         // Compose button bar
         button {
-            class: "flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white font-medium rounded-xl transition-colors",
+            class: "p-3 bg-accent hover:bg-accent-hover text-white rounded-xl transition-colors",
             onclick: open_modal,
-            Icon { icon: FaPen, width: 14, height: 14 }
-            if default_reply_to.is_some() { "Compose Reply" } else { "Compose Post" }
+            title: if default_reply_to.is_some() { "Compose Reply" } else { "Compose Post" },
+            Icon { icon: FaPen, width: 18, height: 18 }
         }
 
         // Compose modal
