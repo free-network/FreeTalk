@@ -267,38 +267,89 @@ fn Invite(invite_code: String) -> Element {
     }
 }
 
+/// Guard for board routes - returns Some(Element) if board not found, None if OK
+fn board_guard(board_id: &str) -> Option<Element> {
+    // Parse and sync the board
+    sync_board_from_url(board_id);
+
+    // Check if the board exists in our map
+    let board_exists = if let Ok(bytes) = bs58::decode(board_id).into_vec() {
+        if bytes.len() == 32 {
+            if let Ok(vk) = VerifyingKey::from_bytes(&bytes.try_into().unwrap()) {
+                BOARDS.read().map.contains_key(&vk)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    if board_exists {
+        None
+    } else {
+        Some(rsx! {
+            div { class: "flex-1 flex flex-col items-center justify-center p-8 text-center",
+                p { class: "text-xl text-text-muted mb-4",
+                    "Board not found or not yet loaded"
+                }
+                p { class: "text-text-muted mb-6",
+                    "Select a board from the list above, or wait for it to sync."
+                }
+                a {
+                    href: "#/",
+                    class: "px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors inline-block",
+                    "Go to Home"
+                }
+            }
+        })
+    }
+}
+
 /// Route component for posts list view
 #[component]
 fn Posts(board_id: String) -> Element {
-    sync_board_from_url(&board_id);
+    if let Some(guard) = board_guard(&board_id) {
+        return guard;
+    }
     rsx! { PostsView {} }
 }
 
 /// Route component for single post view
 #[component]
 fn Post(board_id: String, post_id: String) -> Element {
-    sync_board_from_url(&board_id);
+    if let Some(guard) = board_guard(&board_id) {
+        return guard;
+    }
     rsx! { SinglePostView { post_id: post_id } }
 }
 
 /// Route component for conversation view
 #[component]
 fn ConversationView(board_id: String) -> Element {
-    sync_board_from_url(&board_id);
+    if let Some(guard) = board_guard(&board_id) {
+        return guard;
+    }
     rsx! { Conversation {} }
 }
 
 /// Route component for admin management view
 #[component]
 fn Admin(board_id: String) -> Element {
-    sync_board_from_url(&board_id);
+    if let Some(guard) = board_guard(&board_id) {
+        return guard;
+    }
     rsx! { AdminView {} }
 }
 
 /// Route component for members view
 #[component]
 fn Members(board_id: String) -> Element {
-    sync_board_from_url(&board_id);
+    if let Some(guard) = board_guard(&board_id) {
+        return guard;
+    }
     rsx! { MembersView {} }
 }
 
