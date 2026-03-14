@@ -96,7 +96,7 @@ pub fn BoardList() -> Element {
     });
 
     rsx! {
-        div { class: "w-full",
+        div { class: "relative w-full",
             // Dropdown trigger button - current board display
             div { class: "flex justify-center",
                 button {
@@ -127,7 +127,7 @@ pub fn BoardList() -> Element {
                 }
 
                 // Dropdown menu - centered like the button
-                div { class: "flex justify-center z-20",
+                div { class: "absolute left-0 right-0 flex justify-center z-20",
                     div { class: "bg-panel shadow-lg rounded-b-xl overflow-hidden",
                         style: "min-width: 60vw;",
 
