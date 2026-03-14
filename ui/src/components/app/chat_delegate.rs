@@ -53,6 +53,17 @@ const LEGACY_DELEGATES: &[([u8; 32], [u8; 32])] = &[
             18, 240, 159, 211, 241, 109, 110, 245, 72, 186, 140, 240, 81,
         ],
     ),
+    // V3: Before freenet-stdlib 0.3.2 MessageOrigin API change (2026-03-14)
+    (
+        [
+            166, 218, 132, 157, 222, 254, 162, 3, 250, 42, 63, 152, 144, 234, 255, 90, 24, 3, 65,
+            29, 107, 145, 150, 181, 162, 135, 29, 6, 94, 126, 174, 97,
+        ],
+        [
+            28, 66, 102, 131, 72, 215, 177, 166, 224, 251, 52, 214, 240, 13, 8, 118, 165, 107, 149,
+            182, 143, 99, 19, 206, 35, 29, 220, 216, 219, 176, 171, 80,
+        ],
+    ),
 ];
 
 /// Check if a delegate key matches any known legacy delegate
@@ -456,7 +467,7 @@ pub async fn send_delegate_request(
 
 /// localStorage key to track whether legacy migration has been attempted
 #[allow(dead_code)]
-const LEGACY_MIGRATION_FLAG: &str = "river_legacy_migration_done";
+const LEGACY_MIGRATION_FLAG: &str = "freetalk_legacy_migration_done";
 
 /// Check if legacy migration has already been done (via localStorage)
 fn is_legacy_migration_done() -> bool {
