@@ -221,13 +221,19 @@ pub fn PostInput(
                         }
                     }
 
-                    // Modal footer
-                    div { class: "flex items-center justify-between px-6 py-4 border-t border-border bg-surface/50",
+                    // Modal footer - wrapped in form for iPad virtual keyboard support
+                    form {
+                        class: "flex items-center justify-between px-6 py-4 border-t border-border bg-surface/50",
+                        onsubmit: move |evt| {
+                            evt.prevent_default();
+                            send_message();
+                        },
                         span { class: "text-xs text-text-muted",
                             "Press Ctrl+Enter to send"
                         }
                         div { class: "flex gap-3",
                             button {
+                                r#type: "button",
                                 class: "px-4 py-2 rounded-lg bg-surface hover:bg-surface-hover text-text transition-colors",
                                 onclick: move |_| {
                                     show_modal.set(false);
@@ -236,9 +242,9 @@ pub fn PostInput(
                                 "Cancel"
                             }
                             button {
+                                r#type: "submit",
                                 class: "px-5 py-2 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
                                 disabled: message_text.read().is_empty() || message_text.read().len() > max_message_size || title_text.read().len() > max_title_size,
-                                onclick: move |_| send_message(),
                                 "Send Post"
                             }
                         }
