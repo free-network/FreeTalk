@@ -1,0 +1,34 @@
+diff --git a/rust/src/client_api/browser.rs b/rust/src/client_api/browser.rs
+index 4e30d48..f246544 100644
+--- a/rust/src/client_api/browser.rs
++++ b/rust/src/client_api/browser.rs
+@@ -129,11 +129,26 @@ impl WebApi {
+ 
+         let mut eh = error_handler.clone();
+         let onerror_callback = Closure::<dyn FnMut(_)>::new(move |e: ErrorEvent| {
++            // Use Reflect::get to safely handle undefined properties
++            // (ErrorEvent properties can be undefined for WebSocket errors)
++            let filename = js_sys::Reflect::get(&e, &JsValue::from_str("filename"))
++                .ok()
++                .and_then(|v| v.as_string())
++                .unwrap_or_else(|| "unknown".to_string());
++            let lineno = js_sys::Reflect::get(&e, &JsValue::from_str("lineno"))
++                .ok()
++                .and_then(|v| v.as_f64())
++                .map(|n| n as u32)
++                .unwrap_or(0);
++            let message = js_sys::Reflect::get(&e, &JsValue::from_str("message"))
++                .ok()
++                .and_then(|v| v.as_string())
++                .unwrap_or_else(|| "WebSocket error".to_string());
+             let error = format!(
+                 "error: {file}:{lineno}: {msg}",
+-                file = e.filename(),
+-                lineno = e.lineno(),
+-                msg = e.message()
++                file = filename,
++                lineno = lineno,
++                msg = message
+             );
+             eh(Error::ConnectionError(serde_json::json!({
+                 "error": error, "source": "exec error"
