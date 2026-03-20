@@ -393,6 +393,30 @@ echo "Test River available at: http://127.0.0.1:7509/v1/contract/web/$contract_i
 echo "Test contract ID: $contract_id"
 '''
 
+# ─── Developer Setup ───────────────────────────────────────────────────────────
+#
+# Run `cargo make setup` after cloning to enable git hooks that prevent
+# accidental WASM commits (which break delegate key continuity and cause
+# data loss). See .githooks/pre-commit and .claude/rules/wasm-safety.md.
+
+[tasks.setup]
+description = "One-time repo setup: configures git hooks for WASM safety"
+script = '''
+#!/bin/bash
+set -e
+
+echo "Configuring git hooks path → .githooks/"
+git config core.hooksPath .githooks
+
+echo ""
+echo "Git hooks enabled. The pre-commit hook will now block commits that"
+echo "stage WASM files (ui/public/contracts/) without a corresponding"
+echo "migration entry in chat_delegate.rs LEGACY_DELEGATES."
+echo ""
+echo "This prevents accidental delegate key changes that break board data."
+echo "See .claude/rules/wasm-safety.md for details."
+'''
+
 [tasks.clippy]
 description = "Run clippy on all packages"
 command = "cargo"

@@ -2112,17 +2112,31 @@ impl ApiClient {
         let mut new_message_count = 0;
         let start_time = std::time::Instant::now();
 
-        // Show initial messages if requested
-        if initial_messages > 0 {
+        // Pre-populate seen messages to avoid showing existing messages as "new"
+        // when they arrive in subscription deltas
+        {
             let board_state = self.get_board(board_owner_key, false).await?;
-            let messages = &board_state.recent_messages.messages;
 
-            let initial_msgs: Vec<_> = messages.iter().rev().take(initial_messages).rev().collect();
+            // Mark ALL non-action messages as seen (including deleted ones),
+            // so deleted messages arriving in subscription deltas are not
+            // mistakenly shown as new. See: https://github.com/freenet/river/issues/173
+            for msg in &board_state.recent_messages.messages {
+                if !msg.message.content.is_action() {
+                    let msg_id = format!("{:?}:{:?}", msg.message.author, msg.message.time);
+                    seen_messages.insert(msg_id);
+                }
+            }
 
-            for msg in &initial_msgs {
-                let msg_id = format!("{:?}:{:?}", msg.message.author, msg.message.time);
-                seen_messages.insert(msg_id);
-                Self::output_message(&board_state, msg, board_owner_key, &format)?;
+            // Show the last N display messages if requested
+            if initial_messages > 0 {
+                let display_msgs: Vec<_> = board_state.recent_messages.display_messages().collect();
+                let display_start = display_msgs.len().saturating_sub(initial_messages);
+
+                for (i, msg) in display_msgs.iter().enumerate() {
+                    if i >= display_start {
+                        Self::output_message(&board_state, msg, board_owner_key, &format)?;
+                    }
+                }
             }
         }
 
@@ -2228,19 +2242,34 @@ impl ApiClient {
                                         );
 
                                         if seen_messages.insert(msg_id.clone()) {
-                                            // Need to get current board state for nickname lookup
+                                            // Fetch full board state to check deleted status
+                                            // and get display context (nicknames, reactions)
                                             drop(web_api);
-                                            if let Ok(board_state) =
-                                                self.get_board(board_owner_key, false).await
-                                            {
-                                                Self::output_message(
-                                                    &board_state,
-                                                    msg,
-                                                    board_owner_key,
-                                                    &format,
-                                                )?;
+                                            match self.get_board(board_owner_key, false).await {
+                                                Ok(board_state) => {
+                                                    // Skip deleted messages (fixes #173: phantom messages)
+                                                    if !board_state
+                                                        .recent_messages
+                                                        .actions_state
+                                                        .deleted
+                                                        .contains(&msg.id())
+                                                    {
+                                                        Self::output_message(
+                                                            &board_state,
+                                                            msg,
+                                                            board_owner_key,
+                                                            &format,
+                                                        )?;
+                                                        new_message_count += 1;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    // Remove from seen so the message can be
+                                                    // retried on the next delta
+                                                    debug!("Failed to fetch board state: {}", e);
+                                                    seen_messages.remove(&msg_id);
+                                                }
                                             }
-                                            new_message_count += 1;
                                             web_api = self.web_api.lock().await;
 
                                             if max_messages > 0 && new_message_count >= max_messages

@@ -172,6 +172,43 @@ pub fn owner_vk_to_contract_key(owner_vk: &VerifyingKey) -> ContractKey {
     ContractKey::from_params_and_code(parameters, &contract_code)
 }
 
+/// Defer a closure's execution via setTimeout(0), breaking out of the current WASM call stack.
+///
+/// IMPORTANT: Signal mutations (BOARDS.with_mut(), BOARDS.write(), CURRENT_BOARD.write(), etc.)
+/// must always be wrapped in defer() when called from spawn_local tasks or synchronous event
+/// handlers (onclick, etc.). This defers execution to a clean context where no Dioxus RefCell
+/// borrows are active, preventing "RefCell already borrowed" panics in dioxus-core diff/node.rs.
+///
+/// # Example
+/// ```ignore
+/// onclick: move |_| {
+///     crate::util::defer(move || {
+///         BOARDS.write().map.remove(&key);
+///     });
+/// };
+/// ```
+#[cfg(target_arch = "wasm32")]
+pub fn defer<F>(f: F)
+where
+    F: FnOnce() + 'static,
+{
+    use wasm_bindgen::prelude::*;
+    let cb = Closure::once_into_js(f);
+    web_sys::window()
+        .expect("no window")
+        .set_timeout_with_callback(&cb.into())
+        .ok();
+}
+
+/// Non-WASM fallback: just run the closure directly
+#[cfg(not(target_arch = "wasm32"))]
+pub fn defer<F>(f: F)
+where
+    F: FnOnce() + 'static,
+{
+    f();
+}
+
 /// Spawn a future via setTimeout(0), breaking out of the current WASM call stack.
 ///
 /// IMPORTANT: spawn_local runs within wasm-bindgen-futures' task scheduler,

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Pre-commit hook: block accidental WASM file commits
+#
+# WASM builds are non-reproducible. Committing rebuilt WASMs without a
+# migration entry breaks delegate key continuity and causes data loss.
+# See .claude/rules/wasm-safety.md for details.
+
+set -euo pipefail
+
+# Check if any WASM files in contracts directory are staged
+WASM_FILES=$(git diff --cached --name-only -- \
+    'ui/public/contracts/*.wasm' \
+    2>/dev/null || true)
+
+if [ -z "$WASM_FILES" ]; then
+    exit 0
+fi
+
+# Allow if chat_delegate.rs is also staged (proxy for migration entry update)
+DELEGATE_STAGED=$(git diff --cached --name-only -- \
+    'ui/src/components/app/chat_delegate.rs' \
+    2>/dev/null || true)
+
+if [ -n "$DELEGATE_STAGED" ]; then
+    echo "WASM files staged with chat_delegate.rs — allowing commit."
+    exit 0
+fi
+
+echo ""
+echo "BLOCKED: WASM files are staged for commit WITHOUT migration entry!"
+echo ""
+echo "Staged WASM files:"
+echo "$WASM_FILES" | sed 's/^/  /'
+echo ""
+echo "WASM builds are non-reproducible. Committing rebuilt WASMs without"
+echo "updating LEGACY_DELEGATES in chat_delegate.rs will break delegate"
+echo "key continuity and cause users to lose board data."
+echo ""
+echo "If this is intentional:"
+echo "  1. Add old delegate key to LEGACY_DELEGATES in chat_delegate.rs"
+echo "  2. Stage chat_delegate.rs alongside the WASMs"
+echo ""
+echo "If this is accidental:"
+echo "  git restore --staged ui/public/contracts/"
+echo "  git checkout HEAD -- ui/public/contracts/"
+echo ""
+exit 1

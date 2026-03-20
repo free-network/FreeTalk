@@ -80,24 +80,12 @@ pub static NEEDS_SYNC: GlobalSignal<std::collections::HashSet<VerifyingKey>> =
 /// If called while any signal is borrowed, this causes a RefCell re-entrant
 /// borrow panic in WASM (especially on Firefox mobile).
 ///
-/// We use setTimeout(0) instead of spawn_local because spawn_local runs within
-/// wasm-bindgen-futures' task scheduler, which may itself hold a RefCell borrow
-/// when polling tasks. setTimeout(0) breaks out of the WASM call stack entirely,
+/// Uses crate::util::defer() to break out of the WASM call stack entirely,
 /// ensuring the write happens in a completely clean execution context.
 pub fn mark_needs_sync(board_key: ed25519_dalek::VerifyingKey) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::prelude::*;
-        let cb = Closure::once_into_js(move || {
-            NEEDS_SYNC.write().insert(board_key);
-        });
-        web_sys::window()
-            .expect("no window")
-            .set_timeout_with_callback(&cb.into())
-            .ok();
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    NEEDS_SYNC.write().insert(board_key);
+    crate::util::defer(move || {
+        NEEDS_SYNC.write().insert(board_key);
+    });
 }
 
 // Build metadata from build.rs
