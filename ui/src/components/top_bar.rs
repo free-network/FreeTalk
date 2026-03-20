@@ -1,7 +1,7 @@
 //! Top bar component showing user profile, admin controls, and post input.
 
 use crate::board_data::SendMessageError;
-use crate::components::app::{BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL};
+use crate::components::app::{BOARDS, CURRENT_BOARD, CURRENT_CATEGORY, MEMBER_INFO_MODAL};
 use crate::components::category_create_modal::CREATE_CATEGORY_MODAL;
 use crate::components::conversation::message_input::PostInput;
 use crate::util::avatar::get_avatar;
@@ -32,6 +32,24 @@ pub fn TopBar() -> Element {
             if message_text.is_empty() {
                 return;
             }
+
+            // Use category context as parent if viewing a category and no explicit reply context
+            let effective_reply_ctx = reply_ctx.or_else(|| {
+                let cat_ctx = CURRENT_CATEGORY.read();
+                if let (Some(cat_id), Some(cat_name), Some(author)) = (
+                    cat_ctx.category_id.clone(),
+                    cat_ctx.category_name.clone(),
+                    cat_ctx.author_name.clone(),
+                ) {
+                    Some(ReplyContext {
+                        message_id: cat_id,
+                        author_name: author,
+                        content_preview: cat_name,
+                    })
+                } else {
+                    None
+                }
+            });
 
             // Get board data for sending
             let board_info = {
@@ -89,7 +107,7 @@ pub fn TopBar() -> Element {
                         secret_opt,
                         title_text,
                         message_text,
-                        reply_ctx,
+                        effective_reply_ctx,
                     )
                     .await;
                 });
@@ -186,14 +204,15 @@ pub fn TopBar() -> Element {
                             span { "⚙" }
                             span { "Admin" }
                         }
-                        // New Category button
+                        // New Category button (uses current category as parent if viewing one)
                         button {
                             class: "flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent/80 text-white font-medium rounded-xl transition-colors",
                             title: "Create Category",
                             onclick: move |_| {
+                                let parent_id = CURRENT_CATEGORY.read().category_id.clone();
                                 CREATE_CATEGORY_MODAL.with_mut(|modal| {
                                     modal.show = true;
-                                    modal.parent_category_id = None;
+                                    modal.parent_category_id = parent_id;
                                 });
                             },
                             span { "📁" }
@@ -245,9 +264,10 @@ pub fn TopBar() -> Element {
                                     class: "flex items-center gap-3 px-4 py-3 text-accent hover:bg-surface transition-colors w-full text-left",
                                     onclick: move |_| {
                                         menu_open.set(false);
+                                        let parent_id = CURRENT_CATEGORY.read().category_id.clone();
                                         CREATE_CATEGORY_MODAL.with_mut(|modal| {
                                             modal.show = true;
-                                            modal.parent_category_id = None;
+                                            modal.parent_category_id = parent_id;
                                         });
                                     },
                                     span { "📁" }

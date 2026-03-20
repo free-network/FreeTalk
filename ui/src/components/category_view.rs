@@ -1,4 +1,4 @@
-use crate::components::app::{Route, BOARDS, CURRENT_BOARD};
+use crate::components::app::{CurrentCategoryContext, Route, BOARDS, CURRENT_BOARD, CURRENT_CATEGORY};
 use crate::components::conversation::{
     get_all_messages, get_category_posts, get_subcategories, MessageCard, MessageCardVariant,
     MessageData,
@@ -114,6 +114,40 @@ pub fn CategoryView(category_id: String) -> Element {
             .owner_key
             .map(|key| bs58::encode(key.as_bytes()).into_string())
             .unwrap_or_default()
+    });
+
+    // Set CURRENT_CATEGORY when viewing this category (for auto-parenting new posts/categories)
+    {
+        let category_id = category_id.clone();
+        use_effect(move || {
+            // Get category info to set the context
+            let current_board = CURRENT_BOARD.read();
+            if let Some(key) = current_board.owner_key {
+                let boards = BOARDS.read();
+                if let Some(board_data) = boards.map.get(&key) {
+                    let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
+                    let all_messages = get_all_messages(
+                        &board_data.board_state.recent_messages,
+                        &board_data.board_state.member_info,
+                        self_member_id,
+                        &board_data.secrets,
+                    );
+
+                    if let Some(cat) = all_messages.iter().find(|m| m.id_string() == category_id && m.is_category) {
+                        *CURRENT_CATEGORY.write() = CurrentCategoryContext {
+                            category_id: Some(cat.message_id.clone()),
+                            category_name: cat.category_name.clone(),
+                            author_name: Some(cat.author_name.clone()),
+                        };
+                    }
+                }
+            }
+        });
+    }
+
+    // Clear CURRENT_CATEGORY when leaving this view
+    use_drop(|| {
+        *CURRENT_CATEGORY.write() = CurrentCategoryContext::default();
     });
 
     // Get category data, subcategories, and posts

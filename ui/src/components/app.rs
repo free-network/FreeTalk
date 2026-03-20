@@ -29,6 +29,7 @@ use dioxus::prelude::*;
 use ed25519_dalek::VerifyingKey;
 use freenet_stdlib::client_api::WebApi;
 use river_core::board_state::member::MemberId;
+use river_core::board_state::message::MessageId;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
 
@@ -76,6 +77,21 @@ pub static AUTH_TOKEN: GlobalSignal<Option<String>> = Global::new(|| None);
 // This prevents infinite loops where network responses trigger more syncs
 pub static NEEDS_SYNC: GlobalSignal<std::collections::HashSet<VerifyingKey>> =
     Global::new(std::collections::HashSet::new);
+
+/// Tracks the current category being viewed (for auto-parenting new posts/categories)
+pub static CURRENT_CATEGORY: GlobalSignal<CurrentCategoryContext> =
+    Global::new(|| CurrentCategoryContext::default());
+
+/// Context for the currently viewed category
+#[derive(Clone, Default)]
+pub struct CurrentCategoryContext {
+    /// The category message ID being viewed
+    pub category_id: Option<MessageId>,
+    /// Category name (for reply preview)
+    pub category_name: Option<String>,
+    /// Author name of the category (for reply context)
+    pub author_name: Option<String>,
+}
 
 /// Mark a board as needing sync, deferred via setTimeout(0).
 ///
