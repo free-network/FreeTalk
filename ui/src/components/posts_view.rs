@@ -303,20 +303,32 @@ pub fn PostsView(
                                                     }
                                                 }
                                                 div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
-                                                    {categories.iter().map(|cat| {
-                                                        let cat_id = cat.id_string();
-                                                        let board_id = current_board_id.read().clone();
-                                                        let nav = navigator();
-                                                        rsx! {
-                                                            CategoryCard {
-                                                                key: "{cat_id}",
-                                                                category: cat.clone(),
-                                                                on_click: move |_| {
-                                                                    nav.push(Route::PostsInCategory {
-                                                                        board_id: board_id.clone(),
-                                                                        category_id: cat_id.clone(),
-                                                                    });
-                                                                },
+                                                    {categories.iter().map({
+                                                        let handle_edit_message = handle_edit_message.clone();
+                                                        move |cat| {
+                                                            let cat_id = cat.id_string();
+                                                            let board_id = current_board_id.read().clone();
+                                                            let nav = navigator();
+                                                            let handle_edit_message = handle_edit_message.clone();
+                                                            rsx! {
+                                                                CategoryCard {
+                                                                    key: "{cat_id}",
+                                                                    category: cat.clone(),
+                                                                    self_member_id: self_member_id,
+                                                                    on_click: move |_| {
+                                                                        nav.push(Route::PostsInCategory {
+                                                                            board_id: board_id.clone(),
+                                                                            category_id: cat_id.clone(),
+                                                                        });
+                                                                    },
+                                                                    on_edit: move |(msg_id, new_name, new_desc)| {
+                                                                        // Re-use edit_message handler - name goes in title, desc in text
+                                                                        handle_edit_message(msg_id, new_name, new_desc);
+                                                                    },
+                                                                    on_request_delete: move |msg_id| {
+                                                                        pending_delete.set(Some(msg_id));
+                                                                    },
+                                                                }
                                                             }
                                                         }
                                                     })}
