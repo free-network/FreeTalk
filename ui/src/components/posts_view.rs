@@ -118,20 +118,24 @@ pub fn PostsView(
     // Get content
     let (categories, posts) = get_content(category_id.as_ref(), &all_messages);
 
-    // Set CURRENT_CATEGORY for auto-parenting posts/categories
+    // Update CURRENT_CATEGORY for auto-parenting posts/categories
+    // Compare before writing to avoid unnecessary updates
     {
-        let current_cat = current_category.clone();
-        use_effect(move || {
-            if let Some(cat) = current_cat.as_ref() {
-                *CURRENT_CATEGORY.write() = CurrentCategoryContext {
-                    category_id: Some(cat.message_id.clone()),
-                    category_name: cat.category_name.clone(),
-                    author_name: Some(cat.author_name.clone()),
-                };
-            } else {
-                *CURRENT_CATEGORY.write() = CurrentCategoryContext::default();
+        let new_context = if let Some(cat) = current_category.as_ref() {
+            CurrentCategoryContext {
+                category_id: Some(cat.message_id.clone()),
+                category_name: cat.category_name.clone(),
+                author_name: Some(cat.author_name.clone()),
             }
-        });
+        } else {
+            CurrentCategoryContext::default()
+        };
+
+        let current = CURRENT_CATEGORY.read();
+        if current.category_id != new_context.category_id {
+            drop(current);
+            *CURRENT_CATEGORY.write() = new_context;
+        }
     }
 
     // Clear CURRENT_CATEGORY when leaving
