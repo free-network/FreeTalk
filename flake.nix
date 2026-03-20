@@ -47,7 +47,7 @@
 
             # For WASM
             wasm-pack
-            wasm-bindgen-cli
+            wasm-bindgen-cli_0_2_114
             binaryen  # wasm-opt
 
             # System jemalloc (for tikv-jemalloc-sys)
