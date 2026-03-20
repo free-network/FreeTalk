@@ -2,7 +2,7 @@ use crate::components::app::{CurrentCategoryContext, Route, BOARDS, CURRENT_BOAR
 use crate::components::category_view::CategoryCard;
 use crate::components::conversation::{
     get_all_messages, get_category_posts, get_subcategories, get_top_level_categories,
-    get_top_level_posts, MessageCard, MessageCardVariant,
+    get_top_level_posts, MessageCard, MessageCardVariant, MessageData,
 };
 use crate::util::message_actions::{self, ActionContext};
 use dioxus::prelude::*;
@@ -18,24 +18,66 @@ struct BreadcrumbItem {
     icon: Option<String>,
 }
 
+/// Build breadcrumb trail from root to current category
+fn build_breadcrumbs(category_id: Option<&String>, all_messages: &[MessageData]) -> Vec<BreadcrumbItem> {
+    let mut crumbs = vec![BreadcrumbItem {
+        id: None,
+        name: "Home".to_string(),
+        icon: Some("🏠".to_string()),
+    }];
+
+    if let Some(cat_id) = category_id {
+        // Build chain from current category up to root
+        let mut chain = Vec::new();
+        let mut current_id = Some(cat_id.clone());
+
+        while let Some(cid) = current_id {
+            if let Some(cat) = all_messages.iter().find(|m| m.id_string() == cid && m.is_category) {
+                chain.push(BreadcrumbItem {
+                    id: Some(cat.id_string()),
+                    name: cat.category_name.clone().unwrap_or_else(|| "Unnamed".to_string()),
+                    icon: cat.category_icon.clone(),
+                });
+                current_id = cat.parent_category_id.as_ref().map(|id| format!("{}", id.0.0));
+            } else {
+                break;
+            }
+        }
+
+        // Reverse to get root-to-current order
+        chain.reverse();
+        crumbs.extend(chain);
+    }
+
+    crumbs
+}
+
+/// Get content (subcategories and posts) for a category or root
+fn get_content(category_id: Option<&String>, all_messages: &[MessageData]) -> (Vec<MessageData>, Vec<MessageData>) {
+    if let Some(cat_id_str) = category_id {
+        // Parse category_id to MessageId
+        if let Some(cat_msg_id) = cat_id_str.parse::<i64>().ok().map(|hash| {
+            MessageId(freenet_scaffold::util::FastHash(hash))
+        }) {
+            let categories = get_subcategories(all_messages, &cat_msg_id);
+            let posts = get_category_posts(all_messages, &cat_msg_id);
+            return (categories, posts);
+        }
+    }
+    // Root level
+    let categories = get_top_level_categories(all_messages);
+    let posts = get_top_level_posts(all_messages);
+    (categories, posts)
+}
+
 #[component]
 pub fn PostsView(
     #[props(default)] category_id: Option<String>,
 ) -> Element {
-    // Convert prop to signal for reactivity in memos
-    let mut category_id_signal = use_signal(|| category_id.clone());
-
-    // Update signal when prop changes
-    use_effect({
-        let category_id = category_id.clone();
-        move || {
-            category_id_signal.set(category_id.clone());
-        }
-    });
-
     let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
-    let current_board_data = {
+    // Get current board data
+    let board_data_memo = use_memo(move || {
         let current_board = CURRENT_BOARD.read();
         if let Some(key) = current_board.owner_key {
             let boards = BOARDS.read();
@@ -43,106 +85,44 @@ pub fn PostsView(
         } else {
             None
         }
-    };
+    });
 
+    let current_board_data = board_data_memo.read().clone();
     let has_board_selected = current_board_data.is_some();
 
-    // Get all messages once for reuse
-    let all_messages = use_memo(move || {
-        let current_board = CURRENT_BOARD.read();
-        if let Some(key) = current_board.owner_key {
-            let boards = BOARDS.read();
-            if let Some(board_data) = boards.map.get(&key) {
-                let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
-                return Some(get_all_messages(
-                    &board_data.board_state.recent_messages,
-                    &board_data.board_state.member_info,
-                    self_member_id,
-                    &board_data.secrets,
-                ));
-            }
-        }
+    // Get all messages
+    let all_messages: Vec<MessageData> = if let Some(ref board_data) = current_board_data {
+        let self_member_id = MemberId::from(&board_data.self_sk.verifying_key());
+        get_all_messages(
+            &board_data.board_state.recent_messages,
+            &board_data.board_state.member_info,
+            self_member_id,
+            &board_data.secrets,
+        )
+    } else {
+        Vec::new()
+    };
+
+    // Get current category if viewing one
+    let current_category: Option<MessageData> = if let Some(ref cat_id) = category_id {
+        all_messages.iter()
+            .find(|m| m.id_string() == *cat_id && m.is_category)
+            .cloned()
+    } else {
         None
-    });
+    };
 
-    // Get current category data if viewing a category
-    let current_category = use_memo(move || {
-        let messages = all_messages.read();
-        let cat_id = category_id_signal.read();
-        if let (Some(cat_id), Some(msgs)) = (cat_id.as_ref(), messages.as_ref()) {
-            msgs.iter()
-                .find(|m| m.id_string() == *cat_id && m.is_category)
-                .cloned()
-        } else {
-            None
-        }
-    });
+    // Build breadcrumbs
+    let breadcrumbs = build_breadcrumbs(category_id.as_ref(), &all_messages);
 
-    // Build breadcrumb trail
-    let breadcrumbs = use_memo(move || {
-        let mut crumbs = vec![BreadcrumbItem {
-            id: None,
-            name: "Home".to_string(),
-            icon: Some("🏠".to_string()),
-        }];
-
-        let cat_id = category_id_signal.read();
-        if let Some(cat_id) = cat_id.as_ref() {
-            let messages = all_messages.read();
-            if let Some(msgs) = messages.as_ref() {
-                // Build chain from current category up to root
-                let mut chain = Vec::new();
-                let mut current_id = Some(cat_id.clone());
-
-                while let Some(cid) = current_id {
-                    if let Some(cat) = msgs.iter().find(|m| m.id_string() == cid && m.is_category) {
-                        chain.push(BreadcrumbItem {
-                            id: Some(cat.id_string()),
-                            name: cat.category_name.clone().unwrap_or_else(|| "Unnamed".to_string()),
-                            icon: cat.category_icon.clone(),
-                        });
-                        current_id = cat.parent_category_id.as_ref().map(|id| format!("{}", id.0.0));
-                    } else {
-                        break;
-                    }
-                }
-
-                // Reverse to get root-to-current order
-                chain.reverse();
-                crumbs.extend(chain);
-            }
-        }
-
-        crumbs
-    });
-
-    // Get content for current view (categories + posts)
-    let content = use_memo(move || {
-        let messages = all_messages.read();
-        let cat_id = category_id_signal.read();
-        if let Some(msgs) = messages.as_ref() {
-            if let Some(cat_id_str) = cat_id.as_ref() {
-                // Parse category_id to MessageId
-                if let Some(cat_msg_id) = cat_id_str.parse::<i64>().ok().map(|hash| {
-                    MessageId(freenet_scaffold::util::FastHash(hash))
-                }) {
-                    let categories = get_subcategories(msgs, &cat_msg_id);
-                    let posts = get_category_posts(msgs, &cat_msg_id);
-                    return Some((categories, posts));
-                }
-            }
-            // Root level
-            let categories = get_top_level_categories(msgs);
-            let posts = get_top_level_posts(msgs);
-            return Some((categories, posts));
-        }
-        None
-    });
+    // Get content
+    let (categories, posts) = get_content(category_id.as_ref(), &all_messages);
 
     // Set CURRENT_CATEGORY for auto-parenting posts/categories
     {
+        let current_cat = current_category.clone();
         use_effect(move || {
-            if let Some(cat) = current_category.read().as_ref() {
+            if let Some(cat) = current_cat.as_ref() {
                 *CURRENT_CATEGORY.write() = CurrentCategoryContext {
                     category_id: Some(cat.message_id.clone()),
                     category_name: cat.category_name.clone(),
@@ -197,7 +177,7 @@ pub fn PostsView(
             .unwrap_or_default()
     });
 
-    let viewing_category = category_id_signal.read().is_some();
+    let viewing_category = category_id.is_some();
 
     rsx! {
         div { class: "flex-1 flex flex-col min-w-0 bg-bg",
@@ -214,8 +194,8 @@ pub fn PostsView(
                         // Breadcrumb navigation (only show when viewing a category)
                         if viewing_category {
                             div { class: "flex items-center gap-2 mb-6 text-sm flex-wrap",
-                                {breadcrumbs.read().iter().enumerate().map(|(i, crumb)| {
-                                    let is_last = i == breadcrumbs.read().len() - 1;
+                                {breadcrumbs.iter().enumerate().map(|(i, crumb)| {
+                                    let is_last = i == breadcrumbs.len() - 1;
                                     let board_id = current_board_id.read().clone();
                                     let crumb_id = crumb.id.clone();
                                     let crumb_name = crumb.name.clone();
@@ -255,7 +235,7 @@ pub fn PostsView(
                         }
 
                         // Category header (when viewing a category)
-                        if let Some(cat) = current_category.read().as_ref() {
+                        if let Some(cat) = current_category.as_ref() {
                             {
                                 let icon = cat.category_icon.as_deref().unwrap_or("📁");
                                 let name = cat.category_name.as_deref().unwrap_or("Unnamed");
@@ -288,117 +268,115 @@ pub fn PostsView(
                         // Content
                         {
                             let board_info = current_board_data.as_ref()
-                                .map(|rd| {
-                                    let config = &rd.board_state.configuration.configuration;
+                                .map(|bd| {
+                                    let config = &bd.board_state.configuration.configuration;
                                     (
-                                        MemberId::from(&rd.self_sk.verifying_key()),
+                                        MemberId::from(&bd.self_sk.verifying_key()),
                                         config.max_title_size,
                                         config.max_message_size,
                                     )
                                 });
-                            match (content.read().as_ref(), board_info) {
-                                (Some((categories, posts)), Some((self_member_id, max_title_size, max_message_size))) => {
-                                    let has_categories = !categories.is_empty();
-                                    let has_posts = !posts.is_empty();
 
-                                    if !has_categories && !has_posts {
-                                        rsx! {
-                                            div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
-                                                p { class: "text-xl", "No content yet." }
-                                                p { class: "text-sm mt-2", "Be the first to share something!" }
-                                            }
+                            let has_categories = !categories.is_empty();
+                            let has_posts = !posts.is_empty();
+
+                            if let Some((self_member_id, max_title_size, max_message_size)) = board_info {
+                                if !has_categories && !has_posts {
+                                    rsx! {
+                                        div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
+                                            p { class: "text-xl", "No content yet." }
+                                            p { class: "text-sm mt-2", "Be the first to share something!" }
                                         }
-                                    } else {
-                                        rsx! {
-                                            // Categories grid
-                                            if has_categories {
-                                                div { class: "mb-8",
-                                                    if has_posts || !viewing_category {
-                                                        h2 { class: "text-lg font-semibold text-text-muted mb-4 flex items-center gap-2",
-                                                            if viewing_category { "Subcategories" } else { "Categories" }
-                                                        }
-                                                    }
-                                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
-                                                        {categories.iter().map(|cat| {
-                                                            let cat_id = cat.id_string();
-                                                            let board_id = current_board_id.read().clone();
-                                                            let nav = navigator();
-                                                            rsx! {
-                                                                CategoryCard {
-                                                                    key: "{cat_id}",
-                                                                    category: cat.clone(),
-                                                                    on_click: move |_| {
-                                                                        nav.push(Route::PostsInCategory {
-                                                                            board_id: board_id.clone(),
-                                                                            category_id: cat_id.clone(),
-                                                                        });
-                                                                    },
-                                                                }
-                                                            }
-                                                        })}
-                                                    }
-                                                }
-                                            }
-
-                                            // Posts section
-                                            if has_posts {
-                                                if has_categories {
+                                    }
+                                } else {
+                                    rsx! {
+                                        // Categories grid
+                                        if has_categories {
+                                            div { class: "mb-8",
+                                                if has_posts || !viewing_category {
                                                     h2 { class: "text-lg font-semibold text-text-muted mb-4 flex items-center gap-2",
-                                                        "Posts"
+                                                        if viewing_category { "Subcategories" } else { "Categories" }
                                                     }
                                                 }
-                                                div { class: "space-y-8",
-                                                    {posts.iter().map({
-                                                        let handle_toggle_reaction = handle_toggle_reaction.clone();
-                                                        let handle_edit_message = handle_edit_message.clone();
+                                                div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
+                                                    {categories.iter().map(|cat| {
+                                                        let cat_id = cat.id_string();
                                                         let board_id = current_board_id.read().clone();
-                                                        move |post| {
-                                                            let post_id = post.id_string();
-                                                            let board_id = board_id.clone();
-                                                            let nav = navigator();
-                                                            let handle_toggle_reaction = handle_toggle_reaction.clone();
-                                                            let handle_edit_message = handle_edit_message.clone();
-                                                            rsx! {
-                                                                div { key: "{post_id}",
-                                                                    MessageCard {
-                                                                        message: post.clone(),
-                                                                        variant: MessageCardVariant::Card,
-                                                                        self_member_id: self_member_id,
-                                                                        expanded: false,
-                                                                        show_replies: false,
-                                                                        max_title_size: max_title_size,
-                                                                        max_message_size: max_message_size,
-                                                                        on_click: move |_| {
-                                                                            nav.push(Route::Post {
-                                                                                board_id: board_id.clone(),
-                                                                                post_id: post_id.clone(),
-                                                                            });
-                                                                        },
-                                                                        on_react: move |(msg_id, emoji)| {
-                                                                            handle_toggle_reaction(msg_id, emoji);
-                                                                        },
-                                                                        on_request_delete: move |msg_id| {
-                                                                            pending_delete.set(Some(msg_id));
-                                                                        },
-                                                                        on_edit: move |(msg_id, new_title, new_text)| {
-                                                                            handle_edit_message(msg_id, new_title, new_text);
-                                                                        },
-                                                                    }
-                                                                }
+                                                        let nav = navigator();
+                                                        rsx! {
+                                                            CategoryCard {
+                                                                key: "{cat_id}",
+                                                                category: cat.clone(),
+                                                                on_click: move |_| {
+                                                                    nav.push(Route::PostsInCategory {
+                                                                        board_id: board_id.clone(),
+                                                                        category_id: cat_id.clone(),
+                                                                    });
+                                                                },
                                                             }
                                                         }
                                                     })}
                                                 }
                                             }
                                         }
+
+                                        // Posts section
+                                        if has_posts {
+                                            if has_categories {
+                                                h2 { class: "text-lg font-semibold text-text-muted mb-4 flex items-center gap-2",
+                                                    "Posts"
+                                                }
+                                            }
+                                            div { class: "space-y-8",
+                                                {posts.iter().map({
+                                                    let handle_toggle_reaction = handle_toggle_reaction.clone();
+                                                    let handle_edit_message = handle_edit_message.clone();
+                                                    let board_id = current_board_id.read().clone();
+                                                    move |post| {
+                                                        let post_id = post.id_string();
+                                                        let board_id = board_id.clone();
+                                                        let nav = navigator();
+                                                        let handle_toggle_reaction = handle_toggle_reaction.clone();
+                                                        let handle_edit_message = handle_edit_message.clone();
+                                                        rsx! {
+                                                            div { key: "{post_id}",
+                                                                MessageCard {
+                                                                    message: post.clone(),
+                                                                    variant: MessageCardVariant::Card,
+                                                                    self_member_id: self_member_id,
+                                                                    expanded: false,
+                                                                    show_replies: false,
+                                                                    max_title_size: max_title_size,
+                                                                    max_message_size: max_message_size,
+                                                                    on_click: move |_| {
+                                                                        nav.push(Route::Post {
+                                                                            board_id: board_id.clone(),
+                                                                            post_id: post_id.clone(),
+                                                                        });
+                                                                    },
+                                                                    on_react: move |(msg_id, emoji)| {
+                                                                        handle_toggle_reaction(msg_id, emoji);
+                                                                    },
+                                                                    on_request_delete: move |msg_id| {
+                                                                        pending_delete.set(Some(msg_id));
+                                                                    },
+                                                                    on_edit: move |(msg_id, new_title, new_text)| {
+                                                                        handle_edit_message(msg_id, new_title, new_text);
+                                                                    },
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                })}
+                                            }
+                                        }
                                     }
                                 }
-                                _ => {
-                                    rsx! {
-                                        div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
-                                            p { class: "text-xl", "No content yet." }
-                                            p { class: "text-sm mt-2", "Be the first to share something!" }
-                                        }
+                            } else {
+                                rsx! {
+                                    div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
+                                        p { class: "text-xl", "No content yet." }
+                                        p { class: "text-sm mt-2", "Be the first to share something!" }
                                     }
                                 }
                             }
