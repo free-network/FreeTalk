@@ -26,30 +26,30 @@ pub fn TopBar() -> Element {
             .and_then(|key| BOARDS.read().map.get(&key).cloned())
     });
 
+    // Get category context for default reply (when viewing a category)
+    let category_reply_context = use_memo(move || {
+        let cat_ctx = CURRENT_CATEGORY.read();
+        if let (Some(cat_id), Some(cat_name), Some(author)) = (
+            cat_ctx.category_id.clone(),
+            cat_ctx.category_name.clone(),
+            cat_ctx.author_name.clone(),
+        ) {
+            Some(ReplyContext {
+                message_id: cat_id,
+                author_name: author,
+                content_preview: format!("[Category] {}", cat_name),
+            })
+        } else {
+            None
+        }
+    });
+
     // Message sending handler
     let handle_send_message =
         move |(title_text, message_text, reply_ctx): (String, String, Option<ReplyContext>)| {
             if message_text.is_empty() {
                 return;
             }
-
-            // Use category context as parent if viewing a category and no explicit reply context
-            let effective_reply_ctx = reply_ctx.or_else(|| {
-                let cat_ctx = CURRENT_CATEGORY.read();
-                if let (Some(cat_id), Some(cat_name), Some(author)) = (
-                    cat_ctx.category_id.clone(),
-                    cat_ctx.category_name.clone(),
-                    cat_ctx.author_name.clone(),
-                ) {
-                    Some(ReplyContext {
-                        message_id: cat_id,
-                        author_name: author,
-                        content_preview: cat_name,
-                    })
-                } else {
-                    None
-                }
-            });
 
             // Get board data for sending
             let board_info = {
@@ -107,7 +107,7 @@ pub fn TopBar() -> Element {
                         secret_opt,
                         title_text,
                         message_text,
-                        effective_reply_ctx,
+                        reply_ctx,
                     )
                     .await;
                 });
@@ -287,6 +287,7 @@ pub fn TopBar() -> Element {
                         let max_message = current_board_data.read().as_ref()
                             .map(|bd| bd.board_state.configuration.configuration.max_message_size)
                             .unwrap_or(10000);
+                        let default_reply = category_reply_context.read().clone();
                         rsx! {
                             PostInput {
                                 handle_send_message: move |msg: (String, String, Option<ReplyContext>)| {
@@ -294,6 +295,7 @@ pub fn TopBar() -> Element {
                                 },
                                 replying_to: replying_to,
                                 on_request_edit_last: move |_| {},
+                                default_reply_to: default_reply,
                                 max_title_size: max_title,
                                 max_message_size: max_message,
                             }

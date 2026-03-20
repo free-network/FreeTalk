@@ -1,4 +1,4 @@
-use crate::components::app::{BOARDS, CURRENT_BOARD};
+use crate::components::app::{BOARDS, CURRENT_BOARD, CURRENT_CATEGORY};
 use crate::util::messaging::send_category;
 use dioxus::prelude::*;
 use river_core::board_state::message::MessageId;
@@ -162,6 +162,13 @@ pub fn CategoryCreateModal() -> Element {
         "Create Category"
     };
 
+    // Get parent category name for display
+    let parent_category_name = if has_parent {
+        CURRENT_CATEGORY.read().category_name.clone()
+    } else {
+        None
+    };
+
     rsx! {
         // Backdrop
         div {
@@ -191,6 +198,16 @@ pub fn CategoryCreateModal() -> Element {
                     if let Some(err) = error_msg.read().as_ref() {
                         div { class: "p-3 bg-error-bg border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400",
                             "{err}"
+                        }
+                    }
+
+                    // Parent category indicator
+                    if let Some(parent_name) = parent_category_name.as_ref() {
+                        div { class: "flex items-center gap-2 px-3 py-2 bg-surface border-l-2 border-accent rounded text-sm text-text-muted",
+                            span { class: "flex-1",
+                                span { class: "font-medium", "📁 Creating in: " }
+                                "{parent_name}"
+                            }
                         }
                     }
 
