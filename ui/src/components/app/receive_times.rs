@@ -135,6 +135,7 @@ pub fn get_delay_secs(message_id: &MessageId, send_time_ms: i64) -> Option<i64> 
 }
 
 /// Format a delay in seconds into a human-readable string.
+#[allow(dead_code)]
 pub fn format_delay(secs: i64) -> String {
     if secs < 60 {
         format!("{}s", secs)

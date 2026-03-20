@@ -1607,30 +1607,3 @@ pub fn get_category_posts(all_messages: &[MessageData], category_id: &MessageId)
     posts
 }
 
-/// Get all contents of a category (both subcategories and posts)
-pub fn get_category_contents(all_messages: &[MessageData], category_id: &MessageId) -> Vec<MessageData> {
-    let mut contents: Vec<_> = all_messages
-        .iter()
-        .filter(|m| {
-            // Subcategories
-            (m.is_category && m.parent_category_id.as_ref() == Some(category_id)) ||
-            // Posts in category
-            (!m.is_category && m.reply_to_message_id.as_ref() == Some(category_id))
-        })
-        .cloned()
-        .collect();
-    // Categories first, then posts by reverse time
-    contents.sort_by(|a, b| {
-        match (a.is_category, b.is_category) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => b.time.cmp(&a.time),
-        }
-    });
-    contents
-}
-
-/// Get uncategorized posts (top-level posts that don't belong to any category)
-pub fn get_uncategorized_posts(all_messages: &[MessageData]) -> Vec<MessageData> {
-    get_top_level_posts(all_messages)
-}

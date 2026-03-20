@@ -20,7 +20,6 @@ use crate::components::board_list::receive_invitation_modal::ReceiveInvitationMo
 use crate::components::category_create_modal::CategoryCreateModal;
 use crate::components::members::member_info_modal::MemberInfoModal;
 use crate::components::members::Invitation;
-use crate::components::category_view::CategoryView;
 use crate::components::posts_view::{PostsView, SinglePostView};
 use crate::invites::PendingInvites;
 use dioxus::document::{Link, Stylesheet};
@@ -46,7 +45,7 @@ pub enum Route {
     #[route("/board/:board_id/post/:post_id")]
     Post { board_id: String, post_id: String },
     #[route("/board/:board_id/category/:category_id")]
-    Category { board_id: String, category_id: String },
+    PostsInCategory { board_id: String, category_id: String },
     #[route("/board/:board_id/conversation")]
     ConversationView { board_id: String },
     #[route("/board/:board_id/admin")]
@@ -335,13 +334,13 @@ fn Post(board_id: String, post_id: String) -> Element {
     rsx! { SinglePostView { post_id: post_id } }
 }
 
-/// Route component for category view
+/// Route component for category view (uses PostsView with category_id)
 #[component]
-fn Category(board_id: String, category_id: String) -> Element {
+fn PostsInCategory(board_id: String, category_id: String) -> Element {
     if let Some(guard) = board_guard(&board_id) {
         return guard;
     }
-    rsx! { CategoryView { category_id: category_id } }
+    rsx! { PostsView { category_id: Some(category_id) } }
 }
 
 /// Route component for conversation view
