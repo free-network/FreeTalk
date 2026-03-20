@@ -1,6 +1,8 @@
 use crate::components::app::{Route, BOARDS, CURRENT_BOARD};
+use crate::components::category_view::CategoryCard;
 use crate::components::conversation::{
-    get_all_messages, get_top_level_posts, MessageCard, MessageCardVariant,
+    get_all_messages, get_top_level_categories, get_top_level_posts, MessageCard,
+    MessageCardVariant,
 };
 use crate::util::message_actions::{self, ActionContext};
 use dioxus::prelude::*;
@@ -24,8 +26,8 @@ pub fn PostsView() -> Element {
 
     let has_board_selected = current_board_data.is_some();
 
-    // Get top-level posts (memoized)
-    let posts = use_memo(move || {
+    // Get top-level categories and posts (memoized)
+    let content = use_memo(move || {
         let current_board = CURRENT_BOARD.read();
         if let Some(key) = current_board.owner_key {
             let boards = BOARDS.read();
@@ -37,7 +39,9 @@ pub fn PostsView() -> Element {
                     self_member_id,
                     &board_data.secrets,
                 );
-                return Some(get_top_level_posts(&all_messages));
+                let categories = get_top_level_categories(&all_messages);
+                let posts = get_top_level_posts(&all_messages);
+                return Some((categories, posts));
             }
         }
         None
@@ -81,7 +85,7 @@ pub fn PostsView() -> Element {
                     p { class: "text-sm mt-2", "Posts will appear here" }
                 }
             } else {
-                // Posts list
+                // Categories and Posts list
                 div { class: "flex-1 overflow-y-auto",
                     div { class: "max-w-4xl mx-auto px-4 py-6",
                         {
@@ -94,49 +98,99 @@ pub fn PostsView() -> Element {
                                         config.max_message_size,
                                     )
                                 });
-                            match (posts.read().as_ref(), board_info) {
-                                (Some(posts), Some((self_member_id, max_title_size, max_message_size))) if !posts.is_empty() => {
-                                    rsx! {
-                                        div { class: "space-y-8",
-                                            {posts.iter().map({
-                                                let handle_toggle_reaction = handle_toggle_reaction.clone();
-                                                let handle_edit_message = handle_edit_message.clone();
-                                                move |post| {
-                                                    let post_id = post.id_string();
-                                                    let nav = navigator();
-                                                    let handle_toggle_reaction = handle_toggle_reaction.clone();
-                                                    let handle_edit_message = handle_edit_message.clone();
-                                                    rsx! {
-                                                        div { key: "{post_id}",
-                                                            MessageCard {
-                                                                message: post.clone(),
-                                                                variant: MessageCardVariant::Card,
-                                                                self_member_id: self_member_id,
-                                                                expanded: false,
-                                                                show_replies: false,
-                                                                max_title_size: max_title_size,
-                                                                max_message_size: max_message_size,
-                                                                on_click: move |_| {
-                                                                    // Get current board_id for navigation
-                                                                    if let Some(key) = CURRENT_BOARD.read().owner_key {
-                                                                        let board_id = bs58::encode(key.as_bytes()).into_string();
-                                                                        nav.push(Route::Post { board_id, post_id: post_id.clone() });
-                                                                    }
-                                                                },
-                                                                on_react: move |(msg_id, emoji)| {
-                                                                    handle_toggle_reaction(msg_id, emoji);
-                                                                },
-                                                                on_request_delete: move |msg_id| {
-                                                                    pending_delete.set(Some(msg_id));
-                                                                },
-                                                                on_edit: move |(msg_id, new_title, new_text)| {
-                                                                    handle_edit_message(msg_id, new_title, new_text);
-                                                                },
+                            match (content.read().as_ref(), board_info) {
+                                (Some((categories, posts)), Some((self_member_id, max_title_size, max_message_size))) => {
+                                    let has_categories = !categories.is_empty();
+                                    let has_posts = !posts.is_empty();
+
+                                    if !has_categories && !has_posts {
+                                        rsx! {
+                                            div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
+                                                p { class: "text-xl", "No posts yet." }
+                                                p { class: "text-sm mt-2", "Be the first to share something!" }
+                                            }
+                                        }
+                                    } else {
+                                        rsx! {
+                                            // Categories grid
+                                            if has_categories {
+                                                div { class: "mb-8",
+                                                    h2 { class: "text-lg font-semibold text-text-muted mb-4 flex items-center gap-2",
+                                                        "Categories"
+                                                    }
+                                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
+                                                        {categories.iter().map(|cat| {
+                                                            let cat_id = cat.id_string();
+                                                            let nav = navigator();
+                                                            rsx! {
+                                                                CategoryCard {
+                                                                    key: "{cat_id}",
+                                                                    category: cat.clone(),
+                                                                    on_click: move |_| {
+                                                                        if let Some(key) = CURRENT_BOARD.read().owner_key {
+                                                                            let board_id = bs58::encode(key.as_bytes()).into_string();
+                                                                            nav.push(Route::Category {
+                                                                                board_id,
+                                                                                category_id: cat_id.clone(),
+                                                                            });
+                                                                        }
+                                                                    },
+                                                                }
                                                             }
-                                                        }
+                                                        })}
                                                     }
                                                 }
-                                            })}
+                                            }
+
+                                            // Posts section
+                                            if has_posts {
+                                                if has_categories {
+                                                    h2 { class: "text-lg font-semibold text-text-muted mb-4 flex items-center gap-2",
+                                                        "Posts"
+                                                    }
+                                                }
+                                                div { class: "space-y-8",
+                                                    {posts.iter().map({
+                                                        let handle_toggle_reaction = handle_toggle_reaction.clone();
+                                                        let handle_edit_message = handle_edit_message.clone();
+                                                        move |post| {
+                                                            let post_id = post.id_string();
+                                                            let nav = navigator();
+                                                            let handle_toggle_reaction = handle_toggle_reaction.clone();
+                                                            let handle_edit_message = handle_edit_message.clone();
+                                                            rsx! {
+                                                                div { key: "{post_id}",
+                                                                    MessageCard {
+                                                                        message: post.clone(),
+                                                                        variant: MessageCardVariant::Card,
+                                                                        self_member_id: self_member_id,
+                                                                        expanded: false,
+                                                                        show_replies: false,
+                                                                        max_title_size: max_title_size,
+                                                                        max_message_size: max_message_size,
+                                                                        on_click: move |_| {
+                                                                            // Get current board_id for navigation
+                                                                            if let Some(key) = CURRENT_BOARD.read().owner_key {
+                                                                                let board_id = bs58::encode(key.as_bytes()).into_string();
+                                                                                nav.push(Route::Post { board_id, post_id: post_id.clone() });
+                                                                            }
+                                                                        },
+                                                                        on_react: move |(msg_id, emoji)| {
+                                                                            handle_toggle_reaction(msg_id, emoji);
+                                                                        },
+                                                                        on_request_delete: move |msg_id| {
+                                                                            pending_delete.set(Some(msg_id));
+                                                                        },
+                                                                        on_edit: move |(msg_id, new_title, new_text)| {
+                                                                            handle_edit_message(msg_id, new_title, new_text);
+                                                                        },
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    })}
+                                                }
+                                            }
                                         }
                                     }
                                 }

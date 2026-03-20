@@ -551,6 +551,37 @@ impl BoardMessageBody {
         }
     }
 
+    /// Create a public category message (for organizing posts)
+    ///
+    /// Only board owners and admins should create categories.
+    /// The caller must verify permissions before calling this.
+    pub fn category(
+        name: String,
+        description: Option<String>,
+        icon: Option<String>,
+        color: Option<String>,
+        parent_category_id: Option<MessageId>,
+    ) -> Self {
+        use crate::board_state::content::{
+            CategoryContentV1, CATEGORY_CONTENT_VERSION, CONTENT_TYPE_CATEGORY,
+        };
+        let mut cat = CategoryContentV1::new(name, description);
+        if let Some(i) = icon {
+            cat = cat.with_icon(i);
+        }
+        if let Some(c) = color {
+            cat = cat.with_color(c);
+        }
+        if let Some(p) = parent_category_id {
+            cat = cat.with_parent(p);
+        }
+        Self::Public {
+            content_type: CONTENT_TYPE_CATEGORY,
+            content_version: CATEGORY_CONTENT_VERSION,
+            data: cat.encode(),
+        }
+    }
+
     /// Create a private action message (encrypted)
     ///
     /// Use this for any action (edit, delete, reaction, remove_reaction) in a private board.
@@ -609,12 +640,18 @@ impl BoardMessageBody {
         self.content_type() == CONTENT_TYPE_ACTION
     }
 
+    /// Check if this is a category message (content_type = CATEGORY)
+    pub fn is_category(&self) -> bool {
+        use crate::board_state::content::CONTENT_TYPE_CATEGORY;
+        self.content_type() == CONTENT_TYPE_CATEGORY
+    }
+
     /// Decode the content (for public messages only)
     /// Returns None for private messages - decrypt first
     pub fn decode_content(&self) -> Option<crate::board_state::content::DecodedContent> {
         use crate::board_state::content::{
-            ActionContentV1, DecodedContent, ReplyContentV1, TextContentV1, CONTENT_TYPE_ACTION,
-            CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
+            ActionContentV1, CategoryContentV1, DecodedContent, ReplyContentV1, TextContentV1,
+            CONTENT_TYPE_ACTION, CONTENT_TYPE_CATEGORY, CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
         };
         match self {
             Self::Public {
@@ -627,6 +664,9 @@ impl BoardMessageBody {
                     .ok()
                     .map(DecodedContent::Action),
                 CONTENT_TYPE_REPLY => ReplyContentV1::decode(data).ok().map(DecodedContent::Reply),
+                CONTENT_TYPE_CATEGORY => {
+                    CategoryContentV1::decode(data).ok().map(DecodedContent::Category)
+                }
                 _ => Some(DecodedContent::Unknown {
                     content_type: *content_type,
                     content_version: *content_version,
@@ -696,10 +736,11 @@ impl BoardMessageBody {
     }
 
     /// Extract title from the message content (for public messages only).
-    /// Returns None for private messages or non-text/reply content.
+    /// Returns None for private messages or non-text/reply/category content.
     pub fn title(&self) -> Option<String> {
         use crate::board_state::content::{
-            ReplyContentV1, TextContentV1, CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
+            CategoryContentV1, ReplyContentV1, TextContentV1, CONTENT_TYPE_CATEGORY,
+            CONTENT_TYPE_REPLY, CONTENT_TYPE_TEXT,
         };
         match self {
             Self::Public {
@@ -707,6 +748,7 @@ impl BoardMessageBody {
             } => match *content_type {
                 CONTENT_TYPE_TEXT => TextContentV1::decode(data).ok().map(|t| t.title),
                 CONTENT_TYPE_REPLY => ReplyContentV1::decode(data).ok().map(|r| r.title),
+                CONTENT_TYPE_CATEGORY => CategoryContentV1::decode(data).ok().map(|c| c.name),
                 _ => None,
             },
             Self::Private { .. } => None,

@@ -17,8 +17,10 @@ use crate::components::app::freenet_api::FreenetSynchronizer;
 use crate::components::board_list::create_board_modal::CreateBoardModal;
 use crate::components::board_list::edit_board_modal::EditBoardModal;
 use crate::components::board_list::receive_invitation_modal::ReceiveInvitationModal;
+use crate::components::category_create_modal::CategoryCreateModal;
 use crate::components::members::member_info_modal::MemberInfoModal;
 use crate::components::members::Invitation;
+use crate::components::category_view::CategoryView;
 use crate::components::posts_view::{PostsView, SinglePostView};
 use crate::invites::PendingInvites;
 use dioxus::document::{Link, Stylesheet};
@@ -42,6 +44,8 @@ pub enum Route {
     Posts { board_id: String },
     #[route("/board/:board_id/post/:post_id")]
     Post { board_id: String, post_id: String },
+    #[route("/board/:board_id/category/:category_id")]
+    Category { board_id: String, category_id: String },
     #[route("/board/:board_id/conversation")]
     ConversationView { board_id: String },
     #[route("/board/:board_id/admin")]
@@ -216,6 +220,7 @@ pub fn App() -> Element {
             EditBoardModal {}
             MemberInfoModal {}
             CreateBoardModal {}
+            CategoryCreateModal {}
             DocumentTitleUpdater {}
         }
     }
@@ -312,6 +317,15 @@ fn Post(board_id: String, post_id: String) -> Element {
         return guard;
     }
     rsx! { SinglePostView { post_id: post_id } }
+}
+
+/// Route component for category view
+#[component]
+fn Category(board_id: String, category_id: String) -> Element {
+    if let Some(guard) = board_guard(&board_id) {
+        return guard;
+    }
+    rsx! { CategoryView { category_id: category_id } }
 }
 
 /// Route component for conversation view

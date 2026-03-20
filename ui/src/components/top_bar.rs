@@ -2,6 +2,7 @@
 
 use crate::board_data::SendMessageError;
 use crate::components::app::{BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL};
+use crate::components::category_create_modal::CREATE_CATEGORY_MODAL;
 use crate::components::conversation::message_input::PostInput;
 use crate::util::avatar::get_avatar;
 use crate::util::ecies::unseal_bytes_with_secrets;
@@ -185,6 +186,19 @@ pub fn TopBar() -> Element {
                             span { "⚙" }
                             span { "Admin" }
                         }
+                        // New Category button
+                        button {
+                            class: "flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent/80 text-white font-medium rounded-xl transition-colors",
+                            title: "Create Category",
+                            onclick: move |_| {
+                                CREATE_CATEGORY_MODAL.with_mut(|modal| {
+                                    modal.show = true;
+                                    modal.parent_category_id = None;
+                                });
+                            },
+                            span { "📁" }
+                            span { "Category" }
+                        }
                     }
                 }
 
@@ -226,6 +240,18 @@ pub fn TopBar() -> Element {
                                     onclick: move |_| menu_open.set(false),
                                     span { "⚙" }
                                     span { "Admin" }
+                                }
+                                button {
+                                    class: "flex items-center gap-3 px-4 py-3 text-accent hover:bg-surface transition-colors w-full text-left",
+                                    onclick: move |_| {
+                                        menu_open.set(false);
+                                        CREATE_CATEGORY_MODAL.with_mut(|modal| {
+                                            modal.show = true;
+                                            modal.parent_category_id = None;
+                                        });
+                                    },
+                                    span { "📁" }
+                                    span { "New Category" }
                                 }
                             }
                         }

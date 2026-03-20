@@ -40,6 +40,18 @@ pub struct MessageData {
     pub reply_to_author: Option<String>,
     pub reply_to_preview: Option<String>,
     pub receive_delay_secs: Option<i64>,
+    /// Whether this message is a category
+    pub is_category: bool,
+    /// Category name (if is_category)
+    pub category_name: Option<String>,
+    /// Category description (if is_category)
+    pub category_description: Option<String>,
+    /// Category icon emoji (if is_category)
+    pub category_icon: Option<String>,
+    /// Category color hex (if is_category)
+    pub category_color: Option<String>,
+    /// Parent category ID (if this is a subcategory)
+    pub parent_category_id: Option<MessageId>,
 }
 
 /// A message with its nested replies
@@ -109,6 +121,10 @@ pub fn get_all_messages(
         let send_time_ms = raw_time.timestamp_millis();
         let receive_delay_secs = get_delay_secs(&message_id, send_time_ms);
 
+        // Extract category info
+        let (is_category, category_name, category_description, category_icon, category_color, parent_category_id) =
+            extract_category_info(&message.message.content, secrets);
+
         messages.push(MessageData {
             message_id,
             author_id,
@@ -125,6 +141,12 @@ pub fn get_all_messages(
             reply_to_author,
             reply_to_preview,
             receive_delay_secs,
+            is_category,
+            category_name,
+            category_description,
+            category_icon,
+            category_color,
+            parent_category_id,
         });
     }
 
@@ -314,6 +336,34 @@ fn extract_reply_context(
         _ => {}
     }
     (None, None, None)
+}
+
+/// Extract category information from message content
+fn extract_category_info(
+    content: &BoardMessageBody,
+    _secrets: &HashMap<u32, [u8; 32]>,
+) -> (bool, Option<String>, Option<String>, Option<String>, Option<String>, Option<MessageId>) {
+    use river_core::board_state::content::{CategoryContentV1, CONTENT_TYPE_CATEGORY};
+
+    match content {
+        BoardMessageBody::Public {
+            content_type, data, ..
+        } if *content_type == CONTENT_TYPE_CATEGORY => {
+            if let Ok(cat) = CategoryContentV1::decode(data) {
+                return (
+                    true,
+                    Some(cat.name),
+                    cat.description,
+                    cat.icon,
+                    cat.color,
+                    cat.parent_category_id,
+                );
+            }
+        }
+        // Categories are always public (no private category support)
+        _ => {}
+    }
+    (false, None, None, None, None, None)
 }
 
 /// Conversation component that shows replies to a specific parent message
@@ -1513,13 +1563,74 @@ pub fn MessageCard(
     }
 }
 
-/// Get all top-level posts (messages that are not replies)
+/// Get all top-level posts (messages that are not replies and not categories)
 pub fn get_top_level_posts(all_messages: &[MessageData]) -> Vec<MessageData> {
     let mut posts: Vec<_> = all_messages
         .iter()
-        .filter(|m| m.is_top_level_post())
+        .filter(|m| m.is_top_level_post() && !m.is_category)
         .cloned()
         .collect();
     posts.sort_by_key(|m| std::cmp::Reverse(m.time));
     posts
+}
+
+/// Get all top-level categories (categories with no parent)
+pub fn get_top_level_categories(all_messages: &[MessageData]) -> Vec<MessageData> {
+    let mut categories: Vec<_> = all_messages
+        .iter()
+        .filter(|m| m.is_category && m.parent_category_id.is_none())
+        .cloned()
+        .collect();
+    categories.sort_by_key(|m| m.time);
+    categories
+}
+
+/// Get subcategories of a specific category
+pub fn get_subcategories(all_messages: &[MessageData], category_id: &MessageId) -> Vec<MessageData> {
+    let mut subcategories: Vec<_> = all_messages
+        .iter()
+        .filter(|m| m.is_category && m.parent_category_id.as_ref() == Some(category_id))
+        .cloned()
+        .collect();
+    subcategories.sort_by_key(|m| m.time);
+    subcategories
+}
+
+/// Get posts within a category (non-category messages that reply to the category)
+pub fn get_category_posts(all_messages: &[MessageData], category_id: &MessageId) -> Vec<MessageData> {
+    let mut posts: Vec<_> = all_messages
+        .iter()
+        .filter(|m| !m.is_category && m.reply_to_message_id.as_ref() == Some(category_id))
+        .cloned()
+        .collect();
+    posts.sort_by_key(|m| std::cmp::Reverse(m.time));
+    posts
+}
+
+/// Get all contents of a category (both subcategories and posts)
+pub fn get_category_contents(all_messages: &[MessageData], category_id: &MessageId) -> Vec<MessageData> {
+    let mut contents: Vec<_> = all_messages
+        .iter()
+        .filter(|m| {
+            // Subcategories
+            (m.is_category && m.parent_category_id.as_ref() == Some(category_id)) ||
+            // Posts in category
+            (!m.is_category && m.reply_to_message_id.as_ref() == Some(category_id))
+        })
+        .cloned()
+        .collect();
+    // Categories first, then posts by reverse time
+    contents.sort_by(|a, b| {
+        match (a.is_category, b.is_category) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => b.time.cmp(&a.time),
+        }
+    });
+    contents
+}
+
+/// Get uncategorized posts (top-level posts that don't belong to any category)
+pub fn get_uncategorized_posts(all_messages: &[MessageData]) -> Vec<MessageData> {
+    get_top_level_posts(all_messages)
 }

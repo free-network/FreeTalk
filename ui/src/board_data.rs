@@ -244,6 +244,24 @@ impl BoardData {
         Err(SendMessageError::UserNotMember)
     }
 
+    /// Check if the current user can create categories (must be owner or admin)
+    pub fn can_create_categories(&self) -> bool {
+        let self_id = MemberId::from(&self.self_sk.verifying_key());
+        let owner_id = MemberId::from(&self.owner_vk);
+
+        // Owner can always create categories
+        if self_id == owner_id {
+            return true;
+        }
+
+        // Check if user is an admin
+        self.board_state
+            .admin
+            .admins
+            .iter()
+            .any(|a| a.admin.id() == self_id)
+    }
+
     /// Capture the user's AuthorizedMember and MemberInfo from the current state.
     /// AuthorizedMember is only captured once (migration path for older boards).
     /// MemberInfo is always updated to the latest version so nickname edits are preserved.

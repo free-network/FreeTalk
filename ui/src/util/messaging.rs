@@ -233,3 +233,93 @@ pub async fn send_message(
         }
     });
 }
+
+/// Send a category message to the current board.
+///
+/// Only board owners and admins can create categories.
+pub async fn send_category(
+    name: String,
+    description: Option<String>,
+    icon: Option<String>,
+    color: Option<String>,
+    parent_category_id: Option<MessageId>,
+) -> Result<(), String> {
+    use crate::components::app::CURRENT_BOARD;
+
+    // Get required board data
+    let (current_board, board_key, self_sk, board_state_clone, can_create) = {
+        let current_board_read = CURRENT_BOARD.read();
+        let boards_read = BOARDS.read();
+
+        let current_board = current_board_read
+            .owner_key
+            .ok_or("No board selected")?;
+
+        let board_data = boards_read
+            .map
+            .get(&current_board)
+            .ok_or("Board not found")?;
+
+        let can_create = board_data.can_create_categories();
+
+        (
+            current_board,
+            board_data.board_key(),
+            board_data.self_sk.clone(),
+            board_data.board_state.clone(),
+            can_create,
+        )
+    };
+
+    if !can_create {
+        return Err("Only board owners and admins can create categories".to_string());
+    }
+
+    // Create the category content
+    let content = BoardMessageBody::category(name, description, icon, color, parent_category_id);
+
+    let message = MessageV1 {
+        board_owner: MemberId::from(current_board),
+        author: MemberId::from(&self_sk.verifying_key()),
+        content,
+        time: get_current_system_time(),
+    };
+
+    // Serialize message to CBOR for signing
+    let mut message_bytes = Vec::new();
+    ciborium::ser::into_writer(&message, &mut message_bytes)
+        .map_err(|e| format!("Failed to serialize message: {:?}", e))?;
+
+    // Sign using delegate with fallback to local signing
+    let signature =
+        crate::signing::sign_message_with_fallback(board_key, message_bytes, &self_sk).await;
+
+    let auth_message = AuthorizedMessageV1::with_signature(message, signature);
+
+    let delta = ChatBoardStateV1Delta {
+        recent_messages: Some(vec![auth_message.clone()]),
+        ..Default::default()
+    };
+
+    info!("Creating category: {:?}", auth_message);
+
+    // Apply the delta
+    BOARDS.with_mut(|boards| {
+        if let Some(board_data) = boards.map.get_mut(&current_board) {
+            if let Err(e) = board_data.board_state.apply_delta(
+                &board_state_clone,
+                &ChatBoardParametersV1 {
+                    owner: current_board,
+                },
+                &Some(delta),
+            ) {
+                error!("Failed to apply category delta: {:?}", e);
+            } else {
+                // Mark board as needing sync
+                mark_needs_sync(current_board);
+            }
+        }
+    });
+
+    Ok(())
+}

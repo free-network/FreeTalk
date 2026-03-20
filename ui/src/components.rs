@@ -1,6 +1,8 @@
 pub mod admin_view;
 pub mod app;
 pub mod board_list;
+pub mod category_create_modal;
+pub mod category_view;
 pub mod conversation;
 pub mod members;
 pub mod posts_view;

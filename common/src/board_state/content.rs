@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 pub const CONTENT_TYPE_TEXT: u32 = 1;
 pub const CONTENT_TYPE_ACTION: u32 = 2;
 pub const CONTENT_TYPE_REPLY: u32 = 3;
-// Future: CONTENT_TYPE_BLOB = 4, CONTENT_TYPE_POLL = 5, etc.
+pub const CONTENT_TYPE_CATEGORY: u32 = 4;
+// Future: CONTENT_TYPE_BLOB = 5, CONTENT_TYPE_POLL = 6, etc.
 
 /// Current version for text content
 pub const TEXT_CONTENT_VERSION: u32 = 1;
@@ -27,6 +28,9 @@ pub const ACTION_CONTENT_VERSION: u32 = 1;
 
 /// Current version for reply content
 pub const REPLY_CONTENT_VERSION: u32 = 1;
+
+/// Current version for category content
+pub const CATEGORY_CONTENT_VERSION: u32 = 1;
 
 /// Action type constants
 pub const ACTION_TYPE_EDIT: u32 = 1;
@@ -206,6 +210,59 @@ impl ReplyContentV1 {
     }
 }
 
+/// Category content (content_type = 4)
+///
+/// Categories organize posts into hierarchical groups.
+/// Only board owners and admins can create categories.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct CategoryContentV1 {
+    /// Category name/title
+    pub name: String,
+    /// Optional description
+    pub description: Option<String>,
+    /// Optional icon (emoji)
+    pub icon: Option<String>,
+    /// Optional color for UI display (hex like "#6366f1")
+    pub color: Option<String>,
+    /// Parent category ID (None for top-level categories)
+    pub parent_category_id: Option<MessageId>,
+}
+
+impl CategoryContentV1 {
+    pub fn new(name: String, description: Option<String>) -> Self {
+        Self {
+            name,
+            description,
+            icon: None,
+            color: None,
+            parent_category_id: None,
+        }
+    }
+
+    pub fn with_icon(mut self, icon: String) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    pub fn with_color(mut self, color: String) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    pub fn with_parent(mut self, parent_id: MessageId) -> Self {
+        self.parent_category_id = Some(parent_id);
+        self
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        encode_cbor(self)
+    }
+
+    pub fn decode(data: &[u8]) -> Result<Self, String> {
+        decode_cbor(data, "CategoryContentV1")
+    }
+}
+
 /// Decoded message content for client-side processing
 #[derive(Clone, PartialEq, Debug)]
 pub enum DecodedContent {
@@ -215,6 +272,8 @@ pub enum DecodedContent {
     Action(ActionContentV1),
     /// Reply to another message
     Reply(ReplyContentV1),
+    /// Category (for organizing posts)
+    Category(CategoryContentV1),
     /// Unknown content type - preserved for round-tripping but displayed as placeholder
     Unknown {
         content_type: u32,
@@ -236,11 +295,25 @@ impl DecodedContent {
         }
     }
 
-    /// Get the text content if this is a text or reply message
+    /// Get the text content if this is a text, reply, or category message
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Self::Text(text) => Some(&text.content),
             Self::Reply(reply) => Some(&reply.content),
+            Self::Category(cat) => cat.description.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Check if this is a category
+    pub fn is_category(&self) -> bool {
+        matches!(self, Self::Category(_))
+    }
+
+    /// Get the category content if this is a category
+    pub fn as_category(&self) -> Option<&CategoryContentV1> {
+        match self {
+            Self::Category(cat) => Some(cat),
             _ => None,
         }
     }
@@ -272,6 +345,10 @@ impl DecodedContent {
                     action.action_type, action.target
                 ),
             },
+            Self::Category(cat) => {
+                let icon = cat.icon.as_deref().unwrap_or("📁");
+                format!("{} {}", icon, cat.name)
+            }
             Self::Unknown {
                 content_type,
                 content_version,
@@ -373,5 +450,38 @@ mod tests {
             content_version: 1,
         };
         assert!(unknown.to_display_string().contains("Unsupported"));
+    }
+
+    #[test]
+    fn test_category_content_roundtrip() {
+        let category = CategoryContentV1::new("General".to_string(), Some("General discussion".to_string()))
+            .with_icon("💬".to_string())
+            .with_color("#6366f1".to_string());
+        let encoded = category.encode();
+        let decoded = CategoryContentV1::decode(&encoded).unwrap();
+        assert_eq!(category, decoded);
+        assert_eq!(decoded.name, "General");
+        assert_eq!(decoded.icon, Some("💬".to_string()));
+        assert_eq!(decoded.color, Some("#6366f1".to_string()));
+    }
+
+    #[test]
+    fn test_category_with_parent() {
+        let parent_id = test_message_id();
+        let category = CategoryContentV1::new("Subcategory".to_string(), None)
+            .with_parent(parent_id);
+        let encoded = category.encode();
+        let decoded = CategoryContentV1::decode(&encoded).unwrap();
+        assert_eq!(decoded.parent_category_id, Some(parent_id));
+    }
+
+    #[test]
+    fn test_decoded_content_category() {
+        let cat = CategoryContentV1::new("Test".to_string(), Some("Description".to_string()))
+            .with_icon("🎯".to_string());
+        let dc = DecodedContent::Category(cat.clone());
+        assert!(dc.is_category());
+        assert_eq!(dc.as_category(), Some(&cat));
+        assert_eq!(dc.to_display_string(), "🎯 Test");
     }
 }
