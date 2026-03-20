@@ -22,6 +22,17 @@ struct BreadcrumbItem {
 pub fn PostsView(
     #[props(default)] category_id: Option<String>,
 ) -> Element {
+    // Convert prop to signal for reactivity in memos
+    let mut category_id_signal = use_signal(|| category_id.clone());
+
+    // Update signal when prop changes
+    use_effect({
+        let category_id = category_id.clone();
+        move || {
+            category_id_signal.set(category_id.clone());
+        }
+    });
+
     let mut pending_delete: Signal<Option<MessageId>> = use_signal(|| None);
 
     let current_board_data = {
@@ -55,83 +66,77 @@ pub fn PostsView(
     });
 
     // Get current category data if viewing a category
-    let current_category = use_memo({
-        let category_id = category_id.clone();
-        move || {
-            let messages = all_messages.read();
-            if let (Some(cat_id), Some(msgs)) = (category_id.as_ref(), messages.as_ref()) {
-                msgs.iter()
-                    .find(|m| m.id_string() == *cat_id && m.is_category)
-                    .cloned()
-            } else {
-                None
-            }
+    let current_category = use_memo(move || {
+        let messages = all_messages.read();
+        let cat_id = category_id_signal.read();
+        if let (Some(cat_id), Some(msgs)) = (cat_id.as_ref(), messages.as_ref()) {
+            msgs.iter()
+                .find(|m| m.id_string() == *cat_id && m.is_category)
+                .cloned()
+        } else {
+            None
         }
     });
 
     // Build breadcrumb trail
-    let breadcrumbs = use_memo({
-        let category_id = category_id.clone();
-        move || {
-            let mut crumbs = vec![BreadcrumbItem {
-                id: None,
-                name: "Home".to_string(),
-                icon: Some("🏠".to_string()),
-            }];
+    let breadcrumbs = use_memo(move || {
+        let mut crumbs = vec![BreadcrumbItem {
+            id: None,
+            name: "Home".to_string(),
+            icon: Some("🏠".to_string()),
+        }];
 
-            if let Some(cat_id) = category_id.as_ref() {
-                let messages = all_messages.read();
-                if let Some(msgs) = messages.as_ref() {
-                    // Build chain from current category up to root
-                    let mut chain = Vec::new();
-                    let mut current_id = Some(cat_id.clone());
+        let cat_id = category_id_signal.read();
+        if let Some(cat_id) = cat_id.as_ref() {
+            let messages = all_messages.read();
+            if let Some(msgs) = messages.as_ref() {
+                // Build chain from current category up to root
+                let mut chain = Vec::new();
+                let mut current_id = Some(cat_id.clone());
 
-                    while let Some(cid) = current_id {
-                        if let Some(cat) = msgs.iter().find(|m| m.id_string() == cid && m.is_category) {
-                            chain.push(BreadcrumbItem {
-                                id: Some(cat.id_string()),
-                                name: cat.category_name.clone().unwrap_or_else(|| "Unnamed".to_string()),
-                                icon: cat.category_icon.clone(),
-                            });
-                            current_id = cat.parent_category_id.as_ref().map(|id| format!("{}", id.0.0));
-                        } else {
-                            break;
-                        }
+                while let Some(cid) = current_id {
+                    if let Some(cat) = msgs.iter().find(|m| m.id_string() == cid && m.is_category) {
+                        chain.push(BreadcrumbItem {
+                            id: Some(cat.id_string()),
+                            name: cat.category_name.clone().unwrap_or_else(|| "Unnamed".to_string()),
+                            icon: cat.category_icon.clone(),
+                        });
+                        current_id = cat.parent_category_id.as_ref().map(|id| format!("{}", id.0.0));
+                    } else {
+                        break;
                     }
-
-                    // Reverse to get root-to-current order
-                    chain.reverse();
-                    crumbs.extend(chain);
                 }
-            }
 
-            crumbs
+                // Reverse to get root-to-current order
+                chain.reverse();
+                crumbs.extend(chain);
+            }
         }
+
+        crumbs
     });
 
     // Get content for current view (categories + posts)
-    let content = use_memo({
-        let category_id = category_id.clone();
-        move || {
-            let messages = all_messages.read();
-            if let Some(msgs) = messages.as_ref() {
-                if let Some(cat_id_str) = category_id.as_ref() {
-                    // Parse category_id to MessageId
-                    if let Some(cat_msg_id) = cat_id_str.parse::<i64>().ok().map(|hash| {
-                        MessageId(freenet_scaffold::util::FastHash(hash))
-                    }) {
-                        let categories = get_subcategories(msgs, &cat_msg_id);
-                        let posts = get_category_posts(msgs, &cat_msg_id);
-                        return Some((categories, posts));
-                    }
+    let content = use_memo(move || {
+        let messages = all_messages.read();
+        let cat_id = category_id_signal.read();
+        if let Some(msgs) = messages.as_ref() {
+            if let Some(cat_id_str) = cat_id.as_ref() {
+                // Parse category_id to MessageId
+                if let Some(cat_msg_id) = cat_id_str.parse::<i64>().ok().map(|hash| {
+                    MessageId(freenet_scaffold::util::FastHash(hash))
+                }) {
+                    let categories = get_subcategories(msgs, &cat_msg_id);
+                    let posts = get_category_posts(msgs, &cat_msg_id);
+                    return Some((categories, posts));
                 }
-                // Root level
-                let categories = get_top_level_categories(msgs);
-                let posts = get_top_level_posts(msgs);
-                return Some((categories, posts));
             }
-            None
+            // Root level
+            let categories = get_top_level_categories(msgs);
+            let posts = get_top_level_posts(msgs);
+            return Some((categories, posts));
         }
+        None
     });
 
     // Set CURRENT_CATEGORY for auto-parenting posts/categories
@@ -192,7 +197,7 @@ pub fn PostsView(
             .unwrap_or_default()
     });
 
-    let viewing_category = category_id.is_some();
+    let viewing_category = category_id_signal.read().is_some();
 
     rsx! {
         div { class: "flex-1 flex flex-col min-w-0 bg-bg",
