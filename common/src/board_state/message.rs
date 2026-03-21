@@ -105,7 +105,6 @@ impl ComposableState for MessagesV1 {
         parameters: &Self::Parameters,
         delta: &Option<Self::Delta>,
     ) -> Result<(), String> {
-        let max_recent_messages = parent_state.configuration.configuration.max_recent_messages;
         let max_message_size = parent_state.configuration.configuration.max_message_size;
         let max_title_size = parent_state.configuration.configuration.max_title_size;
         let privacy_mode = &parent_state.configuration.configuration.privacy_mode;
@@ -192,12 +191,6 @@ impl ComposableState for MessagesV1 {
                 .cmp(&b.message.time)
                 .then_with(|| a.id().cmp(&b.id()))
         });
-
-        // Remove oldest messages if there are too many
-        if self.messages.len() > max_recent_messages {
-            self.messages
-                .drain(0..self.messages.len() - max_recent_messages);
-        }
 
         // Rebuild computed state from action messages
         self.rebuild_actions_state();
@@ -1180,19 +1173,19 @@ mod tests {
             .apply_delta(&parent_state, &parameters, &Some(delta))
             .is_ok());
 
-        // Check results
+        // Check results - all messages are kept (no pruning)
         assert_eq!(
             messages.messages.len(),
-            3,
-            "Should have 3 messages after applying delta"
+            4,
+            "Should have 4 messages after applying delta"
         );
         assert!(
-            !messages.messages.contains(&message1),
-            "Oldest message should be removed"
+            messages.messages.contains(&message1),
+            "Message1 should be retained"
         );
         assert!(
             messages.messages.contains(&message2),
-            "Second oldest message should be retained"
+            "Message2 should be retained"
         );
         assert!(
             messages.messages.contains(&message3),
@@ -1210,11 +1203,15 @@ mod tests {
             .apply_delta(&parent_state, &parameters, &Some(delta))
             .is_ok());
 
-        // Check results
-        assert_eq!(messages.messages.len(), 3, "Should still have 3 messages");
+        // Check results - all messages are kept (no pruning)
+        assert_eq!(messages.messages.len(), 5, "Should have 5 messages");
         assert!(
-            !messages.messages.contains(&old_message),
-            "Older message should not be added"
+            messages.messages.contains(&old_message),
+            "Older message should be added"
+        );
+        assert!(
+            messages.messages.contains(&message1),
+            "Message1 should be retained"
         );
         assert!(
             messages.messages.contains(&message2),

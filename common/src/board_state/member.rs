@@ -99,8 +99,6 @@ impl ComposableState for MembersV1 {
         parameters: &Self::Parameters,
         delta: &Option<Self::Delta>,
     ) -> Result<(), String> {
-        let max_members = parent_state.configuration.configuration.max_members;
-
         if let Some(delta) = delta {
             // Build a combined lookup map that includes both existing members
             // AND members being added in this delta. This is necessary because
@@ -119,9 +117,7 @@ impl ComposableState for MembersV1 {
                 self.verify_member_invite_with_lookup(member, parameters, &combined_members_by_id)?;
             }
 
-            // Add ALL new members (deduplicated), let remove_excess_members handle trimming.
-            // This ensures CRDT convergence: regardless of delta order, the same set of
-            // members will be kept based on the deterministic removal criteria.
+            // Add ALL new members (deduplicated)
             for member in &delta.added {
                 // Skip if this member already exists
                 if self
@@ -137,9 +133,6 @@ impl ComposableState for MembersV1 {
 
         // Always check for and remove banned members
         self.remove_banned_members(&parent_state.bans, parameters);
-
-        // Always enforce max members limit
-        self.remove_excess_members(parameters, max_members);
 
         // Sort for deterministic ordering (CRDT convergence requirement)
         self.members.sort_by_key(|m| m.member.id());
@@ -232,42 +225,6 @@ impl MembersV1 {
             }
         }
         downstream
-    }
-
-    /// If the number of members exceeds the specified limit, remove the members with the longest invite chains
-    /// until the limit is satisfied. When chain lengths are equal, remove the member with the highest MemberId
-    /// for deterministic ordering (CRDT convergence requirement).
-    fn remove_excess_members(&mut self, parameters: &ChatBoardParametersV1, max_members: usize) {
-        if self.members.len() <= max_members {
-            return;
-        }
-
-        let members_by_id = self.members_by_member_id();
-        let owner_id = parameters.owner_id();
-
-        // Pre-compute chain lengths once for all members (no Ed25519 verification needed)
-        let mut chain_lengths: Vec<(MemberId, usize)> = self
-            .members
-            .iter()
-            .map(|m| {
-                let len = Self::invite_chain_length(m, owner_id, &members_by_id);
-                (m.member.id(), len)
-            })
-            .collect();
-
-        // Sort by chain length descending, then by MemberId descending for deterministic tie-breaking
-        chain_lengths.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
-
-        // Collect IDs to remove
-        let excess = self.members.len() - max_members;
-        let ids_to_remove: HashSet<MemberId> = chain_lengths
-            .iter()
-            .take(excess)
-            .map(|(id, _)| *id)
-            .collect();
-
-        self.members
-            .retain(|m| !ids_to_remove.contains(&m.member.id()));
     }
 
     /// Checks for banned members and returns a set of member IDs to be removed if any are found.
@@ -380,31 +337,6 @@ impl MembersV1 {
         }
 
         Ok(invite_chain)
-    }
-
-    /// Walk the invite chain and return the length WITHOUT Ed25519 signature verification.
-    /// Used by `remove_excess_members` where we only need chain length for comparison.
-    fn invite_chain_length(
-        member: &AuthorizedMember,
-        owner_id: MemberId,
-        members_by_id: &HashMap<MemberId, &AuthorizedMember>,
-    ) -> usize {
-        let mut length = 0;
-        let mut current_id = member.member.invited_by;
-        let mut visited = HashSet::new();
-        visited.insert(member.member.id());
-
-        while current_id != owner_id {
-            if !visited.insert(current_id) {
-                break; // Circular chain — will be caught by verify()
-            }
-            length += 1;
-            match members_by_id.get(&current_id) {
-                Some(inviter) => current_id = inviter.member.invited_by,
-                None => break, // Missing inviter — will be caught by verify()
-            }
-        }
-        length
     }
 
     /// Walk the invite chain and return all member IDs in the chain WITHOUT Ed25519 verification.
@@ -1031,49 +963,6 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_excess_members() {
-        let owner_signing_key = SigningKey::generate(&mut OsRng);
-        let owner_verifying_key = VerifyingKey::from(&owner_signing_key);
-        let owner_id = owner_verifying_key.into();
-
-        let (member1, member1_signing_key) = create_test_member(owner_id, owner_id);
-        let (member2, member2_signing_key) = create_test_member(owner_id, member1.id());
-        let (member3, _) = create_test_member(owner_id, member2.id());
-
-        let authorized_member1 = AuthorizedMember::new(member1.clone(), &owner_signing_key);
-        let authorized_member2 = AuthorizedMember::new(member2.clone(), &member1_signing_key);
-        let authorized_member3 = AuthorizedMember::new(member3.clone(), &member2_signing_key);
-
-        let mut members = MembersV1 {
-            members: vec![authorized_member1, authorized_member2, authorized_member3],
-        };
-
-        let parameters = ChatBoardParametersV1 {
-            owner: owner_verifying_key,
-        };
-
-        // Test case 1: No excess members
-        members.remove_excess_members(&parameters, 3);
-        assert_eq!(members.members.len(), 3);
-
-        // Test case 2: One excess member
-        members.remove_excess_members(&parameters, 2);
-        assert_eq!(members.members.len(), 2);
-        assert!(members
-            .members
-            .iter()
-            .any(|m| m.member.id() == member1.id()));
-        assert!(members
-            .members
-            .iter()
-            .any(|m| m.member.id() == member2.id()));
-        assert!(!members
-            .members
-            .iter()
-            .any(|m| m.member.id() == member3.id()));
-    }
-
-    #[test]
     fn test_members_by_member_id() {
         let owner_signing_key = SigningKey::generate(&mut OsRng);
         let owner_verifying_key = VerifyingKey::from(&owner_signing_key);
@@ -1099,43 +988,6 @@ mod tests {
         assert_eq!(
             members_map.get(&member2.id()).unwrap().member.id(),
             member2.id()
-        );
-    }
-
-    #[test]
-    fn test_invite_chain_length() {
-        let owner_signing_key = SigningKey::generate(&mut OsRng);
-        let owner_verifying_key = VerifyingKey::from(&owner_signing_key);
-        let owner_id: MemberId = owner_verifying_key.into();
-
-        // Build a chain: owner -> m1 -> m2 -> m3
-        let (member1, member1_signing_key) = create_test_member(owner_id, owner_id);
-        let (member2, member2_signing_key) = create_test_member(owner_id, member1.id());
-        let (member3, _) = create_test_member(owner_id, member2.id());
-
-        let auth_m1 = AuthorizedMember::new(member1.clone(), &owner_signing_key);
-        let auth_m2 = AuthorizedMember::new(member2.clone(), &member1_signing_key);
-        let auth_m3 = AuthorizedMember::new(member3.clone(), &member2_signing_key);
-
-        let members = MembersV1 {
-            members: vec![auth_m1.clone(), auth_m2.clone(), auth_m3.clone()],
-        };
-        let members_by_id = members.members_by_member_id();
-
-        // Depth 0: member directly invited by owner
-        assert_eq!(
-            MembersV1::invite_chain_length(&auth_m1, owner_id, &members_by_id),
-            0
-        );
-        // Depth 1: one hop from owner
-        assert_eq!(
-            MembersV1::invite_chain_length(&auth_m2, owner_id, &members_by_id),
-            1
-        );
-        // Depth 2: two hops from owner
-        assert_eq!(
-            MembersV1::invite_chain_length(&auth_m3, owner_id, &members_by_id),
-            2
         );
     }
 
@@ -1199,73 +1051,27 @@ mod tests {
             owner: owner_verifying_key,
         };
 
-        // Test applying delta that would exceed max_members
-        // Now ALL members are added first, then excess removed deterministically:
-        // - member1 has shortest invite chain (invited by owner)
-        // - member2, member3, member4 all have same chain length (invited by member1)
-        // - One of member2/3/4 is removed based on highest MemberId (deterministic tie-breaker)
+        // Test applying delta - all members are kept (no pruning)
         let delta = MembersDelta {
             added: vec![authorized_member3.clone(), authorized_member4.clone()],
         };
 
         let result = members.apply_delta(&parent_state, &parameters, &Some(delta));
         assert!(result.is_ok());
-        assert_eq!(members.members.len(), 3);
-        // member1 is always kept (shortest invite chain)
-        assert!(members
-            .members
-            .iter()
-            .any(|m| m.member.id() == member1.id()));
-        // Exactly 2 of [member2, member3, member4] are kept
-        let kept_count = [member2.id(), member3.id(), member4.id()]
-            .iter()
-            .filter(|id| members.members.iter().any(|m| m.member.id() == **id))
-            .count();
-        assert_eq!(
-            kept_count, 2,
-            "Exactly 2 of the 3 equal-chain-length members should be kept"
-        );
+        assert_eq!(members.members.len(), 4, "All 4 members should be kept");
+        assert!(members.members.iter().any(|m| m.member.id() == member1.id()));
+        assert!(members.members.iter().any(|m| m.member.id() == member2.id()));
+        assert!(members.members.iter().any(|m| m.member.id() == member3.id()));
+        assert!(members.members.iter().any(|m| m.member.id() == member4.id()));
 
-        // Test applying delta with already existing member
+        // Test applying delta with already existing member (deduplication)
         let delta = MembersDelta {
             added: vec![authorized_member2.clone()],
         };
 
         let result = members.apply_delta(&parent_state, &parameters, &Some(delta));
         assert!(result.is_ok());
-        assert_eq!(members.members.len(), 3);
-    }
-
-    #[test]
-    fn test_remove_excess_members_edge_cases() {
-        let owner_signing_key = SigningKey::generate(&mut OsRng);
-        let owner_verifying_key = VerifyingKey::from(&owner_signing_key);
-        let owner_id = owner_verifying_key.into();
-
-        let (member1, member1_signing_key) = create_test_member(owner_id, owner_id);
-        let (member2, _) = create_test_member(owner_id, member1.id());
-
-        let authorized_member1 = AuthorizedMember::new(member1.clone(), &owner_signing_key);
-        let authorized_member2 = AuthorizedMember::new(member2.clone(), &member1_signing_key);
-
-        let mut members = MembersV1 {
-            members: vec![authorized_member1.clone(), authorized_member2.clone()],
-        };
-
-        let parameters = ChatBoardParametersV1 {
-            owner: owner_verifying_key,
-        };
-
-        // Test with max_members set to 0
-        members.remove_excess_members(&parameters, 0);
-        assert_eq!(members.members.len(), 0);
-
-        // Reset members
-        members.members = vec![authorized_member1.clone(), authorized_member2.clone()];
-
-        // Test with max_members greater than current number of members
-        members.remove_excess_members(&parameters, 3);
-        assert_eq!(members.members.len(), 2);
+        assert_eq!(members.members.len(), 4, "Duplicate should not be added");
     }
 
     #[test]

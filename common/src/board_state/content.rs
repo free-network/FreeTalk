@@ -530,7 +530,7 @@ mod tests {
         assert_eq!(category, decoded);
         assert_eq!(decoded.name, "General");
         assert_eq!(decoded.icon, Some("💬".to_string()));
-        assert_eq!(decoded.color, Some("#6366f1".to_string()));
+        assert_eq!(decoded.color, "#6366f1".to_string());
     }
 
     #[test]

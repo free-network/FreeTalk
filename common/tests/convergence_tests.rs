@@ -83,7 +83,7 @@ fn create_test_msg(
 //
 // Result: Different final states depending on delta order.
 //
-// FIX: Sort delta.added by MemberId before processing
+// Members are no longer pruned - all members are kept regardless of max_members
 
 #[test]
 fn test_member_add_order_convergence() {
@@ -99,9 +99,7 @@ fn test_member_add_order_convergence() {
     let auth_member_a = create_authorized_member(member_a.clone(), &owner_signing_key);
     let auth_member_b = create_authorized_member(member_b.clone(), &owner_signing_key);
 
-    // Create parent state with max_members = 1 (only board for one new member)
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 1;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
@@ -121,68 +119,22 @@ fn test_member_add_order_convergence() {
         .apply_delta(&parent_state, &parameters, &Some(delta_ba))
         .expect("apply_delta should succeed");
 
-    // Both states should have exactly 1 member (due to max_members limit)
-    assert_eq!(state_a.members.len(), 1, "State A should have 1 member");
-    assert_eq!(state_b.members.len(), 1, "State B should have 1 member");
+    // Both states should have all 2 members (no pruning)
+    assert_eq!(state_a.members.len(), 2, "State A should have 2 members");
+    assert_eq!(state_b.members.len(), 2, "State B should have 2 members");
 
-    // CONVERGENCE CHECK: Both states should have the SAME member
-    // If this fails, it proves non-convergence due to order-dependent truncation
-    let member_a_in_state_a = state_a
-        .members
-        .iter()
-        .any(|m| m.member.id() == member_a.id());
-    let member_b_in_state_a = state_a
-        .members
-        .iter()
-        .any(|m| m.member.id() == member_b.id());
-    let member_a_in_state_b = state_b
-        .members
-        .iter()
-        .any(|m| m.member.id() == member_a.id());
-    let member_b_in_state_b = state_b
-        .members
-        .iter()
-        .any(|m| m.member.id() == member_b.id());
+    // CONVERGENCE CHECK: Both states should have the SAME members
+    let mut ids_a: Vec<_> = state_a.members.iter().map(|m| m.member.id()).collect();
+    let mut ids_b: Vec<_> = state_b.members.iter().map(|m| m.member.id()).collect();
+    ids_a.sort();
+    ids_b.sort();
 
-    // For convergence, the same member should be in both states
     assert_eq!(
-        member_a_in_state_a, member_a_in_state_b,
-        "Member A presence should be the same in both states. \
-         State A has member A: {}, State B has member A: {}",
-        member_a_in_state_a, member_a_in_state_b
-    );
-    assert_eq!(
-        member_b_in_state_a, member_b_in_state_b,
-        "Member B presence should be the same in both states. \
-         State A has member B: {}, State B has member B: {}",
-        member_b_in_state_a, member_b_in_state_b
-    );
-
-    // The actual convergence assertion
-    assert_eq!(
-        state_a
-            .members
-            .iter()
-            .map(|m| m.member.id())
-            .collect::<Vec<_>>(),
-        state_b
-            .members
-            .iter()
-            .map(|m| m.member.id())
-            .collect::<Vec<_>>(),
+        ids_a, ids_b,
         "CONVERGENCE FAILURE: Different delta orders produced different final states!\n\
          State A members: {:?}\n\
          State B members: {:?}",
-        state_a
-            .members
-            .iter()
-            .map(|m| m.member.id())
-            .collect::<Vec<_>>(),
-        state_b
-            .members
-            .iter()
-            .map(|m| m.member.id())
-            .collect::<Vec<_>>()
+        ids_a, ids_b
     );
 }
 
@@ -202,16 +154,16 @@ fn test_member_add_order_convergence() {
 // When multiple members have the same invite chain length, max_by_key returns
 // an arbitrary one (the last one encountered during iteration).
 //
-// FIX: Add secondary sort by member ID for deterministic tie-breaking
+// Members are no longer pruned - all members are kept
 
 #[test]
-fn test_member_removal_tiebreak_convergence() {
+fn test_member_convergence() {
     // Create owner
     let owner_signing_key = SigningKey::generate(&mut OsRng);
     let owner_verifying_key = owner_signing_key.verifying_key();
     let owner_id: MemberId = owner_verifying_key.into();
 
-    // Create three members, all invited directly by owner (same invite chain length = 0)
+    // Create three members, all invited directly by owner
     let (member_a, _) = create_test_member(owner_id, owner_id);
     let (member_b, _) = create_test_member(owner_id, owner_id);
     let (member_c, _) = create_test_member(owner_id, owner_id);
@@ -220,9 +172,7 @@ fn test_member_removal_tiebreak_convergence() {
     let auth_member_b = create_authorized_member(member_b.clone(), &owner_signing_key);
     let auth_member_c = create_authorized_member(member_c.clone(), &owner_signing_key);
 
-    // Create parent state with max_members = 2 (need to remove 1 of 3)
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 2;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
@@ -252,9 +202,9 @@ fn test_member_removal_tiebreak_convergence() {
         .apply_delta(&parent_state, &parameters, &None)
         .expect("apply_delta should succeed");
 
-    // Both should have 2 members after removing excess
-    assert_eq!(state_a.members.len(), 2, "State A should have 2 members");
-    assert_eq!(state_b.members.len(), 2, "State B should have 2 members");
+    // All 3 members should be kept (no pruning)
+    assert_eq!(state_a.members.len(), 3, "State A should have 3 members");
+    assert_eq!(state_b.members.len(), 3, "State B should have 3 members");
 
     // CONVERGENCE CHECK: Both states should have the SAME members
     let mut ids_a: Vec<_> = state_a.members.iter().map(|m| m.member.id()).collect();
@@ -262,14 +212,7 @@ fn test_member_removal_tiebreak_convergence() {
     ids_a.sort();
     ids_b.sort();
 
-    assert_eq!(
-        ids_a, ids_b,
-        "CONVERGENCE FAILURE: Different iteration orders produced different member sets!\n\
-         State A members: {:?}\n\
-         State B members: {:?}\n\
-         All members had the same invite chain length, so tie-breaking was needed.",
-        ids_a, ids_b
-    );
+    assert_eq!(ids_a, ids_b, "Both states should have the same members");
 }
 
 // =============================================================================
@@ -405,16 +348,16 @@ fn test_ban_excess_order_convergence() {
 // sorting is undefined (sort_by is not stable in the presence of equal keys
 // without additional tie-breaking).
 //
-// FIX: Add secondary sort by message ID for deterministic ordering
+// Messages are no longer pruned - all messages are kept regardless of max_recent_messages
 
 #[test]
-fn test_message_prune_order_convergence() {
+fn test_message_order_convergence() {
     // Create owner
     let owner_signing_key = SigningKey::generate(&mut OsRng);
     let owner_verifying_key = owner_signing_key.verifying_key();
     let owner_id: MemberId = owner_verifying_key.into();
 
-    // Use the SAME timestamp for all messages to trigger the bug
+    // Use the SAME timestamp for all messages
     let same_time = SystemTime::now();
 
     // Create three messages with identical timestamps
@@ -448,9 +391,7 @@ fn test_message_prune_order_convergence() {
         &owner_signing_key,
     );
 
-    // Create parent state with max_recent_messages = 2 (need to remove 1 of 3)
     let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_recent_messages = 2;
     parent_state.configuration.configuration.max_message_size = 1000;
 
     let parameters = ChatBoardParametersV1 {
@@ -475,9 +416,9 @@ fn test_message_prune_order_convergence() {
         .apply_delta(&parent_state, &parameters, &None)
         .expect("apply_delta should succeed");
 
-    // Both should have 2 messages after pruning
-    assert_eq!(state_a.messages.len(), 2, "State A should have 2 messages");
-    assert_eq!(state_b.messages.len(), 2, "State B should have 2 messages");
+    // All messages should be kept (no pruning)
+    assert_eq!(state_a.messages.len(), 3, "State A should have 3 messages");
+    assert_eq!(state_b.messages.len(), 3, "State B should have 3 messages");
 
     // CONVERGENCE CHECK: Both states should have the SAME messages
     let mut ids_a: Vec<_> = state_a.messages.iter().map(|m| m.id()).collect();
@@ -489,8 +430,7 @@ fn test_message_prune_order_convergence() {
         ids_a, ids_b,
         "CONVERGENCE FAILURE: Different message orders produced different message sets!\n\
          State A messages: {:?}\n\
-         State B messages: {:?}\n\
-         All messages had the same timestamp, so tie-breaking was needed.",
+         State B messages: {:?}",
         ids_a, ids_b
     );
 }
@@ -713,9 +653,8 @@ fn test_member_convergence_stress_50_members() {
 
     assert_eq!(all_members.len(), 50);
 
-    // Set max_members to 30 (need to remove 20)
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 30;
+    // No pruning - all members kept
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
@@ -748,10 +687,10 @@ fn test_member_convergence_stress_50_members() {
         .apply_delta(&parent_state, &parameters, &None)
         .expect("apply_delta should succeed");
 
-    // All states should have exactly 30 members
-    assert_eq!(state_a.members.len(), 30, "State A should have 30 members");
-    assert_eq!(state_b.members.len(), 30, "State B should have 30 members");
-    assert_eq!(state_c.members.len(), 30, "State C should have 30 members");
+    // All states should have all 50 members (no pruning)
+    assert_eq!(state_a.members.len(), 50, "State A should have 50 members");
+    assert_eq!(state_b.members.len(), 50, "State B should have 50 members");
+    assert_eq!(state_c.members.len(), 50, "State C should have 50 members");
 
     // All states should have the SAME members
     let mut ids_a: Vec<_> = state_a.members.iter().map(|m| m.member.id()).collect();
@@ -800,9 +739,8 @@ fn test_message_convergence_stress_100_messages() {
         messages.push(msg);
     }
 
-    // Set max_recent_messages to 50
+    // No pruning - all messages kept
     let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_recent_messages = 50;
     parent_state.configuration.configuration.max_message_size = 1000;
 
     let parameters = ChatBoardParametersV1 {
@@ -844,10 +782,10 @@ fn test_message_convergence_stress_100_messages() {
         .apply_delta(&parent_state, &parameters, &None)
         .expect("apply_delta should succeed");
 
-    // All states should have exactly 50 messages
-    assert_eq!(state_a.messages.len(), 50);
-    assert_eq!(state_b.messages.len(), 50);
-    assert_eq!(state_c.messages.len(), 50);
+    // All states should have all 100 messages (no pruning)
+    assert_eq!(state_a.messages.len(), 100);
+    assert_eq!(state_b.messages.len(), 100);
+    assert_eq!(state_c.messages.len(), 100);
 
     // All states should have the SAME messages
     let ids_a: Vec<_> = state_a.messages.iter().map(|m| m.id()).collect();
@@ -1096,7 +1034,7 @@ fn test_random_operation_sequence_convergence() {
     }
 }
 
-/// Property test: Messages with varying max limits should converge
+/// Property test: Messages should converge regardless of order (no pruning)
 #[test]
 fn test_message_varying_limits_convergence() {
     let owner_signing_key = SigningKey::generate(&mut OsRng);
@@ -1123,54 +1061,36 @@ fn test_message_varying_limits_convergence() {
         owner: owner_verifying_key,
     };
 
-    // Test with different max_recent_messages limits
-    for max_messages in [5, 10, 15, 20, 25] {
-        let mut parent_state = ChatBoardStateV1::default();
-        parent_state.configuration.configuration.max_recent_messages = max_messages;
-        parent_state.configuration.configuration.max_message_size = 1000;
+    let mut parent_state = ChatBoardStateV1::default();
+    parent_state.configuration.configuration.max_message_size = 1000;
 
-        // Apply messages in different orders
-        let mut state_forward = MessagesV1 {
-            messages: messages.clone(),
-            ..Default::default()
-        };
-        state_forward
-            .apply_delta(&parent_state, &parameters, &None)
-            .expect("apply_delta should succeed");
+    // Apply messages in different orders
+    let mut state_forward = MessagesV1 {
+        messages: messages.clone(),
+        ..Default::default()
+    };
+    state_forward
+        .apply_delta(&parent_state, &parameters, &None)
+        .expect("apply_delta should succeed");
 
-        let mut reversed = messages.clone();
-        reversed.reverse();
-        let mut state_backward = MessagesV1 {
-            messages: reversed,
-            ..Default::default()
-        };
-        state_backward
-            .apply_delta(&parent_state, &parameters, &None)
-            .expect("apply_delta should succeed");
+    let mut reversed = messages.clone();
+    reversed.reverse();
+    let mut state_backward = MessagesV1 {
+        messages: reversed,
+        ..Default::default()
+    };
+    state_backward
+        .apply_delta(&parent_state, &parameters, &None)
+        .expect("apply_delta should succeed");
 
-        // Verify convergence
-        assert_eq!(
-            state_forward.messages.len(),
-            max_messages,
-            "Forward state should have {} messages",
-            max_messages
-        );
-        assert_eq!(
-            state_backward.messages.len(),
-            max_messages,
-            "Backward state should have {} messages",
-            max_messages
-        );
+    // All 30 messages should be kept (no pruning)
+    assert_eq!(state_forward.messages.len(), 30, "Forward state should have 30 messages");
+    assert_eq!(state_backward.messages.len(), 30, "Backward state should have 30 messages");
 
-        let ids_forward: Vec<_> = state_forward.messages.iter().map(|m| m.id()).collect();
-        let ids_backward: Vec<_> = state_backward.messages.iter().map(|m| m.id()).collect();
+    let ids_forward: Vec<_> = state_forward.messages.iter().map(|m| m.id()).collect();
+    let ids_backward: Vec<_> = state_backward.messages.iter().map(|m| m.id()).collect();
 
-        assert_eq!(
-            ids_forward, ids_backward,
-            "CONVERGENCE FAILURE: Different orders with max_messages={} produced different states",
-            max_messages
-        );
-    }
+    assert_eq!(ids_forward, ids_backward, "Both states should converge to the same order");
 }
 
 // =============================================================================
@@ -1227,14 +1147,14 @@ fn test_member_exactly_at_capacity() {
     assert_eq!(ids_a, ids_b, "At capacity, all members should be preserved");
 }
 
-/// Edge case: One over capacity
+/// Edge case: Members beyond old capacity limit (no pruning now)
 #[test]
 fn test_member_one_over_capacity() {
     let owner_signing_key = SigningKey::generate(&mut OsRng);
     let owner_verifying_key = owner_signing_key.verifying_key();
     let owner_id: MemberId = owner_verifying_key.into();
 
-    // Create 6 members (one over capacity of 5)
+    // Create 6 members
     let mut members: Vec<AuthorizedMember> = Vec::new();
     for _ in 0..6 {
         let (member, _) = create_test_member(owner_id, owner_id);
@@ -1242,8 +1162,7 @@ fn test_member_one_over_capacity() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 5;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
@@ -1265,19 +1184,16 @@ fn test_member_one_over_capacity() {
         .apply_delta(&parent_state, &parameters, &None)
         .expect("apply_delta should succeed");
 
-    // Both should have exactly 5 members
-    assert_eq!(state_a.members.len(), 5);
-    assert_eq!(state_b.members.len(), 5);
+    // All 6 members should be kept (no pruning)
+    assert_eq!(state_a.members.len(), 6);
+    assert_eq!(state_b.members.len(), 6);
 
     let mut ids_a: Vec<_> = state_a.members.iter().map(|m| m.member.id()).collect();
     let mut ids_b: Vec<_> = state_b.members.iter().map(|m| m.member.id()).collect();
     ids_a.sort();
     ids_b.sort();
 
-    assert_eq!(
-        ids_a, ids_b,
-        "One over capacity: same member should be removed regardless of order"
-    );
+    assert_eq!(ids_a, ids_b, "All members should be preserved");
 }
 
 /// Edge case: All messages with identical timestamps
@@ -1354,7 +1270,7 @@ fn test_messages_all_identical_timestamps() {
     }
 }
 
-/// Edge case: Deep invite chains (10+ levels)
+/// Edge case: Deep invite chains (10+ levels) - all kept now
 #[test]
 fn test_deep_invite_chains() {
     let owner_signing_key = SigningKey::generate(&mut OsRng);
@@ -1385,19 +1301,17 @@ fn test_deep_invite_chains() {
         depth_0_members.push(auth_member);
     }
 
-    // Combine all members
+    // Combine all members (12 + 3 = 15)
     let mut all_members: Vec<AuthorizedMember> = chain.iter().map(|(m, _)| m.clone()).collect();
     all_members.extend(depth_0_members);
 
-    // Set max_members to 10 (need to remove 5)
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 10;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
-    // The deepest members (end of chain) should be removed first
+    // All members should be kept (no pruning)
     let mut state_a = MembersV1 {
         members: all_members.clone(),
     };
@@ -1412,30 +1326,19 @@ fn test_deep_invite_chains() {
         .apply_delta(&parent_state, &parameters, &None)
         .expect("apply_delta should succeed");
 
-    assert_eq!(state_a.members.len(), 10);
-    assert_eq!(state_b.members.len(), 10);
+    // All 15 members should be kept
+    assert_eq!(state_a.members.len(), 15);
+    assert_eq!(state_b.members.len(), 15);
 
     let mut ids_a: Vec<_> = state_a.members.iter().map(|m| m.member.id()).collect();
     let mut ids_b: Vec<_> = state_b.members.iter().map(|m| m.member.id()).collect();
     ids_a.sort();
     ids_b.sort();
 
-    assert_eq!(
-        ids_a, ids_b,
-        "Deep invite chains: same members should be kept"
-    );
-
-    // Verify that the deepest chain members were removed (chain indices 7-11 have depth 8-12)
-    let deep_chain_ids: Vec<MemberId> = chain[7..12].iter().map(|(m, _)| m.member.id()).collect();
-    for deep_id in &deep_chain_ids {
-        assert!(
-            !ids_a.contains(deep_id),
-            "Deep chain member should have been removed"
-        );
-    }
+    assert_eq!(ids_a, ids_b, "All members should be preserved");
 }
 
-/// Edge case: Concurrent adds and removals (via bans)
+/// Edge case: Concurrent adds and removals (via bans) - bans still remove members
 #[test]
 fn test_concurrent_adds_and_bans() {
     let owner_signing_key = SigningKey::generate(&mut OsRng);
@@ -1474,7 +1377,6 @@ fn test_concurrent_adds_and_bans() {
     ]);
 
     let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 5;
     parent_state.configuration.configuration.max_user_bans = 10;
     parent_state.bans = bans;
 
@@ -1497,9 +1399,9 @@ fn test_concurrent_adds_and_bans() {
         .apply_delta(&parent_state, &parameters, &None)
         .expect("apply_delta should succeed");
 
-    // Both should have 5 members (8 - 2 banned = 6, then capped to 5)
-    assert_eq!(state_a.members.len(), 5);
-    assert_eq!(state_b.members.len(), 5);
+    // Both should have 6 members (8 - 2 banned = 6, no capacity cap)
+    assert_eq!(state_a.members.len(), 6);
+    assert_eq!(state_b.members.len(), 6);
 
     // Banned members should not be present
     let ids_a: Vec<_> = state_a.members.iter().map(|m| m.member.id()).collect();
@@ -1518,9 +1420,7 @@ fn test_concurrent_adds_and_bans() {
 // REGRESSION TESTS
 // =============================================================================
 
-/// Regression test: Member truncation bug
-/// Before fix: First N members from delta were added based on iteration order
-/// After fix: All members added, then excess removed deterministically
+/// All members are now kept (no pruning) - verify convergence
 #[test]
 fn test_regression_member_truncation_order_dependent() {
     let owner_signing_key = SigningKey::generate(&mut OsRng);
@@ -1535,21 +1435,11 @@ fn test_regression_member_truncation_order_dependent() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 2;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
-
-    // OLD BEHAVIOR (before fix):
-    // - Delta [A, B, C, D, E] with max_members=2 would add A, B (first 2)
-    // - Delta [E, D, C, B, A] with max_members=2 would add E, D (first 2)
-    // Result: Different states!
-
-    // NEW BEHAVIOR (after fix):
-    // - All members are added first, then excess removed by longest chain + highest ID
-    // - Since all have same chain length, the 2 members with LOWEST MemberIds are kept
 
     let mut state_a = MembersV1::default();
     let delta_a = MembersDelta::new(members.clone());
@@ -1565,36 +1455,20 @@ fn test_regression_member_truncation_order_dependent() {
         .apply_delta(&parent_state, &parameters, &Some(delta_b))
         .expect("apply_delta should succeed");
 
-    // Both should have exactly 2 members
-    assert_eq!(state_a.members.len(), 2);
-    assert_eq!(state_b.members.len(), 2);
+    // All 5 members should be kept (no pruning)
+    assert_eq!(state_a.members.len(), 5);
+    assert_eq!(state_b.members.len(), 5);
 
-    // Both should have the SAME 2 members (the ones with lowest MemberIds)
+    // Both should have the SAME members
     let mut ids_a: Vec<_> = state_a.members.iter().map(|m| m.member.id()).collect();
     let mut ids_b: Vec<_> = state_b.members.iter().map(|m| m.member.id()).collect();
     ids_a.sort();
     ids_b.sort();
 
-    assert_eq!(
-        ids_a, ids_b,
-        "REGRESSION: Member truncation is still order-dependent!\n\
-         This would have failed before the fix was applied."
-    );
-
-    // Verify the kept members have the lowest IDs among all 5
-    let mut all_ids: Vec<_> = members.iter().map(|m| m.member.id()).collect();
-    all_ids.sort();
-    let expected_kept: Vec<MemberId> = all_ids[0..2].to_vec();
-
-    assert_eq!(
-        ids_a, expected_kept,
-        "The members with lowest IDs should be kept"
-    );
+    assert_eq!(ids_a, ids_b, "All orderings should converge to same result");
 }
 
-/// Regression test: Member excess removal tie-breaking
-/// Before fix: max_by_key returned arbitrary member when chain lengths tied
-/// After fix: Secondary sort by MemberId provides deterministic tie-breaking
+/// All members are now kept (no pruning) - verify convergence
 #[test]
 fn test_regression_member_excess_removal_tiebreak() {
     let owner_signing_key = SigningKey::generate(&mut OsRng);
@@ -1609,22 +1483,13 @@ fn test_regression_member_excess_removal_tiebreak() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 5;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
     };
 
-    // OLD BEHAVIOR (before fix):
-    // max_by_key would return "the last element" when multiple had same chain length,
-    // which depends on iteration order. Different orderings would remove different members.
-
-    // NEW BEHAVIOR (after fix):
-    // When chain lengths are equal, the member with highest MemberId is removed first.
-    // This is deterministic regardless of iteration order.
-
-    // Test 50 different orderings to increase confidence
+    // Test multiple orderings to ensure convergence
     let mut first_result: Option<Vec<MemberId>> = None;
 
     for rotation in 0..10 {
@@ -1636,31 +1501,18 @@ fn test_regression_member_excess_removal_tiebreak() {
             .apply_delta(&parent_state, &parameters, &None)
             .expect("apply_delta should succeed");
 
+        // All 10 members should be kept
+        assert_eq!(state.members.len(), 10);
+
         let mut ids: Vec<_> = state.members.iter().map(|m| m.member.id()).collect();
         ids.sort();
 
         if let Some(ref first) = first_result {
-            assert_eq!(
-                first, &ids,
-                "REGRESSION: Member excess removal tie-breaking is non-deterministic!\n\
-                 Rotation {} produced different result. This would have failed before the fix.",
-                rotation
-            );
+            assert_eq!(first, &ids, "All orderings should converge to same result");
         } else {
             first_result = Some(ids);
         }
     }
-
-    // Verify the 5 members with lowest IDs are kept
-    let mut all_ids: Vec<_> = members.iter().map(|m| m.member.id()).collect();
-    all_ids.sort();
-    let expected_kept: Vec<MemberId> = all_ids[0..5].to_vec();
-
-    assert_eq!(
-        first_result.unwrap(),
-        expected_kept,
-        "The 5 members with lowest IDs should be kept"
-    );
 }
 
 /// Regression test: Ban excess identification
