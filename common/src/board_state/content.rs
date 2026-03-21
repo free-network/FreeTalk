@@ -38,7 +38,8 @@ pub const ACTION_TYPE_EDIT: u32 = 1;
 pub const ACTION_TYPE_DELETE: u32 = 2;
 pub const ACTION_TYPE_REACTION: u32 = 3;
 pub const ACTION_TYPE_REMOVE_REACTION: u32 = 4;
-// Future: ACTION_TYPE_PIN = 5, ACTION_TYPE_REPLY = 6, etc.
+pub const ACTION_TYPE_EDIT_CATEGORY: u32 = 5;
+// Future: ACTION_TYPE_PIN = 6, ACTION_TYPE_REPLY = 7, etc.
 
 /// Text message content (content_type = 1)
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -126,6 +127,26 @@ impl ActionContentV1 {
         }
     }
 
+    /// Create an edit category action
+    pub fn edit_category(
+        target: MessageId,
+        new_name: String,
+        new_description: Option<String>,
+        new_icon: Option<String>,
+        new_color: String,
+    ) -> Self {
+        Self {
+            action_type: ACTION_TYPE_EDIT_CATEGORY,
+            target,
+            payload: encode_cbor(&CategoryEditPayload {
+                new_name,
+                new_description,
+                new_icon,
+                new_color,
+            }),
+        }
+    }
+
     /// Encode to CBOR bytes
     pub fn encode(&self) -> Vec<u8> {
         encode_cbor(self)
@@ -155,6 +176,15 @@ impl ActionContentV1 {
             None
         }
     }
+
+    /// Get the category edit payload if this is an edit_category action
+    pub fn category_edit_payload(&self) -> Option<CategoryEditPayload> {
+        if self.action_type == ACTION_TYPE_EDIT_CATEGORY {
+            ciborium::from_reader(&self.payload[..]).ok()
+        } else {
+            None
+        }
+    }
 }
 
 /// Payload for edit actions
@@ -168,6 +198,15 @@ pub struct EditPayload {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct ReactionPayload {
     pub emoji: String,
+}
+
+/// Payload for category edit actions
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct CategoryEditPayload {
+    pub new_name: String,
+    pub new_description: Option<String>,
+    pub new_icon: Option<String>,
+    pub new_color: String,
 }
 
 /// Reply message content (content_type = 3)

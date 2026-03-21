@@ -109,7 +109,6 @@ pub fn get_all_messages(
         let title_text = decrypt_message_title(&message.message.content, secrets);
         let is_self = author_id == self_member_id;
 
-        let edited = messages_state.is_edited(&message_id);
         let reactions = messages_state
             .reactions(&message_id)
             .cloned()
@@ -121,9 +120,32 @@ pub fn get_all_messages(
         let send_time_ms = raw_time.timestamp_millis();
         let receive_delay_secs = get_delay_secs(&message_id, send_time_ms);
 
-        // Extract category info
-        let (is_category, category_name, category_description, category_icon, category_color, parent_category_id) =
-            extract_category_info(&message.message.content, secrets);
+        // Extract category info (with edits applied)
+        let (is_category, category_name, category_description, category_icon, category_color, parent_category_id) = {
+            let (is_cat, name, desc, icon, color, parent) =
+                extract_category_info(&message.message.content, secrets);
+            // Apply category edits if available
+            if is_cat {
+                if let Some(edit) = messages_state.edited_category(&message_id) {
+                    (
+                        true,
+                        Some(edit.new_name.clone()),
+                        edit.new_description.clone(),
+                        edit.new_icon.clone(),
+                        Some(edit.new_color.clone()),
+                        parent,
+                    )
+                } else {
+                    (is_cat, name, desc, icon, color, parent)
+                }
+            } else {
+                (is_cat, name, desc, icon, color, parent)
+            }
+        };
+
+        // Mark as edited if category was edited
+        let edited = messages_state.is_edited(&message_id)
+            || messages_state.is_category_edited(&message_id);
 
         messages.push(MessageData {
             message_id,

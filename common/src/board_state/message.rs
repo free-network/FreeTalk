@@ -12,12 +12,16 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::SystemTime;
 
+use crate::board_state::content::CategoryEditPayload;
+
 /// Computed state for message actions (edits, deletes, reactions)
 /// This is rebuilt from action messages and not serialized
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct MessageActionsState {
     /// Messages that have been edited: message_id -> new text content
     pub edited_content: HashMap<MessageId, String>,
+    /// Categories that have been edited: message_id -> edit payload
+    pub edited_categories: HashMap<MessageId, CategoryEditPayload>,
     /// Messages that have been deleted
     pub deleted: std::collections::HashSet<MessageId>,
     /// Reactions on messages: message_id -> (emoji -> list of reactors)
@@ -226,7 +230,7 @@ impl MessagesV1 {
     ) {
         use crate::board_state::content::{
             ActionContentV1, DecodedContent, ACTION_TYPE_DELETE, ACTION_TYPE_EDIT,
-            ACTION_TYPE_REACTION, ACTION_TYPE_REMOVE_REACTION,
+            ACTION_TYPE_EDIT_CATEGORY, ACTION_TYPE_REACTION, ACTION_TYPE_REMOVE_REACTION,
         };
 
         // Clear existing computed state
@@ -298,6 +302,7 @@ impl MessagesV1 {
                             self.actions_state.deleted.insert(target.clone());
                             // Also remove any edited content for deleted messages
                             self.actions_state.edited_content.remove(target);
+                            self.actions_state.edited_categories.remove(target);
                         }
                     }
                 }
@@ -337,6 +342,21 @@ impl MessagesV1 {
                         }
                     }
                 }
+                ACTION_TYPE_EDIT_CATEGORY => {
+                    // Only the original author can edit their category
+                    if let Some(&original_author) = message_authors.get(target) {
+                        if actor == original_author {
+                            // Don't allow editing deleted categories
+                            if !self.actions_state.deleted.contains(target) {
+                                if let Some(payload) = action.category_edit_payload() {
+                                    self.actions_state
+                                        .edited_categories
+                                        .insert(target.clone(), payload);
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => {
                     // Unknown action type - ignore for forward compatibility
                 }
@@ -347,6 +367,16 @@ impl MessagesV1 {
     /// Check if a message has been edited
     pub fn is_edited(&self, message_id: &MessageId) -> bool {
         self.actions_state.edited_content.contains_key(message_id)
+    }
+
+    /// Check if a category has been edited
+    pub fn is_category_edited(&self, message_id: &MessageId) -> bool {
+        self.actions_state.edited_categories.contains_key(message_id)
+    }
+
+    /// Get the edited category payload if available
+    pub fn edited_category(&self, message_id: &MessageId) -> Option<&CategoryEditPayload> {
+        self.actions_state.edited_categories.get(message_id)
     }
 
     /// Check if a message has been deleted
@@ -519,6 +549,25 @@ impl BoardMessageBody {
             ActionContentV1, ACTION_CONTENT_VERSION, CONTENT_TYPE_ACTION,
         };
         let action = ActionContentV1::remove_reaction(target, emoji);
+        Self::Public {
+            content_type: CONTENT_TYPE_ACTION,
+            content_version: ACTION_CONTENT_VERSION,
+            data: action.encode(),
+        }
+    }
+
+    /// Create an edit category action (public)
+    pub fn edit_category(
+        target: MessageId,
+        new_name: String,
+        new_description: Option<String>,
+        new_icon: Option<String>,
+        new_color: String,
+    ) -> Self {
+        use crate::board_state::content::{
+            ActionContentV1, ACTION_CONTENT_VERSION, CONTENT_TYPE_ACTION,
+        };
+        let action = ActionContentV1::edit_category(target, new_name, new_description, new_icon, new_color);
         Self::Public {
             content_type: CONTENT_TYPE_ACTION,
             content_version: ACTION_CONTENT_VERSION,

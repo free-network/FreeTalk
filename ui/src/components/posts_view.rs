@@ -1,5 +1,5 @@
 use crate::components::app::{CurrentCategoryContext, Route, BOARDS, CURRENT_BOARD, CURRENT_CATEGORY};
-use crate::components::category_view::CategoryCard;
+use crate::components::category_view::{CategoryCard, CategoryEditData};
 use crate::components::conversation::{
     get_all_messages, get_category_posts, get_subcategories, get_top_level_categories,
     get_top_level_posts, MessageCard, MessageCardVariant, MessageData,
@@ -172,6 +172,23 @@ pub fn PostsView(
         }
     };
 
+    // Handler for editing categories
+    let handle_edit_category = move |edit_data: CategoryEditData| {
+        if let Some(ctx) = ActionContext::from_current_board() {
+            spawn_local(async move {
+                message_actions::edit_category(
+                    ctx,
+                    edit_data.message_id,
+                    edit_data.new_name,
+                    edit_data.new_description,
+                    edit_data.new_icon,
+                    edit_data.new_color,
+                )
+                .await;
+            });
+        }
+    };
+
     // Get current board_id for navigation
     let current_board_id = use_memo(move || {
         CURRENT_BOARD
@@ -304,12 +321,12 @@ pub fn PostsView(
                                                 }
                                                 div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
                                                     {categories.iter().map({
-                                                        let handle_edit_message = handle_edit_message.clone();
+                                                        let handle_edit_category = handle_edit_category.clone();
                                                         move |cat| {
                                                             let cat_id = cat.id_string();
                                                             let board_id = current_board_id.read().clone();
                                                             let nav = navigator();
-                                                            let handle_edit_message = handle_edit_message.clone();
+                                                            let handle_edit_category = handle_edit_category.clone();
                                                             rsx! {
                                                                 CategoryCard {
                                                                     key: "{cat_id}",
@@ -321,9 +338,8 @@ pub fn PostsView(
                                                                             category_id: cat_id.clone(),
                                                                         });
                                                                     },
-                                                                    on_edit: move |(msg_id, new_name, new_desc)| {
-                                                                        // Re-use edit_message handler - name goes in title, desc in text
-                                                                        handle_edit_message(msg_id, new_name, new_desc);
+                                                                    on_edit: move |edit_data| {
+                                                                        handle_edit_category(edit_data);
                                                                     },
                                                                     on_request_delete: move |msg_id| {
                                                                         pending_delete.set(Some(msg_id));

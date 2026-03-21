@@ -144,6 +144,31 @@ pub async fn edit_message(
     send_action_messages(ctx, vec![content]).await;
 }
 
+/// Edit a category
+pub async fn edit_category(
+    ctx: ActionContext,
+    target_message_id: MessageId,
+    new_name: String,
+    new_description: Option<String>,
+    new_icon: Option<String>,
+    new_color: String,
+) {
+    if new_name.is_empty() {
+        return;
+    }
+
+    // Categories are always public (no private board category support)
+    let content = BoardMessageBody::edit_category(
+        target_message_id,
+        new_name,
+        new_description,
+        new_icon,
+        new_color,
+    );
+
+    send_action_messages(ctx, vec![content]).await;
+}
+
 // Helper to build remove reaction content
 fn build_remove_reaction_content(
     ctx: &ActionContext,
