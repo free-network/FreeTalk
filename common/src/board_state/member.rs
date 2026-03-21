@@ -30,19 +30,11 @@ impl ComposableState for MembersV1 {
 
     fn verify(
         &self,
-        parent_state: &Self::ParentState,
+        _parent_state: &Self::ParentState,
         parameters: &Self::Parameters,
     ) -> Result<(), String> {
         if self.members.is_empty() {
             return Ok(());
-        }
-
-        if self.members.len() > parent_state.configuration.configuration.max_members {
-            return Err(format!(
-                "Too many members: {} > {}",
-                self.members.len(),
-                parent_state.configuration.configuration.max_members
-            ));
         }
 
         let owner_id = parameters.owner_id();
@@ -513,8 +505,7 @@ mod tests {
         println!("Member2 ID: {:?}", member2.id());
         println!("Owner ID: {:?}", owner_id);
 
-        let mut parent_state = ChatBoardStateV1::default();
-        parent_state.configuration.configuration.max_members = 3;
+        let parent_state = ChatBoardStateV1::default();
         let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
@@ -627,8 +618,7 @@ mod tests {
             added: vec![authorized_member3.clone()],
         };
 
-        let mut parent_state = ChatBoardStateV1::default();
-        parent_state.configuration.configuration.max_members = 3;
+        let parent_state = ChatBoardStateV1::default();
 
         let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
@@ -1044,14 +1034,13 @@ mod tests {
             members: vec![authorized_member1.clone(), authorized_member2.clone()],
         };
 
-        let mut parent_state = ChatBoardStateV1::default();
-        parent_state.configuration.configuration.max_members = 3;
+        let parent_state = ChatBoardStateV1::default();
 
         let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
         };
 
-        // Test applying delta - all members are kept (no pruning)
+        // Test applying delta - all members are kept
         let delta = MembersDelta {
             added: vec![authorized_member3.clone(), authorized_member4.clone()],
         };
@@ -1093,8 +1082,7 @@ mod tests {
         let owner_verifying_key = VerifyingKey::from(&owner_signing_key);
         let owner_id = owner_verifying_key.into();
 
-        let mut parent_state = ChatBoardStateV1::default();
-        parent_state.configuration.configuration.max_members = 2;
+        let parent_state = ChatBoardStateV1::default();
 
         let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,
@@ -1104,17 +1092,17 @@ mod tests {
         let empty_members = MembersV1 { members: vec![] };
         assert!(empty_members.verify(&parent_state, &parameters).is_ok());
 
-        // Test with maximum allowed number of members
+        // Test with valid members
         let (member1, member1_signing_key) = create_test_member(owner_id, owner_id);
         let (member2, _) = create_test_member(owner_id, member1.id());
 
         let authorized_member1 = AuthorizedMember::new(member1.clone(), &owner_signing_key);
         let authorized_member2 = AuthorizedMember::new(member2.clone(), &member1_signing_key);
 
-        let max_members = MembersV1 {
+        let valid_members = MembersV1 {
             members: vec![authorized_member1, authorized_member2],
         };
-        assert!(max_members.verify(&parent_state, &parameters).is_ok());
+        assert!(valid_members.verify(&parent_state, &parameters).is_ok());
 
         // Test with members invited by non-existent members
         let non_existent_signing_key = SigningKey::generate(&mut OsRng);
@@ -1148,8 +1136,7 @@ mod tests {
             members: vec![authorized_owner_member],
         };
 
-        let mut parent_state = ChatBoardStateV1::default();
-        parent_state.configuration.configuration.max_members = 2;
+        let parent_state = ChatBoardStateV1::default();
 
         let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,

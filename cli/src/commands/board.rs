@@ -45,14 +45,6 @@ pub enum BoardCommands {
         /// Set maximum number of user bans remembered
         #[arg(long)]
         max_bans: Option<usize>,
-
-        /// Set maximum number of recent messages stored
-        #[arg(long)]
-        max_messages: Option<usize>,
-
-        /// Set maximum number of members
-        #[arg(long)]
-        max_members: Option<usize>,
     },
 }
 
@@ -170,13 +162,8 @@ pub async fn execute(command: BoardCommands, api: ApiClient, format: OutputForma
             // TODO: Implement board leaving
             Ok(())
         }
-        BoardCommands::Config {
-            board_id,
-            max_bans,
-            max_messages,
-            max_members,
-        } => {
-            if max_bans.is_none() && max_messages.is_none() && max_members.is_none() {
+        BoardCommands::Config { board_id, max_bans } => {
+            if max_bans.is_none() {
                 // No changes requested, just show current config
                 let owner_bytes = bs58::decode(&board_id)
                     .into_vec()
@@ -193,8 +180,6 @@ pub async fn execute(command: BoardCommands, api: ApiClient, format: OutputForma
                 let cfg = &board_state.configuration.configuration;
                 println!("Current configuration:");
                 println!("  max_user_bans: {}", cfg.max_user_bans);
-                println!("  max_recent_messages: {}", cfg.max_recent_messages);
-                println!("  max_members: {}", cfg.max_members);
                 return Ok(());
             }
 
@@ -218,12 +203,6 @@ pub async fn execute(command: BoardCommands, api: ApiClient, format: OutputForma
                     if let Some(v) = max_bans {
                         cfg.max_user_bans = v;
                     }
-                    if let Some(v) = max_messages {
-                        cfg.max_recent_messages = v;
-                    }
-                    if let Some(v) = max_members {
-                        cfg.max_members = v;
-                    }
                 })
                 .await
             {
@@ -233,12 +212,6 @@ pub async fn execute(command: BoardCommands, api: ApiClient, format: OutputForma
                             println!("{}", "Configuration updated successfully!".green());
                             if let Some(v) = max_bans {
                                 println!("  max_user_bans: {}", v);
-                            }
-                            if let Some(v) = max_messages {
-                                println!("  max_recent_messages: {}", v);
-                            }
-                            if let Some(v) = max_members {
-                                println!("  max_members: {}", v);
                             }
                         }
                         OutputFormat::Json => {

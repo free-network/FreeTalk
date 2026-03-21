@@ -50,7 +50,6 @@ struct BoardStateSummary {
     ban_count: usize,
     message_count: usize,
     max_user_bans: usize,
-    max_members: usize,
     privacy_mode: String,
     configuration_version: u32,
 }
@@ -60,11 +59,9 @@ struct BoardConfig {
     board_name: String,
     privacy_mode: String,
     configuration_version: u32,
-    max_recent_messages: usize,
     max_user_bans: usize,
     max_message_size: usize,
     max_nickname_size: usize,
-    max_members: usize,
     max_board_name: usize,
     max_board_description: usize,
 }
@@ -218,7 +215,6 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                 ban_count: board_state.bans.0.len(),
                 message_count: board_state.recent_messages.messages.len(),
                 max_user_bans: config.max_user_bans,
-                max_members: config.max_members,
                 privacy_mode: format!("{:?}", config.privacy_mode),
                 configuration_version: config.configuration_version,
             };
@@ -231,10 +227,7 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                     println!("Privacy mode: {}", summary.privacy_mode);
                     println!("Config version: {}", summary.configuration_version);
                     println!();
-                    println!(
-                        "Members: {} / {}",
-                        summary.member_count, summary.max_members
-                    );
+                    println!("Members: {}", summary.member_count);
                     println!("Bans: {} / {}", summary.ban_count, summary.max_user_bans);
                     println!("Messages: {}", summary.message_count);
                 }
@@ -297,11 +290,9 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                 board_name: config.display.name.to_string_lossy(),
                 privacy_mode: format!("{:?}", config.privacy_mode),
                 configuration_version: config.configuration_version,
-                max_recent_messages: config.max_recent_messages,
                 max_user_bans: config.max_user_bans,
                 max_message_size: config.max_message_size,
                 max_nickname_size: config.max_nickname_size,
-                max_members: config.max_members,
                 max_board_name: config.max_board_name,
                 max_board_description: config.max_board_description,
             };
@@ -315,12 +306,7 @@ pub async fn execute(command: DebugCommands, api: ApiClient, format: OutputForma
                     println!("Config version: {}", board_config.configuration_version);
                     println!();
                     println!("Limits:");
-                    println!("  max_members: {}", board_config.max_members);
                     println!("  max_user_bans: {}", board_config.max_user_bans);
-                    println!(
-                        "  max_recent_messages: {}",
-                        board_config.max_recent_messages
-                    );
                     println!("  max_message_size: {}", board_config.max_message_size);
                     println!("  max_nickname_size: {}", board_config.max_nickname_size);
                     println!("  max_board_name: {}", board_config.max_board_name);

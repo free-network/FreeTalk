@@ -6,7 +6,6 @@ use dioxus::prelude::*;
 use dioxus_free_icons::icons::fa_solid_icons::FaRotate;
 use dioxus_free_icons::Icon;
 use freenet_scaffold::ComposableState;
-use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configuration};
 use river_core::board_state::privacy::PrivacyMode;
 use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1Delta};
 use std::ops::Deref;
@@ -69,24 +68,6 @@ pub fn EditBoardModal() -> Element {
                         BoardNameField {
                             config: config.clone(),
                             is_owner: *user_is_owner.read()
-                        }
-
-                        // Member capacity
-                        if let Some(board_data) = editing_board.read().as_ref() {
-                            {
-                                let member_count = board_data.board_state.members.members.len();
-                                let max_members = config.max_members;
-                                let is_full = member_count >= max_members;
-                                rsx! {
-                                    MaxMembersField {
-                                        member_count: member_count,
-                                        max_members: max_members,
-                                        is_full: is_full,
-                                        is_owner: *user_is_owner.read(),
-                                        config: config.clone(),
-                                    }
-                                }
-                            }
                         }
 
                         // Read-only board info
@@ -273,111 +254,5 @@ pub fn EditBoardModal() -> Element {
         }
     } else {
         rsx! {}
-    }
-}
-
-#[component]
-fn MaxMembersField(
-    member_count: usize,
-    max_members: usize,
-    is_full: bool,
-    is_owner: bool,
-    config: Configuration,
-) -> Element {
-    let mut max_members_input = use_signal(|| max_members.to_string());
-
-    let update_max_members = move |evt: Event<FormData>| {
-        if !is_owner {
-            return;
-        }
-        let new_val_str = evt.value().to_string();
-        max_members_input.set(new_val_str.clone());
-
-        let Ok(new_max) = new_val_str.parse::<usize>() else {
-            return;
-        };
-        if new_max == 0 || new_max == config.max_members {
-            return;
-        }
-
-        info!("Updating max_members to {new_max}");
-
-        let owner_key = CURRENT_BOARD.read().owner_key.expect("No owner key");
-
-        let signing_data = BOARDS.with(|boards| {
-            boards.map.get(&owner_key).map(|board_data| {
-                (
-                    board_data.board_key(),
-                    board_data.self_sk.clone(),
-                    board_data.board_state.clone(),
-                )
-            })
-        });
-
-        let Some((board_key, self_sk, board_state_clone)) = signing_data else {
-            return;
-        };
-
-        let mut new_config = config.clone();
-        new_config.max_members = new_max;
-        new_config.configuration_version += 1;
-
-        wasm_bindgen_futures::spawn_local(async move {
-            let mut config_bytes = Vec::new();
-            if let Err(e) = ciborium::ser::into_writer(&new_config, &mut config_bytes) {
-                error!("Failed to serialize config: {:?}", e);
-                return;
-            }
-
-            let signature =
-                crate::signing::sign_config_with_fallback(board_key, config_bytes, &self_sk).await;
-
-            let new_authorized_config =
-                AuthorizedConfigurationV1::with_signature(new_config, signature);
-
-            let delta = ChatBoardStateV1Delta {
-                configuration: Some(new_authorized_config),
-                ..Default::default()
-            };
-
-            BOARDS.with_mut(|boards| {
-                if let Some(board_data) = boards.map.get_mut(&owner_key) {
-                    match ComposableState::apply_delta(
-                        &mut board_data.board_state,
-                        &board_state_clone,
-                        &ChatBoardParametersV1 { owner: owner_key },
-                        &Some(delta),
-                    ) {
-                        Ok(_) => {
-                            info!("max_members updated successfully");
-                            mark_needs_sync(owner_key);
-                        }
-                        Err(e) => error!("Failed to apply max_members delta: {:?}", e),
-                    }
-                }
-            });
-        });
-    };
-
-    rsx! {
-        div { class: "mb-4",
-            label { class: "block text-sm font-medium text-text-muted mb-2",
-                "Members ({member_count}/{max_members})"
-            }
-            if is_full {
-                p { class: "text-xs text-red-400 mb-1",
-                    "Board is full — new members will be rejected."
-                }
-            }
-            if is_owner {
-                input {
-                    r#type: "number",
-                    min: "1",
-                    class: "w-full px-3 py-2 bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent",
-                    value: "{max_members_input}",
-                    onchange: update_max_members,
-                }
-            }
-        }
     }
 }

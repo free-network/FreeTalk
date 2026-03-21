@@ -1129,7 +1129,6 @@ mod tests {
         let author_id = MemberId::from(&author_verifying_key);
 
         let mut parent_state = ChatBoardStateV1::default();
-        parent_state.configuration.configuration.max_recent_messages = 3;
         parent_state.configuration.configuration.max_message_size = 100;
         parent_state.members.members = vec![crate::board_state::member::AuthorizedMember {
             member: crate::board_state::member::Member {

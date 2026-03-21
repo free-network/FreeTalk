@@ -78,12 +78,10 @@ impl ComposableState for AuthorizedConfigurationV1 {
             }
 
             // Verify that the new configuration is valid
-            if delta.configuration.max_recent_messages == 0
-                || delta.configuration.max_user_bans == 0
+            if delta.configuration.max_user_bans == 0
                 || delta.configuration.max_message_size == 0
                 || delta.configuration.max_title_size == 0
                 || delta.configuration.max_nickname_size == 0
-                || delta.configuration.max_members == 0
                 || delta.configuration.max_admins == 0
                 || delta.configuration.max_board_name == 0
                 || delta.configuration.max_board_description == 0
@@ -179,12 +177,10 @@ impl Default for Configuration {
             configuration_version: 1,
             privacy_mode: PrivacyMode::default(),
             display: BoardDisplayMetadata::default(),
-            max_recent_messages: 100,
             max_user_bans: 10,
             max_message_size: 10000,
             max_title_size: 100,
             max_nickname_size: 50,
-            max_members: 200,
             max_admins: 40,
             max_board_name: 100,
             max_board_description: 500,
@@ -210,12 +206,10 @@ pub struct Configuration {
     pub configuration_version: u32,
     pub privacy_mode: PrivacyMode,
     pub display: BoardDisplayMetadata,
-    pub max_recent_messages: usize,
     pub max_user_bans: usize,
     pub max_message_size: usize,
     pub max_title_size: usize,
     pub max_nickname_size: usize,
-    pub max_members: usize,
     pub max_admins: usize,
     pub max_board_name: usize,
     pub max_board_description: usize,
@@ -485,7 +479,7 @@ mod tests {
 
         let mut new_configuration = configuration.clone();
         new_configuration.configuration_version += 1;
-        new_configuration.max_recent_messages = 0;
+        new_configuration.max_user_bans = 0;
         let new_authorized_configuration =
             AuthorizedConfigurationV1::new(new_configuration, &owner_signing_key);
 

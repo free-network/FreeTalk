@@ -944,7 +944,7 @@ mod tests {
 
     /// Regression test: apply_delta should succeed when the delta contains
     /// encrypted secrets for a member that was simultaneously removed from
-    /// parent_state.members (e.g. ban or max_members eviction).
+    /// parent_state.members (e.g. ban).
     #[test]
     fn test_apply_delta_with_removed_member_secret() {
         let (mut state, params, owner_sk) = create_test_state_and_params();

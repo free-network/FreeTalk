@@ -188,7 +188,7 @@ mod tests {
         // Test that the configuration can be updated
         let mut new_cfg = state.configuration.configuration.clone();
         new_cfg.configuration_version += 1;
-        new_cfg.max_recent_messages = 10; // Change from default of 100 to 10
+        new_cfg.max_message_size = 5000; // Change from default
         let new_cfg = AuthorizedConfigurationV1::new(new_cfg, &owner_signing_key);
 
         let mut cfg_modified_state = state.clone();
@@ -276,7 +276,6 @@ mod tests {
         // Configuration allowing bans and members
         let config = Configuration {
             max_user_bans: 10,
-            max_members: 10,
             ..Default::default()
         };
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
@@ -430,11 +429,7 @@ mod tests {
             &a_sk,
         );
 
-        let config = Configuration {
-            max_members: 10,
-            max_recent_messages: 100,
-            ..Default::default()
-        };
+        let config = Configuration::default();
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
 
         let mut state = ChatBoardStateV1 {
@@ -500,11 +495,7 @@ mod tests {
             &b_sk,
         );
 
-        let config = Configuration {
-            max_members: 10,
-            max_recent_messages: 100,
-            ..Default::default()
-        };
+        let config = Configuration::default();
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
 
         let mut state = ChatBoardStateV1 {
@@ -577,7 +568,6 @@ mod tests {
         );
 
         let config = Configuration {
-            max_members: 10,
             max_user_bans: 10,
             ..Default::default()
         };
@@ -625,11 +615,7 @@ mod tests {
             &owner_sk,
         );
 
-        let config = Configuration {
-            max_members: 10,
-            max_recent_messages: 100,
-            ..Default::default()
-        };
+        let config = Configuration::default();
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
 
         // State with A but no messages
@@ -695,10 +681,7 @@ mod tests {
             &owner_sk,
         );
 
-        let config = Configuration {
-            max_members: 10,
-            ..Default::default()
-        };
+        let config = Configuration::default();
         let auth_config = AuthorizedConfigurationV1::new(config, &owner_sk);
 
         let mut state = ChatBoardStateV1 {

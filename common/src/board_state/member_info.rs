@@ -109,8 +109,8 @@ impl ComposableState for MemberInfoV1 {
                     member_info.verify_signature(parameters)?;
                 } else {
                     // For non-owners, verify they exist and check their signature.
-                    // If the member was removed (e.g. banned or max_members), skip
-                    // this entry — retention cleanup below will handle it.
+                    // If the member was removed (e.g. banned), skip this entry —
+                    // retention cleanup below will handle it.
                     let members = parent_state.members.members_by_member_id();
                     let member = match members.get(member_id) {
                         Some(m) => m,
@@ -798,7 +798,7 @@ mod tests {
 
     /// Regression test: apply_delta should succeed when the delta contains
     /// member_info for a member that was simultaneously removed from
-    /// parent_state.members (e.g. ban or max_members eviction).
+    /// parent_state.members (e.g. ban).
     #[test]
     fn test_apply_delta_with_removed_member_info() {
         let owner_signing_key = SigningKey::generate(&mut OsRng);
@@ -818,7 +818,7 @@ mod tests {
             member_info: vec![authorized_member_info.clone()],
         };
 
-        // Parent state with member REMOVED (simulates ban/max_members)
+        // Parent state with member REMOVED (simulates ban)
         let parent_state = ChatBoardStateV1::default();
         let parameters = ChatBoardParametersV1 {
             owner: owner_verifying_key,

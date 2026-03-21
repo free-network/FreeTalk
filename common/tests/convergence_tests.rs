@@ -449,8 +449,7 @@ fn test_member_delta_idempotency() {
     let (member_a, _) = create_test_member(owner_id, owner_id);
     let auth_member_a = create_authorized_member(member_a.clone(), &owner_signing_key);
 
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 10;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
@@ -510,7 +509,6 @@ fn test_message_delta_idempotency() {
     );
 
     let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_recent_messages = 100;
     parent_state.configuration.configuration.max_message_size = 1000;
 
     let parameters = ChatBoardParametersV1 {
@@ -558,8 +556,7 @@ fn test_member_interleaved_deltas_convergence() {
     let auth_c = create_authorized_member(member_c.clone(), &owner_signing_key);
     let auth_d = create_authorized_member(member_d.clone(), &owner_signing_key);
 
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 2;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
@@ -912,8 +909,7 @@ fn test_member_permutation_convergence() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 5;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
@@ -987,8 +983,7 @@ fn test_random_operation_sequence_convergence() {
         member_pool.push((auth_member, signing_key));
     }
 
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 8;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
@@ -1097,7 +1092,7 @@ fn test_message_varying_limits_convergence() {
 // EDGE CASE TESTS
 // =============================================================================
 
-/// Edge case: Exactly at capacity (max_members)
+/// Edge case: All members are kept
 #[test]
 fn test_member_exactly_at_capacity() {
     let owner_signing_key = SigningKey::generate(&mut OsRng);
@@ -1112,8 +1107,7 @@ fn test_member_exactly_at_capacity() {
         members.push(auth_member);
     }
 
-    let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 5;
+    let parent_state = ChatBoardStateV1::default();
 
     let parameters = ChatBoardParametersV1 {
         owner: owner_verifying_key,
@@ -1221,7 +1215,6 @@ fn test_messages_all_identical_timestamps() {
     }
 
     let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_recent_messages = 5;
     parent_state.configuration.configuration.max_message_size = 1000;
 
     let parameters = ChatBoardParametersV1 {
@@ -1631,7 +1624,6 @@ fn test_regression_message_pruning_order() {
     }
 
     let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_recent_messages = 10;
     parent_state.configuration.configuration.max_message_size = 1000;
 
     let parameters = ChatBoardParametersV1 {
@@ -1754,8 +1746,6 @@ fn test_full_state_merge_commutativity() {
 
     // ---- State A: has members [A, C], messages [1, 2], info [owner, A] ----
     let mut state_a = ChatBoardStateV1::default();
-    state_a.configuration.configuration.max_members = 10;
-    state_a.configuration.configuration.max_recent_messages = 100;
     state_a.configuration.configuration.max_message_size = 1000;
     state_a.members.members.push(auth_member_a.clone());
     state_a.members.members.push(auth_member_c.clone());
@@ -1766,8 +1756,6 @@ fn test_full_state_merge_commutativity() {
 
     // ---- State B: has members [B, C], messages [1, 3], info [owner, B] ----
     let mut state_b = ChatBoardStateV1::default();
-    state_b.configuration.configuration.max_members = 10;
-    state_b.configuration.configuration.max_recent_messages = 100;
     state_b.configuration.configuration.max_message_size = 1000;
     state_b.members.members.push(auth_member_b.clone());
     state_b.members.members.push(auth_member_c.clone());
@@ -1928,8 +1916,6 @@ fn test_regression_combined_scenario() {
 
     // Set up parent state with limits
     let mut parent_state = ChatBoardStateV1::default();
-    parent_state.configuration.configuration.max_members = 20;
-    parent_state.configuration.configuration.max_recent_messages = 30;
     parent_state.configuration.configuration.max_message_size = 1000;
     parent_state.configuration.configuration.max_user_bans = 10;
     parent_state.bans = BansV1(bans);
@@ -2036,9 +2022,7 @@ use river_core::board_state::configuration::{AuthorizedConfigurationV1, Configur
 fn create_test_config(owner_sk: &SigningKey) -> AuthorizedConfigurationV1 {
     AuthorizedConfigurationV1::new(
         Configuration {
-            max_members: 10,
             max_user_bans: 10,
-            max_recent_messages: 100,
             max_message_size: 1000,
             ..Default::default()
         },
