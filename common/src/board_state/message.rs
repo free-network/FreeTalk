@@ -242,6 +242,14 @@ impl MessagesV1 {
             .map(|m| (m.id(), m.message.author))
             .collect();
 
+        // Build a set of category message IDs for type checking
+        let category_ids: std::collections::HashSet<MessageId> = self
+            .messages
+            .iter()
+            .filter(|m| m.message.content.is_category())
+            .map(|m| m.id())
+            .collect();
+
         // Process action messages in timestamp order (messages are already sorted)
         for msg in &self.messages {
             let actor = msg.message.author;
@@ -280,6 +288,10 @@ impl MessagesV1 {
             match action.action_type {
                 ACTION_TYPE_EDIT => {
                     // Only the original author can edit their message
+                    // Categories must use ACTION_TYPE_EDIT_CATEGORY instead
+                    if category_ids.contains(target) {
+                        continue;
+                    }
                     if let Some(&original_author) = message_authors.get(target) {
                         if actor == original_author {
                             // Don't allow editing deleted messages
@@ -341,6 +353,10 @@ impl MessagesV1 {
                     }
                 }
                 ACTION_TYPE_EDIT_CATEGORY => {
+                    // Only categories can be edited with this action type
+                    if !category_ids.contains(target) {
+                        continue;
+                    }
                     // Owner, admins, or original author can edit categories
                     let is_owner = owner_id.map_or(false, |id| actor == id);
                     let is_admin = admin_ids.map_or(false, |ids| ids.contains(&actor));
@@ -1628,5 +1644,93 @@ mod tests {
             display[1].message.content.as_public_string(),
             Some("World".to_string())
         );
+    }
+
+    #[test]
+    fn test_edit_action_on_category_ignored() {
+        // Edit actions (ACTION_TYPE_EDIT) should be ignored when targeting a category
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let owner_id = MemberId::from(&verifying_key);
+
+        // Create a category
+        let category_msg = MessageV1 {
+            board_owner: owner_id,
+            author: owner_id,
+            time: SystemTime::now(),
+            content: BoardMessageBody::category(
+                "Test Category".to_string(),
+                Some("Description".to_string()),
+                None,
+                "#ff0000".to_string(),
+                None,
+            ),
+        };
+        let auth_category = AuthorizedMessageV1::new(category_msg, &signing_key);
+        let category_id = auth_category.id();
+
+        // Try to edit the category using ACTION_TYPE_EDIT (wrong action type)
+        let edit_msg = MessageV1 {
+            board_owner: owner_id,
+            author: owner_id,
+            time: SystemTime::now() + Duration::from_secs(1),
+            content: BoardMessageBody::edit(
+                category_id.clone(),
+                String::new(),
+                "Hacked content".to_string(),
+            ),
+        };
+        let auth_edit = AuthorizedMessageV1::new(edit_msg, &signing_key);
+
+        let mut messages = MessagesV1 {
+            messages: vec![auth_category, auth_edit],
+            ..Default::default()
+        };
+        messages.rebuild_actions_state();
+
+        // Edit should be ignored - category should NOT appear as edited
+        assert!(!messages.is_edited(&category_id));
+    }
+
+    #[test]
+    fn test_edit_category_action_on_regular_message_ignored() {
+        // Edit category actions (ACTION_TYPE_EDIT_CATEGORY) should be ignored when targeting a regular message
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let owner_id = MemberId::from(&verifying_key);
+
+        // Create a regular text message
+        let text_msg = MessageV1 {
+            board_owner: owner_id,
+            author: owner_id,
+            time: SystemTime::now(),
+            content: BoardMessageBody::public(String::new(), "Regular message".to_string()),
+        };
+        let auth_text = AuthorizedMessageV1::new(text_msg, &signing_key);
+        let text_id = auth_text.id();
+
+        // Try to edit the text message using ACTION_TYPE_EDIT_CATEGORY (wrong action type)
+        let edit_msg = MessageV1 {
+            board_owner: owner_id,
+            author: owner_id,
+            time: SystemTime::now() + Duration::from_secs(1),
+            content: BoardMessageBody::edit_category(
+                text_id.clone(),
+                "Hacked name".to_string(),
+                None,
+                None,
+                "#ff0000".to_string(),
+            ),
+        };
+        let auth_edit = AuthorizedMessageV1::new(edit_msg, &signing_key);
+
+        let mut messages = MessagesV1 {
+            messages: vec![auth_text, auth_edit],
+            ..Default::default()
+        };
+        messages.rebuild_actions_state();
+
+        // Edit should be ignored - message should NOT appear as category-edited
+        assert!(!messages.is_category_edited(&text_id));
     }
 }
