@@ -136,7 +136,7 @@ pub fn CategoryCreateModal() -> Element {
             }
         };
 
-        let color_val = Some(color.read().clone());
+        let color_val = color.read().clone();
         let parent_id_val = parent_id_for_closure.clone();
 
         spawn_local(async move {
@@ -262,7 +262,7 @@ pub fn CategoryCreateModal() -> Element {
 
                     // Color picker
                     div {
-                        label { class: "block text-sm font-medium text-text mb-2", "Color" }
+                        label { class: "block text-sm font-medium text-text mb-2", "Color *" }
                         div { class: "flex flex-wrap gap-2",
                             {COLOR_PRESETS.iter().map(|(hex, label)| {
                                 let hex = *hex;
@@ -271,13 +271,16 @@ pub fn CategoryCreateModal() -> Element {
                                     button {
                                         key: "{hex}",
                                         class: if is_selected {
-                                            "w-8 h-8 rounded-full ring-2 ring-offset-2 ring-offset-panel ring-text"
+                                            "w-8 h-8 rounded-full ring-2 ring-offset-2 ring-offset-panel ring-text relative flex items-center justify-center"
                                         } else {
                                             "w-8 h-8 rounded-full hover:scale-110 transition-transform"
                                         },
                                         style: "background-color: {hex};",
                                         title: "{label}",
                                         onclick: move |_| color.set(hex.to_string()),
+                                        if is_selected {
+                                            span { class: "text-white text-sm font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]", "✓" }
+                                        }
                                     }
                                 }
                             })}

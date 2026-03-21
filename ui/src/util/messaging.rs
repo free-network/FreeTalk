@@ -241,7 +241,7 @@ pub async fn send_category(
     name: String,
     description: Option<String>,
     icon: Option<String>,
-    color: Option<String>,
+    color: String,
     parent_category_id: Option<MessageId>,
 ) -> Result<(), String> {
     use crate::components::app::CURRENT_BOARD;

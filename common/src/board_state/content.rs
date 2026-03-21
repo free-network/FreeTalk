@@ -230,12 +230,13 @@ pub struct CategoryContentV1 {
 }
 
 impl CategoryContentV1 {
-    pub fn new(name: String, description: Option<String>) -> Self {
+    /// Create a new category. Color is required.
+    pub fn new(name: String, description: Option<String>, color: String) -> Self {
         Self {
             name,
             description,
             icon: None,
-            color: None,
+            color: Some(color),
             parent_category_id: None,
         }
     }
@@ -245,11 +246,6 @@ impl CategoryContentV1 {
     /// If the input is empty, no icon is set.
     pub fn with_icon(mut self, icon: String) -> Self {
         self.icon = normalize_icon(&icon);
-        self
-    }
-
-    pub fn with_color(mut self, color: String) -> Self {
-        self.color = Some(color);
         self
     }
 
@@ -485,9 +481,8 @@ mod tests {
 
     #[test]
     fn test_category_content_roundtrip() {
-        let category = CategoryContentV1::new("General".to_string(), Some("General discussion".to_string()))
-            .with_icon("💬".to_string())
-            .with_color("#6366f1".to_string());
+        let category = CategoryContentV1::new("General".to_string(), Some("General discussion".to_string()), "#6366f1".to_string())
+            .with_icon("💬".to_string());
         let encoded = category.encode();
         let decoded = CategoryContentV1::decode(&encoded).unwrap();
         assert_eq!(category, decoded);
@@ -499,8 +494,8 @@ mod tests {
     #[test]
     fn test_category_with_parent() {
         let parent_id = test_message_id();
-        let category = CategoryContentV1::new("Subcategory".to_string(), None)
-            .with_parent(parent_id);
+        let category = CategoryContentV1::new("Subcategory".to_string(), None, "#ef4444".to_string())
+            .with_parent(parent_id.clone());
         let encoded = category.encode();
         let decoded = CategoryContentV1::decode(&encoded).unwrap();
         assert_eq!(decoded.parent_category_id, Some(parent_id));
@@ -508,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_decoded_content_category() {
-        let cat = CategoryContentV1::new("Test".to_string(), Some("Description".to_string()))
+        let cat = CategoryContentV1::new("Test".to_string(), Some("Description".to_string()), "#22c55e".to_string())
             .with_icon("🎯".to_string());
         let dc = DecodedContent::Category(cat.clone());
         assert!(dc.is_category());

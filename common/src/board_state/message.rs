@@ -559,18 +559,15 @@ impl BoardMessageBody {
         name: String,
         description: Option<String>,
         icon: Option<String>,
-        color: Option<String>,
+        color: String,
         parent_category_id: Option<MessageId>,
     ) -> Self {
         use crate::board_state::content::{
             CategoryContentV1, CATEGORY_CONTENT_VERSION, CONTENT_TYPE_CATEGORY,
         };
-        let mut cat = CategoryContentV1::new(name, description);
+        let mut cat = CategoryContentV1::new(name, description, color);
         if let Some(i) = icon {
             cat = cat.with_icon(i);
-        }
-        if let Some(c) = color {
-            cat = cat.with_color(c);
         }
         if let Some(p) = parent_category_id {
             cat = cat.with_parent(p);
