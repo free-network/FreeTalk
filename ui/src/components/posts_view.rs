@@ -291,17 +291,24 @@ pub fn PostsView(
                             let board_info = current_board_data.as_ref()
                                 .map(|bd| {
                                     let config = &bd.board_state.configuration.configuration;
+                                    let self_member_id = MemberId::from(&bd.self_sk.verifying_key());
+                                    let owner_id = MemberId::from(&bd.owner_vk);
+                                    let is_owner = self_member_id == owner_id;
+                                    let is_admin = bd.board_state.admin.admins.iter()
+                                        .any(|a| a.admin.id() == self_member_id);
                                     (
-                                        MemberId::from(&bd.self_sk.verifying_key()),
+                                        self_member_id,
                                         config.max_title_size,
                                         config.max_message_size,
+                                        is_owner,
+                                        is_admin,
                                     )
                                 });
 
                             let has_categories = !categories.is_empty();
                             let has_posts = !posts.is_empty();
 
-                            if let Some((self_member_id, max_title_size, max_message_size)) = board_info {
+                            if let Some((self_member_id, max_title_size, max_message_size, is_owner, is_admin)) = board_info {
                                 if !has_categories && !has_posts {
                                     rsx! {
                                         div { class: "flex flex-col items-center justify-center h-64 text-text-muted",
@@ -332,6 +339,8 @@ pub fn PostsView(
                                                                     key: "{cat_id}",
                                                                     category: cat.clone(),
                                                                     self_member_id: self_member_id,
+                                                                    is_owner: is_owner,
+                                                                    is_admin: is_admin,
                                                                     on_click: move |_| {
                                                                         nav.push(Route::PostsInCategory {
                                                                             board_id: board_id.clone(),

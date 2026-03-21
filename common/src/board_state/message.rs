@@ -213,20 +213,25 @@ impl MessagesV1 {
     /// use `rebuild_actions_state_with_decrypted` and provide the decrypted
     /// content for each private action message.
     pub fn rebuild_actions_state(&mut self) {
-        self.rebuild_actions_state_with_decrypted(&HashMap::new());
+        self.rebuild_actions_state_with_permissions(&HashMap::new(), None, None);
     }
 
-    /// Rebuild actions state with decrypted content for private action messages.
-    ///
-    /// For private boards, the caller should decrypt each private action message
-    /// and provide the plaintext bytes in `decrypted_content`, keyed by message ID.
-    ///
-    /// # Arguments
-    /// * `decrypted_content` - Map of message_id -> decrypted plaintext bytes for
-    ///   private action messages. Public actions are decoded directly.
+    /// Rebuild actions state with decrypted content (for private boards).
+    /// Use `rebuild_actions_state_with_permissions` if you need to allow
+    /// owner/admin category edits.
     pub fn rebuild_actions_state_with_decrypted(
         &mut self,
         decrypted_content: &HashMap<MessageId, Vec<u8>>,
+    ) {
+        self.rebuild_actions_state_with_permissions(decrypted_content, None, None);
+    }
+
+    /// Rebuild actions state with owner/admin permissions for category edits.
+    pub fn rebuild_actions_state_with_permissions(
+        &mut self,
+        decrypted_content: &HashMap<MessageId, Vec<u8>>,
+        owner_id: Option<MemberId>,
+        admin_ids: Option<&std::collections::HashSet<MemberId>>,
     ) {
         use crate::board_state::content::{
             ActionContentV1, DecodedContent, ACTION_TYPE_DELETE, ACTION_TYPE_EDIT,
@@ -343,16 +348,18 @@ impl MessagesV1 {
                     }
                 }
                 ACTION_TYPE_EDIT_CATEGORY => {
-                    // Only the original author can edit their category
-                    if let Some(&original_author) = message_authors.get(target) {
-                        if actor == original_author {
-                            // Don't allow editing deleted categories
-                            if !self.actions_state.deleted.contains(target) {
-                                if let Some(payload) = action.category_edit_payload() {
-                                    self.actions_state
-                                        .edited_categories
-                                        .insert(target.clone(), payload);
-                                }
+                    // Owner, admins, or original author can edit categories
+                    let is_owner = owner_id.map_or(false, |id| actor == id);
+                    let is_admin = admin_ids.map_or(false, |ids| ids.contains(&actor));
+                    let is_author = message_authors.get(target) == Some(&actor);
+
+                    if is_owner || is_admin || is_author {
+                        // Don't allow editing deleted categories
+                        if !self.actions_state.deleted.contains(target) {
+                            if let Some(payload) = action.category_edit_payload() {
+                                self.actions_state
+                                    .edited_categories
+                                    .insert(target.clone(), payload);
                             }
                         }
                     }

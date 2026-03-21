@@ -143,10 +143,18 @@ impl BoardSynchronizer {
                                 })
                                 .collect();
 
+                            let owner_id = river_core::board_state::member::MemberId::from(&params.owner);
+                            let admin_ids: std::collections::HashSet<_> = board_data
+                                .board_state
+                                .admin
+                                .admins
+                                .iter()
+                                .map(|a| a.admin.id())
+                                .collect();
                             board_data
                                 .board_state
                                 .recent_messages
-                                .rebuild_actions_state_with_decrypted(&decrypted_actions);
+                                .rebuild_actions_state_with_permissions(&decrypted_actions, Some(owner_id), Some(&admin_ids));
                         }
 
                         // Log versions after applying delta
@@ -752,10 +760,18 @@ impl BoardSynchronizer {
                                 })
                                 .collect();
 
+                            let owner_id = river_core::board_state::member::MemberId::from(&board_owner_vk);
+                            let admin_ids: std::collections::HashSet<_> = board_data
+                                .board_state
+                                .admin
+                                .admins
+                                .iter()
+                                .map(|a| a.admin.id())
+                                .collect();
                             board_data
                                 .board_state
                                 .recent_messages
-                                .rebuild_actions_state_with_decrypted(&decrypted_actions);
+                                .rebuild_actions_state_with_permissions(&decrypted_actions, Some(owner_id), Some(&admin_ids));
                         }
 
                         // Log member info versions after merge

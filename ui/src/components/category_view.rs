@@ -35,6 +35,12 @@ pub fn CategoryCard(
     category: MessageData,
     /// Self member ID for determining edit/delete permissions
     self_member_id: MemberId,
+    /// Whether the current user is the board owner
+    #[props(default)]
+    is_owner: bool,
+    /// Whether the current user is a board admin
+    #[props(default)]
+    is_admin: bool,
     /// Click handler for navigation
     on_click: EventHandler<()>,
     /// Edit handler with full category data
@@ -57,8 +63,10 @@ pub fn CategoryCard(
     let description = category.category_description.as_deref();
     let color = category.category_color.as_deref().unwrap_or("#6366f1");
 
-    let is_self = category.author_id == self_member_id;
-    let has_actions = is_self && (on_edit.is_some() || on_request_delete.is_some());
+    // Can edit if user is author, owner, or admin
+    let is_author = category.author_id == self_member_id;
+    let can_edit = is_author || is_owner || is_admin;
+    let has_actions = can_edit && (on_edit.is_some() || on_request_delete.is_some());
     let msg_id = category.message_id.clone();
 
     rsx! {

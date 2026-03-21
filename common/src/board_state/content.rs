@@ -250,6 +250,9 @@ impl ReplyContentV1 {
     }
 }
 
+/// Default color for categories (used for backwards compatibility)
+pub const DEFAULT_CATEGORY_COLOR: &str = "#6366f1";
+
 /// Category content (content_type = 4)
 ///
 /// Categories organize posts into hierarchical groups.
@@ -262,8 +265,8 @@ pub struct CategoryContentV1 {
     pub description: Option<String>,
     /// Optional icon (emoji)
     pub icon: Option<String>,
-    /// Optional color for UI display (hex like "#6366f1")
-    pub color: Option<String>,
+    /// Color for UI display (hex like "#6366f1")
+    pub color: String,
     /// Parent category ID (None for top-level categories)
     pub parent_category_id: Option<MessageId>,
 }
@@ -275,7 +278,7 @@ impl CategoryContentV1 {
             name,
             description,
             icon: None,
-            color: Some(color),
+            color,
             parent_category_id: None,
         }
     }

@@ -377,7 +377,7 @@ fn extract_category_info(
                     Some(cat.name),
                     cat.description,
                     cat.icon,
-                    cat.color,
+                    Some(cat.color),
                     cat.parent_category_id,
                 );
             }
