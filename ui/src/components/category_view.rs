@@ -82,7 +82,7 @@ pub fn CategoryCard(
 
             // Color accent bar at top
             div {
-                class: "h-1",
+                class: "h-2",
                 style: if *is_editing.read() {
                     format!("background-color: {};", edit_color.read())
                 } else {
@@ -139,17 +139,18 @@ pub fn CategoryCard(
                     // Color picker
                     div { class: "mb-2",
                         label { class: "block text-xs font-medium text-text-muted mb-1", "Color" }
-                        div { class: "flex flex-wrap gap-1",
+                        div { class: "flex flex-wrap gap-2",
                             {COLOR_PRESETS.iter().map(|(hex, label)| {
                                 let hex = *hex;
                                 let is_selected = *edit_color.read() == hex;
                                 rsx! {
                                     button {
+                                        r#type: "button",
                                         key: "{hex}",
                                         class: if is_selected {
-                                            "w-6 h-6 rounded-full ring-2 ring-offset-1 ring-offset-panel ring-text relative flex items-center justify-center"
+                                            "w-8 h-8 rounded-full ring-2 ring-offset-2 ring-offset-panel ring-text relative flex items-center justify-center"
                                         } else {
-                                            "w-6 h-6 rounded-full hover:scale-110 transition-transform"
+                                            "w-8 h-8 rounded-full hover:scale-110 transition-transform"
                                         },
                                         style: "background-color: {hex};",
                                         title: "{label}",
@@ -158,7 +159,7 @@ pub fn CategoryCard(
                                             edit_color.set(hex.to_string());
                                         },
                                         if is_selected {
-                                            span { class: "text-white text-xs font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]", "✓" }
+                                            span { class: "text-white text-sm font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]", "✓" }
                                         }
                                     }
                                 }
@@ -169,6 +170,7 @@ pub fn CategoryCard(
                     // Save/Cancel buttons
                     div { class: "flex gap-2",
                         button {
+                            r#type: "button",
                             class: "px-3 py-1 text-sm bg-accent hover:bg-accent/80 text-white rounded transition-colors",
                             onclick: {
                                 let msg_id = msg_id.clone();
@@ -209,6 +211,7 @@ pub fn CategoryCard(
                             "Save"
                         }
                         button {
+                            r#type: "button",
                             class: "px-3 py-1 text-sm bg-surface hover:bg-surface-hover text-text rounded transition-colors",
                             onclick: move |e| {
                                 e.stop_propagation();
@@ -233,6 +236,7 @@ pub fn CategoryCard(
 
                     if on_edit.is_some() {
                         button {
+                            r#type: "button",
                             class: "text-xs text-text-muted hover:text-text px-1",
                             onclick: {
                                 let name = name.to_string();
@@ -253,6 +257,7 @@ pub fn CategoryCard(
                     }
                     if let Some(ref delete_handler) = on_request_delete {
                         button {
+                            r#type: "button",
                             class: "text-xs text-text-muted hover:text-red-500 px-1",
                             onclick: {
                                 let handler = delete_handler.clone();
