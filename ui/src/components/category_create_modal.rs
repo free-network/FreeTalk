@@ -1,6 +1,7 @@
 use crate::components::app::{BOARDS, CURRENT_BOARD, CURRENT_CATEGORY};
 use crate::util::messaging::send_category;
 use dioxus::prelude::*;
+use river_core::board_state::content::validate_icon;
 use river_core::board_state::message::MessageId;
 use wasm_bindgen_futures::spawn_local;
 
@@ -110,6 +111,19 @@ pub fn CategoryCreateModal() -> Element {
             return;
         }
 
+        let icon_val = {
+            let ic = icon.read().trim().to_string();
+            if ic.is_empty() {
+                None
+            } else {
+                if let Err(e) = validate_icon(&ic) {
+                    error_msg.set(Some(e));
+                    return;
+                }
+                Some(ic)
+            }
+        };
+
         error_msg.set(None);
         is_creating.set(true);
 
@@ -119,15 +133,6 @@ pub fn CategoryCreateModal() -> Element {
                 None
             } else {
                 Some(desc)
-            }
-        };
-
-        let icon_val = {
-            let ic = icon.read().trim().to_string();
-            if ic.is_empty() {
-                None
-            } else {
-                Some(ic)
             }
         };
 

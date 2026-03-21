@@ -26,6 +26,7 @@ rand = { workspace = true, optional = true }  # Make `rand` optional
 getrandom = { version = "0.2.15", optional = true, default-features = false }
 base64.workspace = true
 data-encoding.workspace = true
+unicode-segmentation = "1.11"
 
 # Internal dependencies
 freenet-scaffold.workspace = true

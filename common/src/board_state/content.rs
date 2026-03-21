@@ -12,6 +12,7 @@
 
 use crate::board_state::message::MessageId;
 use serde::{Deserialize, Serialize};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Content type constants
 pub const CONTENT_TYPE_TEXT: u32 = 1;
@@ -239,8 +240,11 @@ impl CategoryContentV1 {
         }
     }
 
+    /// Set the icon, enforcing that it is exactly one grapheme cluster.
+    /// If the input contains multiple graphemes, only the first is used.
+    /// If the input is empty, no icon is set.
     pub fn with_icon(mut self, icon: String) -> Self {
-        self.icon = Some(icon);
+        self.icon = normalize_icon(&icon);
         self
     }
 
@@ -261,6 +265,33 @@ impl CategoryContentV1 {
     pub fn decode(data: &[u8]) -> Result<Self, String> {
         decode_cbor(data, "CategoryContentV1")
     }
+}
+
+/// Normalize an icon string to exactly one grapheme cluster.
+/// Returns None if the input is empty, otherwise returns the first grapheme.
+pub fn normalize_icon(icon: &str) -> Option<String> {
+    let trimmed = icon.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed.graphemes(true).next().map(|g| g.to_string())
+}
+
+/// Validate that an icon string is exactly one grapheme cluster.
+/// Returns Ok(()) if valid, Err with message if invalid.
+pub fn validate_icon(icon: &str) -> Result<(), String> {
+    let trimmed = icon.trim();
+    if trimmed.is_empty() {
+        return Ok(()); // Empty is allowed (no icon)
+    }
+    let grapheme_count = trimmed.graphemes(true).count();
+    if grapheme_count != 1 {
+        return Err(format!(
+            "Icon must be exactly 1 character (emoji), got {} characters",
+            grapheme_count
+        ));
+    }
+    Ok(())
 }
 
 /// Decoded message content for client-side processing
