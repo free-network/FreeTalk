@@ -6,11 +6,12 @@ pub(crate) mod receive_invitation_modal;
 use crate::components::app::chat_delegate::save_boards_to_delegate;
 use crate::components::app::document_title::mark_current_board_as_read;
 use crate::components::app::{BOARDS, CREATE_BOARD_MODAL, CURRENT_BOARD};
+use crate::components::members::ImportIdentityModal;
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::logger::tracing::error;
 use dioxus::prelude::*;
 use dioxus_free_icons::{
-    icons::fa_solid_icons::{FaChevronDown, FaComments, FaPlus},
+    icons::fa_solid_icons::{FaChevronDown, FaComments, FaFileImport, FaPlus},
     Icon,
 };
 use web_sys::window;
@@ -57,6 +58,7 @@ fn format_build_time_local() -> String {
 #[component]
 pub fn BoardList() -> Element {
     let mut is_open = use_signal(|| false);
+    let mut import_modal_active = use_signal(|| false);
 
     // Memoize the board list to avoid reading signals during render
     let board_items = use_memo(move || {
@@ -192,6 +194,17 @@ pub fn BoardList() -> Element {
                             span { class: "text-2xl", "Create Board" }
                         }
 
+                        // Import ID button
+                        button {
+                            class: "w-full flex items-center gap-4 px-6 py-4 border-t border-border text-text-muted hover:text-accent hover:bg-surface transition-colors",
+                            onclick: move |_| {
+                                import_modal_active.set(true);
+                                is_open.set(false);
+                            },
+                            Icon { width: 32, height: 32, icon: FaFileImport }
+                            span { class: "text-2xl", "Import ID" }
+                        }
+
                         // Build info footer
                         div { class: "px-6 py-2 border-t border-border text-sm text-text-muted text-center",
                             {"Built: "} {format_build_time_local()}
@@ -199,6 +212,9 @@ pub fn BoardList() -> Element {
                     }
                 }
             }
+        }
+        ImportIdentityModal {
+            is_active: import_modal_active
         }
     }
 }

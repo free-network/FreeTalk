@@ -1,7 +1,7 @@
 use crate::components::app::{mark_needs_sync, BOARDS, CURRENT_BOARD, MEMBER_INFO_MODAL};
 use crate::util::ecies::unseal_bytes_with_secrets;
 use dioxus::prelude::*;
-use dioxus_free_icons::icons::fa_solid_icons::{FaFileExport, FaFileImport, FaUserPlus, FaUsers};
+use dioxus_free_icons::icons::fa_solid_icons::{FaFileExport, FaUserPlus, FaUsers};
 use dioxus_free_icons::Icon;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use river_core::board_state::identity::IdentityExport;
@@ -166,7 +166,6 @@ fn invite_tree_order(owner_id: MemberId, members: &MembersV1) -> Vec<MemberId> {
 pub fn MembersView() -> Element {
     let mut invite_modal_active = use_signal(|| false);
     let mut export_modal_active = use_signal(|| false);
-    let mut import_modal_active = use_signal(|| false);
 
     let members = use_memo(move || {
         let board_owner = CURRENT_BOARD.read().owner_key?;
@@ -277,13 +276,7 @@ pub fn MembersView() -> Element {
                         class: "flex items-center gap-1.5 px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-muted text-xs font-medium rounded-lg transition-colors border border-border",
                         onclick: move |_| export_modal_active.set(true),
                         Icon { icon: FaFileExport, width: 12, height: 12 }
-                        span { "Export" }
-                    }
-                    button {
-                        class: "flex items-center gap-1.5 px-2 py-1.5 bg-surface hover:bg-surface-hover text-text-muted text-xs font-medium rounded-lg transition-colors border border-border",
-                        onclick: move |_| import_modal_active.set(true),
-                        Icon { icon: FaFileImport, width: 12, height: 12 }
-                        span { "Import" }
+                        span { "Export ID" }
                     }
                 }
             }
@@ -309,9 +302,6 @@ pub fn MembersView() -> Element {
         }
         ExportIdentityModal {
             is_active: export_modal_active
-        }
-        ImportIdentityModal {
-            is_active: import_modal_active
         }
     }
 }
@@ -353,12 +343,23 @@ fn ExportIdentityModal(is_active: Signal<bool>) -> Element {
                         }
                     };
 
+                    // Extract board name for inclusion in export (None if encrypted and undecryptable)
+                    let sealed_name = &board_data
+                        .board_state
+                        .configuration
+                        .configuration
+                        .display
+                        .name;
+                    let board_name = unseal_bytes_with_secrets(sealed_name, &board_data.secrets)
+                        .ok()
+                        .map(|bytes| String::from_utf8_lossy(&bytes).to_string());
                     let export = IdentityExport {
                         board_owner: owner_key,
                         signing_key: board_data.self_sk.clone(),
                         authorized_member,
                         invite_chain: board_data.invite_chain.clone(),
                         member_info: board_data.self_member_info.clone(),
+                        board_name,
                     };
                     token_text.set(export.to_armored_string());
                 }
@@ -420,7 +421,7 @@ fn ExportIdentityModal(is_active: Signal<bool>) -> Element {
 }
 
 #[component]
-fn ImportIdentityModal(is_active: Signal<bool>) -> Element {
+pub fn ImportIdentityModal(is_active: Signal<bool>) -> Element {
     let mut token_input = use_signal(String::new);
     let mut error_msg = use_signal(|| None::<String>);
     let mut success_msg = use_signal(|| None::<String>);
@@ -449,10 +450,18 @@ fn ImportIdentityModal(is_active: Signal<bool>) -> Element {
                 // Compute contract key from owner key + current WASM
                 let contract_key = crate::util::owner_vk_to_contract_key(&owner_key);
 
-                // Create BoardData from the import
+                // Create BoardData from the import, using board name from export if available
+                let mut initial_state = river_core::board_state::ChatBoardStateV1::default();
+                if let Some(ref name) = export.board_name {
+                    initial_state.configuration.configuration.display =
+                        river_core::board_state::privacy::BoardDisplayMetadata::public(
+                            name.clone(),
+                            None,
+                        );
+                }
                 let board_data = crate::board_data::BoardData {
                     owner_vk: owner_key,
-                    board_state: Default::default(), // Will be populated on sync
+                    board_state: initial_state, // Will be fully populated on sync
                     self_sk: export.signing_key,
                     contract_key,
                     last_read_message_id: None,

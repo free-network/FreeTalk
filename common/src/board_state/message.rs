@@ -1268,19 +1268,19 @@ mod tests {
         // Create a normal-sized message and an oversized message
         let small_msg = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: author_id,
                 time: SystemTime::now(),
-                content: BoardMessageBody::public("short".to_string()),
+                content: BoardMessageBody::public(String::new(), "short".to_string()),
             },
             &author_sk,
         );
         let big_msg = AuthorizedMessageV1::new(
             MessageV1 {
-                room_owner: owner_id,
+                board_owner: owner_id,
                 author: author_id,
                 time: SystemTime::now(),
-                content: BoardMessageBody::public("x".repeat(100)),
+                content: BoardMessageBody::public(String::new(), "x".repeat(100)),
             },
             &author_sk,
         );
