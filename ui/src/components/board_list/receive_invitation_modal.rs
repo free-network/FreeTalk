@@ -7,64 +7,15 @@ use dioxus::logger::tracing::{error, info};
 use dioxus::prelude::*;
 use ed25519_dalek::VerifyingKey;
 use river_core::board_state::member::MemberId;
-use wasm_bindgen::JsCast;
 
 /// Main component for the invitation modal
 #[component]
 pub fn ReceiveInvitationModal(invitation: Invitation) -> Element {
+    // No event listener needed — PENDING_INVITES is a GlobalSignal.
+    // When get_response.rs sets status to Subscribed, this component
+    // re-renders via render_invitation_content reading PENDING_INVITES.
     let nav = navigator();
     let board_key = invitation.board;
-
-    // Listen for custom events from the FreenetSynchronizer
-    use_effect(move || {
-        let window = web_sys::window().expect("No window found");
-        let closure = wasm_bindgen::closure::Closure::wrap(Box::new(
-            move |event: web_sys::CustomEvent| {
-                let detail = event.detail();
-                if let Some(key_hex) = detail.as_string() {
-                    info!("Received invitation accepted event with key: {}", key_hex);
-
-                    // Convert hex string back to bytes
-                    let mut bytes = Vec::new();
-                    for i in 0..(key_hex.len() / 2) {
-                        let byte_str = &key_hex[i * 2..(i + 1) * 2];
-                        if let Ok(byte) = u8::from_str_radix(byte_str, 16) {
-                            bytes.push(byte);
-                        }
-                    }
-
-                    // Try to convert bytes to VerifyingKey
-                    if bytes.len() == 32 {
-                        let mut array = [0u8; 32];
-                        array.copy_from_slice(&bytes);
-
-                        if let Ok(key) = VerifyingKey::from_bytes(&array) {
-                            // Use with_mut for atomic update
-                            PENDING_INVITES.with_mut(|pending| {
-                                if let Some(join) = pending.map.get_mut(&key) {
-                                    join.status = PendingBoardStatus::Subscribed;
-                                    info!(
-                                        "Updated pending invitation status to Subscribed for key: {:?}",
-                                        key
-                                    );
-                                }
-                            });
-                        }
-                    }
-                }
-            },
-        )
-            as Box<dyn FnMut(web_sys::CustomEvent)>);
-
-        window
-            .add_event_listener_with_callback(
-                "river-invitation-accepted",
-                closure.as_ref().unchecked_ref(),
-            )
-            .expect("Failed to add event listener");
-
-        closure.forget(); // Prevent closure from being dropped
-    });
 
     // Check if invitation is already subscribed and navigate away
     let pending_status = PENDING_INVITES
@@ -103,13 +54,19 @@ pub fn ReceiveInvitationModal(invitation: Invitation) -> Element {
 
 /// Renders the content of the invitation modal based on the invitation data
 fn render_invitation_content(inv: Invitation) -> Element {
-    let pending_invites = PENDING_INVITES.read();
-    let pending_status = pending_invites.map.get(&inv.board).map(|join| &join.status);
+    // Clone the status to release the read guard before any branch can mutate
+    let status = {
+        let pending_invites = PENDING_INVITES.read();
+        pending_invites
+            .map
+            .get(&inv.board)
+            .map(|join| join.status.clone())
+    };
 
-    match pending_status {
+    match status {
         Some(PendingBoardStatus::PendingSubscription) => render_pending_subscription_state(),
         Some(PendingBoardStatus::Subscribing) => render_subscribing_state(),
-        Some(PendingBoardStatus::Error(e)) => render_error_state(e, inv.board),
+        Some(PendingBoardStatus::Error(e)) => render_error_state(&e, inv.board),
         Some(PendingBoardStatus::Subscribed) => {
             // Board subscribed and retrieved successfully, navigate to it
             render_subscribed_state(inv.board)
@@ -183,8 +140,19 @@ fn render_error_state(error: &str, board_key: VerifyingKey) -> Element {
     }
 }
 
-/// Renders the state when board is successfully subscribed and retrieved
+/// Renders the state when board is successfully subscribed and retrieved.
+/// Cleans up the invitation and navigates to the board.
 fn render_subscribed_state(board_key: VerifyingKey) -> Element {
+    // Defer signal mutations to avoid RefCell panics during render.
+    crate::util::defer(move || {
+        PENDING_INVITES.with_mut(|pending| {
+            pending.map.remove(&board_key);
+        });
+        info!(
+            "Invitation accepted, navigating to board {:?}",
+            MemberId::from(board_key)
+        );
+    });
     let board_id = bs58::encode(board_key.as_bytes()).into_string();
     navigator().push(Route::Posts { board_id });
     rsx! {}
