@@ -459,6 +459,10 @@ pub fn ImportIdentityModal(is_active: Signal<bool>) -> Element {
                             None,
                         );
                 }
+                // Capture signing key for delegate migration before moving into BoardData
+                let signing_key_for_migration = export.signing_key.clone();
+                let board_key_bytes = owner_key.to_bytes();
+
                 let board_data = crate::board_data::BoardData {
                     owner_vk: owner_key,
                     board_state: initial_state, // Will be fully populated on sync
@@ -486,6 +490,47 @@ pub fn ImportIdentityModal(is_active: Signal<bool>) -> Element {
 
                 // Trigger a sync for the new board (deferred to avoid RefCell panics)
                 mark_needs_sync(owner_key);
+
+                // Migrate the imported signing key to the delegate immediately.
+                // Without this, the delegate may have a stale key from a prior
+                // session, causing all message signatures to be rejected by the
+                // contract ("State verification failed: Invalid signature").
+                crate::util::safe_spawn_local(async move {
+                    let migrated = crate::signing::migrate_signing_key(
+                        board_key_bytes,
+                        &signing_key_for_migration,
+                    )
+                    .await;
+                    if migrated {
+                        dioxus::logger::tracing::info!(
+                            "Import: signing key migrated to delegate"
+                        );
+                        crate::util::defer(move || {
+                            let mut sanitized = false;
+                            BOARDS.with_mut(|boards| {
+                                if let Some(rd) = boards.map.get_mut(&owner_key) {
+                                    rd.key_migrated_to_delegate = true;
+                                    // Remove any messages with invalid signatures
+                                    // left by a stale delegate key
+                                    let params = ChatBoardParametersV1 { owner: owner_key };
+                                    let removed =
+                                        crate::signing::remove_unverifiable_messages(
+                                            &mut rd.board_state,
+                                            &params,
+                                        );
+                                    sanitized = removed > 0;
+                                }
+                            });
+                            if sanitized {
+                                mark_needs_sync(owner_key);
+                            }
+                        });
+                    } else {
+                        dioxus::logger::tracing::warn!(
+                            "Import: delegate key migration failed, will use fallback signing"
+                        );
+                    }
+                });
 
                 success_msg.set(Some("Identity imported! Syncing board state...".to_string()));
                 error_msg.set(None);

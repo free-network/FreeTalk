@@ -10,6 +10,8 @@
 use crate::components::app::chat_delegate::{generate_request_id, send_delegate_request};
 use dioxus::logger::tracing::{info, warn};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
+use river_core::board_state::member::MemberId;
+use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1};
 use river_core::chat_delegate::{BoardKey, ChatDelegateRequestMsg, ChatDelegateResponseMsg};
 
 /// Store a signing key in the delegate for a board.
@@ -391,5 +393,147 @@ pub async fn sign_admin_with_fallback(
             warn!("Delegate signing failed, using fallback: {}", e);
             fallback_key.sign(&admin_bytes)
         }
+    }
+}
+
+/// Remove messages whose signatures cannot be verified against known members.
+///
+/// This cleans up messages that were signed with a stale delegate key (e.g.,
+/// after identity import overwrites the key). Returns the number of messages
+/// removed.
+pub fn remove_unverifiable_messages(
+    state: &mut ChatBoardStateV1,
+    params: &ChatBoardParametersV1,
+) -> usize {
+    let owner_id = MemberId::from(&params.owner);
+
+    // Build a lookup of member_id -> verifying_key
+    let mut vk_by_id: std::collections::HashMap<MemberId, VerifyingKey> =
+        std::collections::HashMap::new();
+    vk_by_id.insert(owner_id, params.owner);
+    for m in &state.members.members {
+        vk_by_id.insert(m.member.id(), m.member.member_vk);
+    }
+
+    let before = state.recent_messages.messages.len();
+    state.recent_messages.messages.retain(|auth_msg| {
+        let author_id = auth_msg.message.author;
+        let Some(author_vk) = vk_by_id.get(&author_id) else {
+            // Unknown author — remove
+            return false;
+        };
+        // Re-serialize and verify signature
+        let mut msg_bytes = Vec::new();
+        if ciborium::ser::into_writer(&auth_msg.message, &mut msg_bytes).is_err() {
+            return false;
+        }
+        author_vk
+            .verify_strict(&msg_bytes, &auth_msg.signature)
+            .is_ok()
+    });
+    let removed = before - state.recent_messages.messages.len();
+    if removed > 0 {
+        info!(
+            "Removed {} unverifiable message(s) from board state",
+            removed
+        );
+    }
+    removed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use river_core::board_state::member::{AuthorizedMember, Member};
+    use river_core::board_state::message::{AuthorizedMessageV1, BoardMessageBody, MessageV1};
+
+    fn make_signed_message(author_sk: &SigningKey, owner_vk: &VerifyingKey) -> AuthorizedMessageV1 {
+        let msg = MessageV1 {
+            board_owner: MemberId::from(owner_vk),
+            author: MemberId::from(&author_sk.verifying_key()),
+            content: BoardMessageBody::public(String::new(), "test".to_string()),
+            time: std::time::SystemTime::UNIX_EPOCH,
+        };
+        let mut msg_bytes = Vec::new();
+        ciborium::ser::into_writer(&msg, &mut msg_bytes).unwrap();
+        let signature = author_sk.sign(&msg_bytes);
+        AuthorizedMessageV1::with_signature(msg, signature)
+    }
+
+    #[test]
+    fn test_remove_unverifiable_messages() {
+        let mut rng = rand::thread_rng();
+        let owner_sk = SigningKey::generate(&mut rng);
+        let owner_vk = owner_sk.verifying_key();
+        let member_sk = SigningKey::generate(&mut rng);
+        let wrong_sk = SigningKey::generate(&mut rng);
+
+        let params = ChatBoardParametersV1 { owner: owner_vk };
+
+        // Add member to the room
+        let member = Member {
+            owner_member_id: owner_vk.into(),
+            invited_by: owner_vk.into(),
+            member_vk: member_sk.verifying_key(),
+        };
+        let auth_member = AuthorizedMember::new(member, &owner_sk);
+
+        let mut state = ChatBoardStateV1::default();
+        state.members.members.push(auth_member);
+
+        // Valid message from owner
+        let owner_msg = make_signed_message(&owner_sk, &owner_vk);
+        // Valid message from member
+        let member_msg = make_signed_message(&member_sk, &owner_vk);
+        // Message signed with wrong key (stale delegate key scenario)
+        let mut bad_msg = make_signed_message(&member_sk, &owner_vk);
+        let wrong_bytes = {
+            let mut buf = Vec::new();
+            ciborium::ser::into_writer(&bad_msg.message, &mut buf).unwrap();
+            buf
+        };
+        bad_msg.signature = wrong_sk.sign(&wrong_bytes);
+
+        state
+            .recent_messages
+            .messages
+            .extend([owner_msg, member_msg, bad_msg]);
+
+        assert_eq!(state.recent_messages.messages.len(), 3);
+
+        let removed = remove_unverifiable_messages(&mut state, &params);
+        assert_eq!(removed, 1);
+        assert_eq!(state.recent_messages.messages.len(), 2);
+    }
+
+    #[test]
+    fn test_remove_unverifiable_messages_unknown_author() {
+        let mut rng = rand::thread_rng();
+        let owner_sk = SigningKey::generate(&mut rng);
+        let owner_vk = owner_sk.verifying_key();
+        let unknown_sk = SigningKey::generate(&mut rng);
+
+        let params = ChatBoardParametersV1 { owner: owner_vk };
+        let mut state = ChatBoardStateV1::default();
+
+        // Message from unknown author (not in members list)
+        let unknown_msg = make_signed_message(&unknown_sk, &owner_vk);
+        state.recent_messages.messages.push(unknown_msg);
+
+        let removed = remove_unverifiable_messages(&mut state, &params);
+        assert_eq!(removed, 1);
+        assert_eq!(state.recent_messages.messages.len(), 0);
+    }
+
+    #[test]
+    fn test_remove_unverifiable_messages_empty() {
+        let owner_sk = SigningKey::generate(&mut rand::thread_rng());
+        let params = ChatBoardParametersV1 {
+            owner: owner_sk.verifying_key(),
+        };
+        let mut state = ChatBoardStateV1::default();
+
+        let removed = remove_unverifiable_messages(&mut state, &params);
+        assert_eq!(removed, 0);
     }
 }
