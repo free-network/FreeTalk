@@ -698,7 +698,7 @@ impl ApiClient {
         // Try to GET from the new contract first - maybe someone else already migrated
         let get_request = ContractRequest::Get {
             key: *expected_key.id(),
-            return_contract_code: false,
+            return_contract_code: true,
             subscribe: false,
             blocking_subscribe: false,
         };

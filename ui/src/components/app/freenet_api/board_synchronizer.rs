@@ -322,21 +322,12 @@ impl BoardSynchronizer {
                     }
                 });
 
-                // Use locally bundled contract code instead of fetching from the network.
-                // Relay nodes that received state via UPDATE broadcasts don't have the
-                // WASM code (only PUT provides it), so fetch_contract=true fails ~45% of
-                // the time. Since the WASM is already compiled into the binary via
-                // BOARD_CONTRACT_WASM, we only need the state.
-                //
-                // Fallback: if the first attempt timed out (retry_count >= 1), request
-                // the contract code from the network in case there's a version mismatch.
-                let request_code = retry_count >= 1;
-                if request_code {
-                    warn!(
-                        "Retry #{} for {:?}, falling back to return_contract_code=true",
-                        retry_count,
-                        MemberId::from(owner_vk)
-                    );
+                // Always request contract code so the node caches the WASM locally.
+                // Without cached WASM, subsequent Subscribe requests will be rejected
+                // by the node (freenet-core#3601).
+                let request_code = true;
+                if retry_count >= 1 {
+                    warn!("Retry #{} for {:?}", retry_count, MemberId::from(owner_vk));
                 }
 
                 let get_request = ContractRequest::Get {
@@ -910,7 +901,7 @@ impl BoardSynchronizer {
             // This will trigger a response that merges any missed updates
             let get_request = ContractRequest::Get {
                 key: *contract_key.id(),
-                return_contract_code: false,
+                return_contract_code: true,
                 subscribe: false, // Already subscribed, just need the state
                 blocking_subscribe: false,
             };
@@ -955,7 +946,7 @@ impl BoardSynchronizer {
 
         let get_request = ContractRequest::Get {
             key: *contract_key.id(),
-            return_contract_code: false,
+            return_contract_code: true,
             subscribe: false,
             blocking_subscribe: false,
         };
