@@ -3,24 +3,30 @@ use crate::components::app::freenet_api::board_synchronizer::BoardSynchronizer;
 use crate::components::app::freenet_api::error::SynchronizerError;
 use crate::components::app::notifications::mark_initial_sync_complete;
 use crate::components::app::sync_info::{BoardSyncStatus, SYNC_INFO};
-use crate::components::app::{BOARDS, CURRENT_BOARD, PENDING_INVITES};
+use crate::components::app::{BOARDS, CURRENT_BOARD, PENDING_INVITES, WEB_API};
+use crate::constants::BOARD_CONTRACT_WASM;
 use crate::invites::PendingBoardStatus;
 use crate::util::ecies::{decrypt_secret_from_member_blob, decrypt_with_symmetric_key};
-use crate::util::{from_cbor_slice, owner_vk_to_contract_key};
+use crate::util::{from_cbor_slice, owner_vk_to_contract_key, to_cbor_vec};
 use dioxus::logger::tracing::{error, info, warn};
 use dioxus::prelude::ReadableExt;
 use freenet_scaffold::ComposableState;
-use freenet_stdlib::prelude::ContractKey;
+use freenet_stdlib::client_api::{ClientRequest, ContractRequest};
+use freenet_stdlib::prelude::{
+    ContractCode, ContractContainer, ContractKey, ContractWasmAPIVersion, Parameters,
+    WrappedContract, WrappedState,
+};
 use river_core::board_state::member::MemberId;
 use river_core::board_state::member_info::{AuthorizedMemberInfo, MemberInfo};
 use river_core::board_state::message::{BoardMessageBody, MessageId};
 use river_core::board_state::privacy::{PrivacyMode, SealedBytes};
 use river_core::board_state::{ChatBoardParametersV1, ChatBoardStateV1};
 use std::collections::HashMap;
+use std::sync::Arc;
 use x25519_dalek::PublicKey as X25519PublicKey;
 
 pub async fn handle_get_response(
-    board_synchronizer: &mut BoardSynchronizer,
+    _board_synchronizer: &mut BoardSynchronizer,
     key: ContractKey,
     _contract: Vec<u8>,
     state: Vec<u8>,
@@ -100,6 +106,9 @@ pub async fn handle_get_response(
 
             // Clone self_sk before moving into defer closure, since it's needed later for signing key migration
             let self_sk_for_migration = self_sk.clone();
+            // Clone retrieved_state before it's moved into the defer closure,
+            // since we need it for the PUT request below
+            let retrieved_state_for_put = retrieved_state.clone();
 
             // Update the board data
             crate::util::defer(move || {
@@ -298,93 +307,125 @@ pub async fn handle_get_response(
             crate::util::defer(move || {
                 SYNC_INFO.with_mut(|sync_info| {
                     sync_info.register_new_board(owner_vk);
-
-                    // DO NOT update the last_synced_state here
-                    // This will ensure the board is marked as needing an update in the next synchronization
-
-                    sync_info.update_sync_status(&owner_vk, BoardSyncStatus::Subscribed);
+                    // Set to Subscribing — will become Subscribed when handle_put_response()
+                    // in put_response.rs processes the PUT reply
+                    sync_info.update_sync_status(&owner_vk, BoardSyncStatus::Subscribing);
                 });
             });
 
-            // Now subscribe to the contract
-            let subscribe_result = board_synchronizer.subscribe_to_contract(&key).await;
+            // PUT the contract with bundled WASM + subscribe in one request.
+            // This registers the contract code and parameters with the local node,
+            // which is required for subsequent UPDATEs (sending messages) to succeed.
+            // Without this PUT, the node has the state but not the contract code,
+            // causing all UPDATEs to fail with "missing contract parameters".
+            let contract_code = ContractCode::from(BOARD_CONTRACT_WASM);
+            let parameters = ChatBoardParametersV1 { owner: owner_vk };
+            let params_bytes = to_cbor_vec(&parameters);
+            let parameters = Parameters::from(params_bytes);
 
-            if let Err(e) = subscribe_result {
-                error!("Failed to subscribe to contract after GET: {}", e);
-                // Update the sync status to error
-                let error_msg = e.to_string();
+            let contract_container = ContractContainer::from(ContractWasmAPIVersion::V1(
+                WrappedContract::new(Arc::new(contract_code), parameters),
+            ));
+
+            let wrapped_state = WrappedState::new(to_cbor_vec(&retrieved_state_for_put));
+
+            let put_request = ContractRequest::Put {
+                contract: contract_container,
+                state: wrapped_state,
+                related_contracts: Default::default(),
+                subscribe: true,
+                blocking_subscribe: false,
+            };
+
+            let put_result = if let Some(web_api) = WEB_API.write().as_mut() {
+                match web_api.send(ClientRequest::ContractOp(put_request)).await {
+                    Ok(_) => {
+                        info!(
+                            "Sent PUT+subscribe for invited board {:?}",
+                            MemberId::from(owner_vk)
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to PUT contract for invited board {:?}: {}",
+                            MemberId::from(owner_vk),
+                            e
+                        );
+                        Err(e.to_string())
+                    }
+                }
+            } else {
+                Err("WebAPI not available".to_string())
+            };
+
+            if let Err(e) = put_result {
                 crate::util::defer(move || {
                     SYNC_INFO
                         .write()
-                        .update_sync_status(&owner_vk, BoardSyncStatus::Error(error_msg));
+                        .update_sync_status(&owner_vk, BoardSyncStatus::Error(e.clone()));
                 });
-            } else {
-                // Mark the invitation as subscribed and retrieved
+                // Reset invite status so the normal retry flow can pick it up
                 crate::util::defer(move || {
                     PENDING_INVITES.with_mut(|pending_invites| {
                         if let Some(join) = pending_invites.map.get_mut(&owner_vk) {
-                            join.status = PendingBoardStatus::Subscribed;
+                            join.status = PendingBoardStatus::PendingSubscription;
                         }
                     });
                 });
+            } else {
+                // PUT was sent successfully — proceed with UI updates and key migration.
+                // Subscription confirmation happens when handle_put_response() in
+                // put_response.rs processes the reply from the node.
 
                 // Mark initial sync complete for notifications
                 crate::util::defer(move || {
                     mark_initial_sync_complete(&owner_vk);
                 });
-            }
 
-            // Dispatch an event to notify the UI
-            if let Some(window) = web_sys::window() {
-                let key_hex = owner_vk
-                    .as_bytes()
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<String>();
-                let event = web_sys::CustomEvent::new("river-invitation-accepted").unwrap();
-
-                // Set the detail property
-                js_sys::Reflect::set(
-                    &event,
-                    &wasm_bindgen::JsValue::from_str("detail"),
-                    &wasm_bindgen::JsValue::from_str(&key_hex),
-                )
-                .unwrap();
-
-                window.dispatch_event(&event).unwrap();
-
-                // Set the current board to the newly accepted board
+                // Close the invitation modal by updating PENDING_INVITES directly.
+                // PENDING_INVITES is a GlobalSignal — writing to it re-renders the modal.
                 crate::util::defer(move || {
+                    PENDING_INVITES.with_mut(|pending| {
+                        if let Some(join) = pending.map.get_mut(&owner_vk) {
+                            join.status = PendingBoardStatus::Subscribed;
+                            info!(
+                                "Marked invitation as Subscribed for {:?}",
+                                MemberId::from(owner_vk)
+                            );
+                        }
+                    });
                     CURRENT_BOARD.with_mut(|current_board| {
                         current_board.owner_key = Some(owner_vk);
                     });
                 });
 
-                // Migrate the signing key to delegate for this new board
-                let signing_key_clone = self_sk_for_migration.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    let board_key = owner_vk.to_bytes();
-                    let migrated =
-                        crate::signing::migrate_signing_key(board_key, &signing_key_clone).await;
-                    if migrated {
-                        // Must defer signal mutations from spawn_local to
-                        // avoid RefCell already borrowed panics in Dioxus runtime
-                        crate::util::defer(move || {
-                            BOARDS.with_mut(|boards| {
-                                if let Some(board_data) = boards.map.get_mut(&owner_vk) {
-                                    board_data.key_migrated_to_delegate = true;
-                                    info!("Signing key migrated to delegate for new board");
-                                }
+                {
+                    // Migrate the signing key to delegate for this new board
+                    let signing_key_clone = self_sk_for_migration.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let board_key = owner_vk.to_bytes();
+                        let migrated =
+                            crate::signing::migrate_signing_key(board_key, &signing_key_clone).await;
+                        if migrated {
+                            // Must defer signal mutations from spawn_local to
+                            // avoid RefCell already borrowed panics in Dioxus runtime
+                            crate::util::defer(move || {
+                                BOARDS.with_mut(|boards| {
+                                    if let Some(board_data) = boards.map.get_mut(&owner_vk) {
+                                        board_data.key_migrated_to_delegate = true;
+                                        info!("Signing key migrated to delegate for new board");
+                                    }
+                                });
                             });
-                        });
-                    }
-                });
+                        }
+                    });
 
-                // Mark board as needing sync so it gets saved to delegate storage (deferred).
-                // We do NOT trigger ProcessBoards because we haven't modified the
-                // board state — membership will be published with the first message.
-                use crate::components::app::mark_needs_sync;
-                mark_needs_sync(owner_vk);
+                    // Mark board as needing sync so it gets saved to delegate storage.
+                    // We do NOT trigger ProcessBoards because we haven't modified the
+                    // board state — membership will be published with the first message.
+                    crate::components::app::mark_needs_sync(owner_vk);
+                }
             }
         } else if is_existing_board {
             // This is a refresh GET for an already-subscribed board (e.g., after wake from suspension)
