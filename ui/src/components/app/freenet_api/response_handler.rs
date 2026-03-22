@@ -244,19 +244,37 @@ impl ResponseHandler {
                                                             loaded_boards.current_board_key
                                                         {
                                                             info!("Restoring current board selection from delegate");
-                                                            *CURRENT_BOARD.write() = CurrentBoard {
-                                                                owner_key: Some(saved_board_key),
-                                                            };
+                                                            crate::util::defer(move || {
+                                                                *CURRENT_BOARD.write() =
+                                                                    CurrentBoard {
+                                                                        owner_key: Some(
+                                                                            saved_board_key,
+                                                                        ),
+                                                                    };
+                                                            });
                                                         }
 
-                                                        // Collect board keys before merge
+                                                        // Collect board keys and signing keys before merge
+                                                        // (must extract before loaded_boards is moved into defer)
                                                         let board_keys: Vec<_> = loaded_boards
                                                             .map
                                                             .keys()
                                                             .copied()
                                                             .collect();
+                                                        let signing_keys: Vec<_> = loaded_boards
+                                                            .map
+                                                            .iter()
+                                                            .map(|(key, board_data)| {
+                                                                (
+                                                                    *key,
+                                                                    board_data.board_key(),
+                                                                    board_data.self_sk.clone(),
+                                                                )
+                                                            })
+                                                            .collect();
 
                                                         // Merge the loaded boards with the current boards
+                                                        crate::util::defer(move || {
                                                         BOARDS.with_mut(|current_boards| {
                                                             if let Err(e) = current_boards.merge(loaded_boards) {
                                                                 error!("Failed to merge boards: {}", e);
@@ -363,38 +381,31 @@ impl ResponseHandler {
                                                                 }
                                                             }
                                                         });
+                                                        });
 
                                                         // Mark current board as read since user is viewing it
                                                         // (must be after merge so board data exists)
-                                                        mark_current_board_as_read();
-                                                        update_document_title();
+                                                        crate::util::defer(|| {
+                                                            mark_current_board_as_read();
+                                                            update_document_title();
+                                                        });
 
                                                         // Migrate signing keys to delegate for each loaded board
-                                                        info!("Migrating signing keys to delegate for {} boards", board_keys.len());
-                                                        for board_key in &board_keys {
-                                                            // Get the board's signing key
-                                                            let signing_key_opt =
-                                                                BOARDS.with(|boards| {
-                                                                    boards.map.get(board_key).map(
-                                                                        |board_data| {
-                                                                            (
-                                                                                board_data
-                                                                                    .board_key(),
-                                                                                board_data
-                                                                                    .self_sk
-                                                                                    .clone(),
-                                                                            )
-                                                                        },
-                                                                    )
-                                                                });
-
-                                                            if let Some((
-                                                                delegate_board_key,
-                                                                signing_key,
-                                                            )) = signing_key_opt
+                                                        // (uses pre-extracted signing_keys since BOARDS merge is deferred)
+                                                        info!("Migrating signing keys to delegate for {} boards", signing_keys.len());
+                                                        for (
+                                                            board_key,
+                                                            delegate_board_key,
+                                                            signing_key,
+                                                        ) in &signing_keys
+                                                        {
                                                             {
                                                                 // Spawn async migration task
                                                                 let board_key_copy = *board_key;
+                                                                let delegate_board_key =
+                                                                    *delegate_board_key;
+                                                                let signing_key =
+                                                                    signing_key.clone();
                                                                 wasm_bindgen_futures::spawn_local(
                                                                     async move {
                                                                         let migrated = crate::signing::migrate_signing_key(
@@ -422,7 +433,12 @@ impl ResponseHandler {
                                                         // Mark all loaded boards as having completed initial sync
                                                         // and subscribe to receive updates
                                                         for board_key in &board_keys {
-                                                            mark_initial_sync_complete(board_key);
+                                                            let board_key_copy = *board_key;
+                                                            crate::util::defer(move || {
+                                                                mark_initial_sync_complete(
+                                                                    &board_key_copy,
+                                                                );
+                                                            });
                                                         }
 
                                                         // Subscribe to each loaded board's contract
@@ -432,13 +448,17 @@ impl ResponseHandler {
                                                         );
                                                         for board_key in board_keys {
                                                             // Register the board in SYNC_INFO
-                                                            SYNC_INFO
-                                                                .write()
-                                                                .register_new_board(board_key);
-                                                            SYNC_INFO.write().update_sync_status(
-                                                                &board_key,
-                                                                BoardSyncStatus::Subscribing,
-                                                            );
+                                                            crate::util::defer(move || {
+                                                                SYNC_INFO
+                                                                    .write()
+                                                                    .register_new_board(board_key);
+                                                                SYNC_INFO
+                                                                    .write()
+                                                                    .update_sync_status(
+                                                                        &board_key,
+                                                                        BoardSyncStatus::Subscribing,
+                                                                    );
+                                                            });
 
                                                             // Get contract key and subscribe
                                                             let contract_key =

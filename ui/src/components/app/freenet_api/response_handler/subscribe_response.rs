@@ -24,9 +24,11 @@ pub fn handle_subscribe_response(key: ContractKey, subscribed: bool) -> bool {
             );
 
             // Update the sync status to subscribed in a separate block
-            SYNC_INFO
-                .write()
-                .update_sync_status(&owner_vk, BoardSyncStatus::Subscribed);
+            crate::util::defer(move || {
+                SYNC_INFO
+                    .write()
+                    .update_sync_status(&owner_vk, BoardSyncStatus::Subscribed);
+            });
             false
         } else {
             warn!("Failed to subscribe to contract: {}", key.id());
@@ -41,9 +43,11 @@ pub fn handle_subscribe_response(key: ContractKey, subscribed: bool) -> bool {
                     "Subscription failed for board {:?} but we have local state - will re-PUT contract",
                     MemberId::from(owner_vk)
                 );
-                SYNC_INFO
-                    .write()
-                    .update_sync_status(&owner_vk, BoardSyncStatus::Disconnected);
+                crate::util::defer(move || {
+                    SYNC_INFO
+                        .write()
+                        .update_sync_status(&owner_vk, BoardSyncStatus::Disconnected);
+                });
                 true // Signal that a re-PUT should be scheduled
             } else {
                 // No local state - this is a genuine error (e.g., trying to join a board that doesn't exist)
@@ -51,12 +55,14 @@ pub fn handle_subscribe_response(key: ContractKey, subscribed: bool) -> bool {
                     "Subscription failed for board {:?} and no local state available",
                     MemberId::from(owner_vk)
                 );
-                SYNC_INFO.write().update_sync_status(
-                    &owner_vk,
-                    BoardSyncStatus::Error(
-                        "Subscription failed - contract not found on network".to_string(),
-                    ),
-                );
+                crate::util::defer(move || {
+                    SYNC_INFO.write().update_sync_status(
+                        &owner_vk,
+                        BoardSyncStatus::Error(
+                            "Subscription failed - contract not found on network".to_string(),
+                        ),
+                    );
+                });
                 false
             }
         }
