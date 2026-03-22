@@ -48,21 +48,9 @@ impl BoardSynchronizer {
     /// re-entrant signal borrow issues. See update_board_state docs for details.
     pub(crate) fn apply_delta(&self, owner_vk: &VerifyingKey, delta: ChatBoardStateV1Delta) {
         let owner_vk = *owner_vk;
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            use wasm_bindgen::prelude::*;
-            let cb = Closure::once_into_js(move || {
-                Self::apply_delta_inner(owner_vk, delta);
-            });
-            web_sys::window()
-                .expect("no window")
-                .set_timeout_with_callback(&cb.into())
-                .ok();
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        Self::apply_delta_inner(owner_vk, delta);
+        crate::util::defer(move || {
+            Self::apply_delta_inner(owner_vk, delta);
+        });
     }
 
     /// Inner implementation of apply_delta, runs in a clean execution context on WASM.
@@ -631,21 +619,9 @@ impl BoardSynchronizer {
     ) {
         let board_owner_vk = *board_owner_vk;
         let state = state.clone();
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            use wasm_bindgen::prelude::*;
-            let cb = Closure::once_into_js(move || {
-                Self::update_board_state_inner(board_owner_vk, state);
-            });
-            web_sys::window()
-                .expect("no window")
-                .set_timeout_with_callback(&cb.into())
-                .ok();
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        Self::update_board_state_inner(board_owner_vk, state);
+        crate::util::defer(move || {
+            Self::update_board_state_inner(board_owner_vk, state);
+        });
     }
 
     /// Inner implementation of update_board_state, runs in a clean execution context on WASM.
