@@ -47,6 +47,11 @@ pub async fn send_message(
         return;
     }
 
+    let max_message_size = board_state_clone
+        .configuration
+        .configuration
+        .max_message_size;
+
     // Build content based on whether this is a reply or regular message
     let content = if let Some(reply) = reply_ctx {
         // Reply message
@@ -109,6 +114,18 @@ pub async fn send_message(
             BoardMessageBody::public(title_text.clone(), message_text.clone())
         }
     };
+
+    // Safety net: check encoded content size before signing.
+    // The input UI blocks sending when text is over limit, but
+    // encoded size can differ slightly from raw text length.
+    let content_size = content.content_len();
+    if content_size > max_message_size {
+        warn!(
+            "Message too long: {} encoded bytes, max {} bytes",
+            content_size, max_message_size
+        );
+        return;
+    }
 
     let message = MessageV1 {
         board_owner: MemberId::from(current_board),
