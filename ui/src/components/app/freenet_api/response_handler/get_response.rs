@@ -353,11 +353,15 @@ pub async fn handle_get_response(
                     let migrated =
                         crate::signing::migrate_signing_key(board_key, &signing_key_clone).await;
                     if migrated {
-                        BOARDS.with_mut(|boards| {
-                            if let Some(board_data) = boards.map.get_mut(&owner_vk) {
-                                board_data.key_migrated_to_delegate = true;
-                                info!("Signing key migrated to delegate for new board");
-                            }
+                        // Must defer signal mutations from spawn_local to
+                        // avoid RefCell already borrowed panics in Dioxus runtime
+                        crate::util::defer(move || {
+                            BOARDS.with_mut(|boards| {
+                                if let Some(board_data) = boards.map.get_mut(&owner_vk) {
+                                    board_data.key_migrated_to_delegate = true;
+                                    info!("Signing key migrated to delegate for new board");
+                                }
+                            });
                         });
                     }
                 });

@@ -21,7 +21,7 @@ use crate::util::ecies::{decrypt_secret_from_member_blob, decrypt_with_symmetric
 use crate::util::owner_vk_to_contract_key;
 use ciborium::de::from_reader;
 use dioxus::logger::tracing::{error, info, warn};
-use dioxus::prelude::ReadableExt;
+
 use freenet_stdlib::client_api::{ContractResponse, HostResponse};
 use freenet_stdlib::prelude::OutboundDelegateMsg;
 pub use get_response::handle_get_response;
@@ -404,12 +404,15 @@ impl ResponseHandler {
                                                                     .await;
 
                                                                         if migrated {
-                                                                            // Mark the board as migrated
-                                                                            BOARDS.with_mut(|boards| {
-                                                                            if let Some(board_data) = boards.map.get_mut(&board_key_copy) {
-                                                                                board_data.key_migrated_to_delegate = true;
-                                                                            }
-                                                                        });
+                                                                            // Must defer signal mutations from spawn_local to
+                                                                            // avoid RefCell already borrowed panics in Dioxus runtime
+                                                                            crate::util::defer(move || {
+                                                                                BOARDS.with_mut(|boards| {
+                                                                                if let Some(board_data) = boards.map.get_mut(&board_key_copy) {
+                                                                                    board_data.key_migrated_to_delegate = true;
+                                                                                }
+                                                                            });
+                                                                            });
                                                                         }
                                                                     },
                                                                 );
