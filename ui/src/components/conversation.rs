@@ -597,6 +597,14 @@ pub fn Conversation(
             // Message input
             {
                 match current_board_data.as_ref() {
+                    Some(board_data) if board_data.is_awaiting_initial_sync() => {
+                        rsx! {
+                            div { class: "px-4 py-3 mx-4 mb-4 bg-surface rounded-lg text-sm text-text-muted flex items-center gap-3",
+                                div { class: "animate-spin w-4 h-4 border-2 border-accent border-t-transparent rounded-full" }
+                                span { "Syncing board state from the network... You'll be able to send messages once sync completes." }
+                            }
+                        }
+                    },
                     Some(board_data) => {
                         match board_data.can_participate() {
                             Ok(()) => {

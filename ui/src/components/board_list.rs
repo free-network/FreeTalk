@@ -70,6 +70,7 @@ pub fn BoardList() -> Element {
             .iter()
             .map(|(board_key, board_data)| {
                 let board_key = *board_key;
+                let awaiting_sync = board_data.is_awaiting_initial_sync();
                 // Decrypt board name if board is private and we have the secret
                 let sealed_name = &board_data
                     .board_state
@@ -82,7 +83,7 @@ pub fn BoardList() -> Element {
                     Err(_) => sealed_name.to_string_lossy(),
                 };
                 let is_current = current_board_key == Some(board_key);
-                (board_key, board_name, is_current)
+                (board_key, board_name, is_current, awaiting_sync)
             })
             .collect::<Vec<_>>()
     });
@@ -92,8 +93,8 @@ pub fn BoardList() -> Element {
         board_items
             .read()
             .iter()
-            .find(|(_, _, is_current)| *is_current)
-            .map(|(_, name, _)| name.clone())
+            .find(|(_, _, is_current, _)| *is_current)
+            .map(|(_, name, _, _)| name.clone())
             .unwrap_or_else(|| "Select Board".to_string())
     });
 
@@ -135,10 +136,11 @@ pub fn BoardList() -> Element {
 
                         // Board list
                         div { class: "max-h-96 overflow-y-auto",
-                            {board_items.read().iter().map(|(board_key, board_name, is_current)| {
+                            {board_items.read().iter().map(|(board_key, board_name, is_current, awaiting_sync)| {
                                 let board_key = *board_key;
                                 let board_name = board_name.clone();
                                 let is_current = *is_current;
+                                let awaiting_sync = *awaiting_sync;
                                 rsx! {
                                     button {
                                         key: "{board_key:?}",
@@ -170,7 +172,14 @@ pub fn BoardList() -> Element {
                                             icon: FaComments,
                                             class: if is_current { "text-accent" } else { "text-text-muted" }
                                         }
-                                        span { class: "flex-1 text-left text-2xl truncate", "{board_name}" }
+                                        if awaiting_sync {
+                                            div { class: "flex-1 flex items-center gap-2",
+                                                span { class: "text-left text-2xl truncate", "{board_name}" }
+                                                div { class: "animate-spin w-4 h-4 border-2 border-text-muted border-t-transparent rounded-full flex-shrink-0" }
+                                            }
+                                        } else {
+                                            span { class: "flex-1 text-left text-2xl truncate", "{board_name}" }
+                                        }
                                     }
                                 }
                             }).collect::<Vec<_>>().into_iter()}
